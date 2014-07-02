@@ -342,7 +342,6 @@ public class DbImpl
             while (immutableMemTable != null) {
                 backgroundCondition.awaitUninterruptibly();
             }
-
         }
         finally {
             mutex.unlock();
@@ -373,7 +372,6 @@ public class DbImpl
         finally {
             mutex.unlock();
         }
-
     }
 
     private void maybeScheduleCompaction()
@@ -1012,7 +1010,6 @@ public class DbImpl
             pendingOutputs.remove(fileNumber);
 
             return fileMetaData;
-
         }
         catch (IOException e) {
             file.delete();

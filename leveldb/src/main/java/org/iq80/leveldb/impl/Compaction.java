@@ -120,7 +120,6 @@ public class Compaction
         return (levelInputs.size() == 1 &&
                 levelUpInputs.isEmpty() &&
                 totalFileSize(grandparents) <= MAX_GRAND_PARENT_OVERLAP_BYTES);
-
     }
 
     public static long totalFileSize(List<FileMetaData> files)

@@ -15,14 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterators;
-import com.google.common.collect.PeekingIterator;
+import com.google.common.collect.Lists;
+
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Slice;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -37,7 +40,7 @@ public class MemTable
 
     public MemTable(InternalKeyComparator internalKeyComparator)
     {
-        table = new ConcurrentSkipListMap<>(internalKeyComparator);
+        table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
     }
 
     public boolean isEmpty()
@@ -91,13 +94,16 @@ public class MemTable
     }
 
     public class MemTableIterator
-            implements InternalIterator
+            implements
+            InternalIterator,
+            ReverseSeekingIterator<InternalKey, Slice>
     {
-        private PeekingIterator<Entry<InternalKey, Slice>> iterator;
+
+        private ReversePeekingIterator<Entry<InternalKey, Slice>> iterator;
 
         public MemTableIterator()
         {
-            iterator = Iterators.peekingIterator(table.entrySet().iterator());
+            seekToFirst();
         }
 
         @Override
@@ -109,33 +115,82 @@ public class MemTable
         @Override
         public void seekToFirst()
         {
-            iterator = Iterators.peekingIterator(table.entrySet().iterator());
+            makeIteratorAtIndex(0);
         }
 
         @Override
         public void seek(InternalKey targetKey)
         {
-            iterator = Iterators.peekingIterator(table.tailMap(targetKey).entrySet().iterator());
+            // find the smallest key greater than or equal to the targetKey in the table
+            Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
+            if (ceiling == null) { // no keys >= targetKey
+                if (table.size() > 0) {
+                    seekToEnd();
+                }
+                return;
+            }
+            // then initialize the iterator at that key's location within the entryset
+            // (find the index with binary search)
+            List<InternalKey> keyList = Lists.newArrayList(table.keySet());
+            makeIteratorAtIndex(Collections.binarySearch(keyList, ceiling.getKey(), table.comparator()));
         }
 
         @Override
-        public InternalEntry peek()
+        public Entry<InternalKey, Slice> peek()
         {
-            Entry<InternalKey, Slice> entry = iterator.peek();
-            return new InternalEntry(entry.getKey(), entry.getValue());
+            return iterator.peek();
         }
 
         @Override
-        public InternalEntry next()
+        public Entry<InternalKey, Slice> next()
         {
-            Entry<InternalKey, Slice> entry = iterator.next();
-            return new InternalEntry(entry.getKey(), entry.getValue());
+            return iterator.next();
         }
 
         @Override
         public void remove()
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void seekToLast()
+        {
+            if (table.size() == 0) {
+                seekToFirst();
+                return;
+            }
+            makeIteratorAtIndex(table.size() - 1);
+        }
+
+        @Override
+        public void seekToEnd()
+        {
+            makeIteratorAtIndex(table.size());
+        }
+
+        private void makeIteratorAtIndex(int index)
+        {
+            List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
+            iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
+        }
+
+        @Override
+        public Entry<InternalKey, Slice> peekPrev()
+        {
+            return iterator.peekPrev();
+        }
+
+        @Override
+        public Entry<InternalKey, Slice> prev()
+        {
+            return iterator.prev();
+        }
+
+        @Override
+        public boolean hasPrev()
+        {
+            return iterator.hasPrev();
         }
     }
 }

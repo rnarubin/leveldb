@@ -185,7 +185,8 @@ public class MMapLogWriter
 
             // we are no longer on the first chunk
             begin = false;
-        } while (sliceInput.isReadable());
+        }
+        while (sliceInput.isReadable());
 
         if (force) {
             mappedByteBuffer.force();

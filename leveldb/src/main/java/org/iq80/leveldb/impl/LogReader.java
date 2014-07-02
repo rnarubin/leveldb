@@ -324,7 +324,6 @@ public class LogReader
                 eof = true;
                 return false;
             }
-
         }
         currentBlock = blockScratch.slice().input();
         return currentBlock.isReadable();

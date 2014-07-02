@@ -172,7 +172,8 @@ public class FileChannelLogWriter
 
             // we are no longer on the first chunk
             begin = false;
-        } while (sliceInput.isReadable());
+        }
+        while (sliceInput.isReadable());
 
         if (force) {
             fileChannel.force(false);
