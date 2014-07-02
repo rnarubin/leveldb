@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
-public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey, Slice> implements InternalIterator
 {
 
     /*
@@ -76,6 +76,13 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
         resetPriorityQueue();
     }
 
+   @Override
+   protected void seekToLastInternal()
+   {
+      // TODO Auto-generated method stub
+      
+   }
+
     @Override
     protected void seekInternal(InternalKey targetKey)
     {
@@ -123,6 +130,13 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
 
         return result;
     }
+
+   @Override
+   protected Entry<InternalKey, Slice> getPrevElement()
+   {
+      // TODO Auto-generated method stub
+      return null;
+   }
 
     private void resetPriorityQueue()
     {
@@ -286,4 +300,6 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
             return result;
         }
     }
+    
+    
 }

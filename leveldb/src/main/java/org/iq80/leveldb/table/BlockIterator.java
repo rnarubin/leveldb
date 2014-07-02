@@ -18,6 +18,8 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
+
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.Slice;
@@ -26,18 +28,21 @@ import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.iq80.leveldb.util.SliceOutput;
 
 import java.util.Comparator;
+import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
-public class BlockIterator implements SeekingIterator<Slice, Slice>
+public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 {
     private final SliceInput data;
     private final Slice restartPositions;
     private final int restartCount;
+    private int restartIndex;
     private final Comparator<Slice> comparator;
 
     private BlockEntry nextEntry;
+    private BlockEntry prevEntry;
 
     public BlockIterator(Slice data, Slice restartPositions, Comparator<Slice> comparator)
     {
@@ -49,9 +54,11 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
         this.data = data.input();
 
         this.restartPositions = restartPositions.slice();
-        restartCount = this.restartPositions.length() / SIZE_OF_INT;
+        this.restartCount = this.restartPositions.length() / SIZE_OF_INT;
+        this.restartIndex = restartCount;
 
         this.comparator = comparator;
+        
 
         seekToFirst();
     }
@@ -61,7 +68,7 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
     {
         return nextEntry != null;
     }
-
+    
     @Override
     public BlockEntry peek()
     {
@@ -85,11 +92,47 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
         }
         else {
             // read entry at current data position
-            nextEntry = readEntry(data, nextEntry);
+            prevEntry = nextEntry;
+            nextEntry = readEntryAndAdvanceIndex(data, prevEntry);
         }
 
         return entry;
     }
+
+   @Override
+   public boolean hasPrev()
+   {
+      return prevEntry != null;
+   }
+
+   @Override
+   public BlockEntry peekPrev()
+   {
+      if(!hasPrev()){
+         throw new NoSuchElementException();
+      }
+      return prevEntry;
+   }
+
+   @Override
+   public BlockEntry prev()
+   {
+      if(!hasPrev()){
+         throw new NoSuchElementException();
+      }
+      
+      BlockEntry entry = prevEntry;
+
+      if(data.position() <= 0){
+         prevEntry = null;
+      }
+      else{
+         nextEntry = prevEntry;
+         prevEntry = readPreviousEntryAndAdvanceIndex(data, nextEntry);
+      }
+      
+      return entry;
+   }
 
     @Override
     public void remove()
@@ -98,7 +141,7 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
     }
 
     /**
-     * Repositions the iterator so the beginning of this block.
+     * Repositions the iterator to the beginning of this block.
      */
     @Override
     public void seekToFirst()
@@ -107,6 +150,17 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
             seekToRestartPosition(0);
         }
     }
+
+   @Override
+   public void seekToLast()
+   {
+      if(restartCount > 0){
+        seekToRestartPosition(restartCount-1);
+        while(nextEntry != null){
+           next();
+        }
+      }
+   }
 
     /**
      * Repositions the iterator so the key of the next BlockElement returned greater than or equal to the specified targetKey.
@@ -142,10 +196,17 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
         // linear search (within restart block) for first key greater than or equal to targetKey
         for (seekToRestartPosition(left); nextEntry != null; next()) {
             if (comparator.compare(peek().getKey(), targetKey) >= 0) {
+               if(prevEntry == null && left > 0){
+                  prevEntry = readPreviousEntry(left-1, nextEntry);
+               }
                 break;
             }
         }
 
+    }
+
+    private int getRestartPoint(int index){
+       return restartPositions.getInt(index*SIZE_OF_INT);
     }
 
     /**
@@ -158,14 +219,16 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
         Preconditions.checkPositionIndex(restartPosition, restartCount, "restartPosition");
 
         // seek data readIndex to the beginning of the restart block
-        int offset = restartPositions.getInt(restartPosition * SIZE_OF_INT);
-        data.setPosition(offset);
+        data.setPosition(getRestartPoint(restartPosition));
 
         // clear the entries to assure key is not prefixed
         nextEntry = null;
+        prevEntry = null;
+        
+        restartIndex = restartPosition;
 
-        // read the entry
-        nextEntry = readEntry(data, null);
+        // read the next entry
+        nextEntry = readEntry(data, prevEntry);
     }
 
     /**
@@ -195,7 +258,41 @@ public class BlockIterator implements SeekingIterator<Slice, Slice>
 
         // read value
         Slice value = data.readSlice(valueLength);
-
+        
         return new BlockEntry(key, value);
     }
+
+    private BlockEntry readEntryAndAdvanceIndex(SliceInput data, BlockEntry previousEntry){
+       BlockEntry ret = readEntry(data, previousEntry);
+        
+        while(restartIndex +1 < restartCount &&  getRestartPoint(restartIndex+1) < data.position()){
+           restartIndex++;
+        }
+        
+        return ret;
+       
+    }
+
+    private BlockEntry readPreviousEntry(int restartPosition, BlockEntry target){
+       data.setPosition(getRestartPoint(restartPosition));
+       BlockEntry prev = null;
+       BlockEntry entry = readEntry(data, prev);
+       while(!entry.equals(target)){
+          prev = entry;
+          entry = readEntry(data, prev);
+       }
+       return prev;
+    }
+
+    private BlockEntry readPreviousEntryAndAdvanceIndex(SliceInput data, BlockEntry nextEntry){
+       BlockEntry ret = readPreviousEntry(restartIndex, nextEntry);
+        
+        while(restartIndex +1 < restartCount &&  getRestartPoint(restartIndex+1) < data.position()){
+           restartIndex++;
+        }
+        
+        return ret;
+       
+    }
+    
 }

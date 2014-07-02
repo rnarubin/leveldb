@@ -5,7 +5,7 @@ import org.iq80.leveldb.impl.InternalKey;
 
 import java.util.Map.Entry;
 
-public class InternalTableIterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public class InternalTableIterator extends AbstractReverseSeekingIterator<InternalKey, Slice> implements InternalIterator
 {
     private final TableIterator tableIterator;
 
@@ -19,6 +19,12 @@ public class InternalTableIterator extends AbstractSeekingIterator<InternalKey, 
     {
         tableIterator.seekToFirst();
     }
+
+   @Override
+   protected void seekToLastInternal()
+   {
+      tableIterator.seekToLast();
+   }
 
     @Override
     public void seekInternal(InternalKey targetKey)
@@ -35,6 +41,16 @@ public class InternalTableIterator extends AbstractSeekingIterator<InternalKey, 
         }
         return null;
     }
+
+   @Override
+   protected Entry<InternalKey, Slice> getPrevElement()
+   {
+        if (tableIterator.hasPrev()) {
+            Entry<Slice, Slice> prev = tableIterator.prev();
+            return Maps.immutableEntry(new InternalKey(prev.getKey()), prev.getValue());
+        }
+        return null;
+   }
 
     @Override
     public String toString()

@@ -18,6 +18,8 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.collect.Maps;
+
+import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
 import org.iq80.leveldb.util.AbstractSeekingIterator;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.Slice;
@@ -25,7 +27,7 @@ import org.iq80.leveldb.util.Slice;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
-public final class SnapshotSeekingIterator extends AbstractSeekingIterator<Slice, Slice>
+public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterator<Slice, Slice>
 {
     private final DbIterator iterator;
     private final SnapshotImpl snapshot;

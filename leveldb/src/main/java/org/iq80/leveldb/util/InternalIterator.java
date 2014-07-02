@@ -1,6 +1,7 @@
 package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 
 /**

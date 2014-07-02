@@ -8,7 +8,7 @@ import org.iq80.leveldb.impl.TableCache;
 import java.util.List;
 import java.util.Map.Entry;
 
-public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public final class LevelIterator extends AbstractReverseSeekingIterator<InternalKey, Slice> implements InternalIterator
 {
     private final TableCache tableCache;
     private final List<FileMetaData> files;
@@ -30,6 +30,14 @@ public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Sl
         index = 0;
         current = null;
     }
+
+   @Override
+   protected void seekToLastInternal()
+   {
+      index = files.size()-1;
+      current = openFile(index);
+      current.seekToLastInternal();
+   }
 
     @Override
     protected void seekInternal(InternalKey targetKey)
@@ -61,12 +69,12 @@ public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Sl
         index = right;
 
         // if the index is now pointing to the last block in the file, check if the largest key
-        // in the block is than the the target key.  If so, we need to seek beyond the end of this file
+        // in the block is less than the target key.  If so, we need to seek beyond the end of this file
         if (index == files.size() - 1 && comparator.compare(files.get(index).getLargest(), targetKey) < 0) {
             index++;
         }
 
-        // if indexIterator does not have a next, it mean the key does not exist in this iterator
+        // if indexIterator does not have a next, it means the key does not exist in this iterator
         if (index < files.size()) {
             // seek the current iterator to the key
             current = openNextFile();
@@ -111,11 +119,48 @@ public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Sl
         }
     }
 
+   @Override
+   protected Entry<InternalKey, Slice> getPrevElement()
+   {
+        boolean currentHasPrev = false;
+        while (true) {
+            if (current != null) {
+                currentHasPrev = current.hasPrev();
+            }
+            if (!(currentHasPrev)) {
+                if (index > 0) {
+                    current = openPrevFile();
+                }
+                else {
+                    break;
+                }
+            }
+            else {
+                break;
+            }
+        }
+        if (currentHasPrev) {
+            return current.prev();
+        }
+        else {
+            // set current to empty iterator to avoid extra calls to user iterators
+            current = null;
+            return null;
+        }
+   }
+   
+   private InternalTableIterator openFile(int i){
+      return tableCache.newIterator(files.get(i));
+   }
+
     private InternalTableIterator openNextFile()
     {
-        FileMetaData fileMetaData = files.get(index);
-        index++;
-        return tableCache.newIterator(fileMetaData);
+       return openFile(index++);
+    }
+
+    private InternalTableIterator openPrevFile()
+    {
+       return openFile(index--);
     }
 
     @Override

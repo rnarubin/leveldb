@@ -6,7 +6,7 @@ import org.iq80.leveldb.table.Table;
 
 import java.util.Map.Entry;
 
-public final class TableIterator extends AbstractSeekingIterator<Slice, Slice>
+public final class TableIterator extends AbstractReverseSeekingIterator<Slice, Slice>
 {
     private final Table table;
     private final BlockIterator blockIterator;
@@ -26,6 +26,13 @@ public final class TableIterator extends AbstractSeekingIterator<Slice, Slice>
         blockIterator.seekToFirst();
         current = null;
     }
+
+   @Override
+   protected void seekToLastInternal()
+   {
+      blockIterator.seekToLast();
+      current = null;
+   }
 
     @Override
     protected void seekInternal(Slice targetKey)
@@ -78,9 +85,45 @@ public final class TableIterator extends AbstractSeekingIterator<Slice, Slice>
         }
     }
 
+   @Override
+   protected Entry<Slice, Slice> getPrevElement()
+   {
+        boolean currentHasPrev = false;
+        while (true) {
+            if (current != null) {
+                currentHasPrev = current.hasPrev();
+            }
+            if (!(currentHasPrev)) {
+                if (blockIterator.hasPrev()) {
+                    current = getPrevBlock();
+                }
+                else {
+                    break;
+                }
+            }
+            else {
+                break;
+            }
+        }
+        if (currentHasPrev) {
+            return current.prev();
+        }
+        else {
+            // set current to empty iterator to avoid extra calls to user iterators
+            current = null;
+            return null;
+        }
+   }
+
     private BlockIterator getNextBlock()
     {
         Slice blockHandle = blockIterator.next().getValue();
+        Block dataBlock = table.openBlock(blockHandle);
+        return dataBlock.iterator();
+    }
+    
+    private BlockIterator getPrevBlock(){
+        Slice blockHandle = blockIterator.prev().getValue();
         Block dataBlock = table.openBlock(blockHandle);
         return dataBlock.iterator();
     }
