@@ -51,7 +51,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       this.levels = levels;
       this.comparator = comparator;
 
-      this.doubleHeap = new DoubleHeap<>(new NextElementComparator(), new PrevElementComparator());
+      this.doubleHeap = new DoubleHeap<>(new SmallerNextElementComparator(), new LargerPrevElementComparator());
       resetPriorityQueue();
    }
 
@@ -124,7 +124,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
-      if (doubleHeap.maxSize() == 0)
+      if (doubleHeap.sizeMax() == 0)
       {
          return null;
       }
@@ -144,7 +144,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> getNextElement()
    {
-      if (doubleHeap.minSize() == 0)
+      if (doubleHeap.sizeMin() == 0)
       {
          return null;
       }
@@ -215,7 +215,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
 
-   private class NextElementComparator implements Comparator<OrdinalIterator>
+   private class SmallerNextElementComparator implements Comparator<OrdinalIterator>
    {
       @Override
       public int compare(OrdinalIterator o1, OrdinalIterator o2)
@@ -229,7 +229,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
 
-   private class PrevElementComparator implements Comparator<OrdinalIterator>
+   private class LargerPrevElementComparator implements Comparator<OrdinalIterator>
    {
       @Override
       public int compare(OrdinalIterator o1, OrdinalIterator o2)
@@ -240,7 +240,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
          {
             result = Ints.compare(o1.ordinal, o2.ordinal);
          }
-         return result;
+         return -result;
       }
 
    }

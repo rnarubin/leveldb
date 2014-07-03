@@ -23,8 +23,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 
-import com.google.common.collect.Lists;
-
 public class DoubleHeap<E>
 {
    private static final int MIN_HEAP = 0, MAX_HEAP = 1;
@@ -50,11 +48,11 @@ public class DoubleHeap<E>
       return nodes.size();
    }
    
-   public int minSize(){
+   public int sizeMin(){
       return sizeSingle(MIN_HEAP);
    }
    
-   public int maxSize(){
+   public int sizeMax(){
       return sizeSingle(MAX_HEAP);
    }
    
@@ -109,6 +107,10 @@ public class DoubleHeap<E>
    private E removeSingle(int whichHeap){
       Node<E> n = heaps.get(whichHeap).remove();
       
+      if(n == null){
+         return null;
+      }
+
       if(n.index[other(whichHeap)] == -1){
          //node no longer exists in either heap
          nodes.remove(n.data);
@@ -126,7 +128,8 @@ public class DoubleHeap<E>
    }
    
    private E peekSingle(int whichHeap){
-      return heaps.get(whichHeap).peek().data;
+      Node<E> peek = heaps.get(whichHeap).peek();
+      return peek==null?null:peek.data;
    }
    
    private static int other(int whichHeap){
