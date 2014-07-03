@@ -20,7 +20,6 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
-import org.iq80.leveldb.util.AbstractSeekingIterator;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.Slice;
 
@@ -52,6 +51,13 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
         findNextUserEntry(null);
     }
 
+   @Override
+   protected void seekToLastInternal()
+   {
+      iterator.seekToLast();
+      findPrevUserEntry(null);
+   }
+
     @Override
     protected void seekInternal(Slice targetKey)
     {
@@ -73,6 +79,21 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
 
         return Maps.immutableEntry(next.getKey().getUserKey(), next.getValue());
     }
+
+   @Override
+   protected Entry<Slice, Slice> getPrevElement()
+   {
+        if (!iterator.hasPrev()) {
+            return null;
+        }
+
+        Entry<InternalKey, Slice> prev = iterator.prev();
+
+        // find the next user entry after the key we are about to return
+        findPrevUserEntry(prev.getKey().getUserKey());
+
+        return Maps.immutableEntry(prev.getKey().getUserKey(), prev.getValue());
+   }
 
     private void findNextUserEntry(Slice deletedKey)
     {
@@ -103,6 +124,37 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
             }
             iterator.next();
         } while (iterator.hasNext());
+    }
+
+    private void findPrevUserEntry(Slice deletedKey)
+    {
+        // if there are no more entries, we are done
+        if (!iterator.hasPrev()) {
+            return;
+        }
+
+        do {
+            // Peek the previous entry and parse the key
+            InternalKey internalKey = iterator.peekPrev().getKey();
+
+            // skip entries created after our snapshot
+            if (internalKey.getSequenceNumber() > snapshot.getLastSequence()) {
+                iterator.prev();
+                continue;
+            }
+
+            // if the next entry is a deletion, skip all subsequent entries for that key
+            if (internalKey.getValueType() == ValueType.DELETION) {
+                deletedKey = internalKey.getUserKey();
+            }
+            else if (internalKey.getValueType() == ValueType.VALUE) {
+                // is this value masked by a prior deletion record?
+                if (deletedKey == null || userComparator.compare(internalKey.getUserKey(), deletedKey) > 0) {
+                    return;
+                }
+            }
+            iterator.prev();
+        } while (iterator.hasPrev());
     }
 
     @Override

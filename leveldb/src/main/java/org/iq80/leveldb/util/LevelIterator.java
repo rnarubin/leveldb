@@ -160,7 +160,7 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
 
     private InternalTableIterator openPrevFile()
     {
-       return openFile(index--);
+       return openFile(--index);
     }
 
     @Override

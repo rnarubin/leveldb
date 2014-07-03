@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.collect.ComparisonChain;
 import com.google.common.primitives.Longs;
 import org.iq80.leveldb.table.UserComparator;
 

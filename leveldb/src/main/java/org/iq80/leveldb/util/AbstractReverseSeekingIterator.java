@@ -1,7 +1,6 @@
 package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.impl.SeekingIterator;
 
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;

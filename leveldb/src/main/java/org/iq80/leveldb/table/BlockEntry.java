@@ -21,7 +21,6 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import org.iq80.leveldb.util.Slice;
 
-import java.util.Arrays;
 import java.util.Map.Entry;
 
 import static com.google.common.base.Charsets.UTF_8;

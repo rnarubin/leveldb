@@ -18,7 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.PureJavaCrc32C;
 
 public enum LogChunkType
 {

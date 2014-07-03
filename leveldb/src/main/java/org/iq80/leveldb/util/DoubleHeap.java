@@ -23,6 +23,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.google.common.collect.Lists;
+
 public class DoubleHeap<E>
 {
    private static final int MIN_HEAP = 0, MAX_HEAP = 1;
@@ -34,8 +36,30 @@ public class DoubleHeap<E>
       nodes = new HashMap<>();
 
       heaps = new ArrayList<>(2);
-      heaps.set(MIN_HEAP, new Heap<>(minComparator, MIN_HEAP));
-      heaps.set(MAX_HEAP, new Heap<>(minComparator, MAX_HEAP));
+      heaps.add(new Heap<>(minComparator, MIN_HEAP));
+      heaps.add(new Heap<>(maxComparator, MAX_HEAP));
+   }
+   
+   public void clear(){
+      nodes.clear();
+      heaps.get(MIN_HEAP).clear();
+      heaps.get(MAX_HEAP).clear();
+   }
+   
+   public int size(){
+      return nodes.size();
+   }
+   
+   public int minSize(){
+      return sizeSingle(MIN_HEAP);
+   }
+   
+   public int maxSize(){
+      return sizeSingle(MAX_HEAP);
+   }
+   
+   private int sizeSingle(int whichHeap){
+      return heaps.get(whichHeap).size();
    }
 
    public void add(E e)
@@ -119,6 +143,15 @@ public class DoubleHeap<E>
       {
          this.comparator = comparator;
          this.selfIndex = selfIndex;
+         arr = new ArrayList<>();
+      }
+      
+      public void clear(){
+         arr.clear();
+      }
+      
+      public int size(){
+         return arr.size();
       }
 
       public void add(Node<E> n)

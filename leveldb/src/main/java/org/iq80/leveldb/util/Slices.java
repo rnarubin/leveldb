@@ -19,7 +19,6 @@ package org.iq80.leveldb.util;
 
 import com.google.common.base.Preconditions;
 
-import javax.xml.transform.Source;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.CharBuffer;

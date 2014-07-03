@@ -17,8 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.collect.PeekingIterator;
-
 import java.util.Map.Entry;
 
 public interface ReverseSeekingIterator<K,V> extends SeekingIterator<K, V>, ReversePeekingIterator<Entry<K,V>>

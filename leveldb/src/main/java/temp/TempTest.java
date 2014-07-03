@@ -10,7 +10,6 @@ import java.util.Map.Entry;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.VariableLengthQuantity;
 
 public class TempTest
 {
@@ -22,10 +21,10 @@ public class TempTest
       Options options = new Options();
       
       options.createIfMissing(true);
-      try(DB db = factory.open(new File("example"), options)){
               
+      try(DB db = factory.open(new File("example"), options)){
          for(int i = 0; i < 10; i++){
-            db.put(bytes(num[i]), bytes(""+i));
+            db.put(bytes(""+i), bytes(num[i]));
          }
               
 
@@ -33,6 +32,15 @@ public class TempTest
          while(iter.hasNext()){
             Entry<byte[], byte[]> e = iter.next();
             System.out.println(new String(e.getKey())+", "+new String(e.getValue()));
+         }
+         
+         while(iter.hasPrev()){
+            Entry<byte[], byte[]> e = iter.prev();
+            System.out.println(new String(e.getKey())+", "+new String(e.getValue()));
+         }
+         
+         for(int i = 0; i < 10; i++){
+            db.delete(bytes(""+i));
          }
          
          

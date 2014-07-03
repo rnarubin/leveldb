@@ -16,17 +16,13 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterators;
-import com.google.common.collect.PeekingIterator;
 
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Slice;
 import org.testng.collections.Lists;
 
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
