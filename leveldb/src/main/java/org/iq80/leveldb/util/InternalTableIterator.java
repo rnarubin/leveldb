@@ -51,7 +51,7 @@ public class InternalTableIterator extends AbstractReverseSeekingIterator<Intern
         }
         return null;
    }
-
+   
     @Override
     public String toString()
     {
@@ -61,4 +61,16 @@ public class InternalTableIterator extends AbstractReverseSeekingIterator<Intern
         sb.append('}');
         return sb.toString();
     }
+
+   @Override
+   protected boolean hasNextInternal()
+   {
+      return tableIterator.hasNext();
+   }
+
+   @Override
+   protected boolean hasPrevInternal()
+   {
+      return tableIterator.hasPrev();
+   }
 }

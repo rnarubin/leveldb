@@ -19,7 +19,6 @@
 package org.iq80.leveldb.impl;
 
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 
@@ -151,29 +150,6 @@ public final class ReverseIterators<E>
       }
 
       @Override
-      public E prev()
-      {
-         rHasPeeked = false;
-         rPeekedElement = null;
-         E prev = rIterator.prev();
-         hasPeeked = true;
-         peekedElement = prev;
-         return prev;
-      }
-
-      @Override
-      public E peekPrev()
-      {
-         if (!rHasPeeked)
-         {
-            rPeekedElement = rIterator.prev();
-            rIterator.next(); // reset to original position
-            rHasPeeked = true;
-         }
-         return rPeekedElement;
-      }
-
-      @Override
       public E next()
       {
          hasPeeked = false;
@@ -182,6 +158,17 @@ public final class ReverseIterators<E>
          rHasPeeked = true;
          rPeekedElement = next;
          return next;
+      }
+
+      @Override
+      public E prev()
+      {
+         rHasPeeked = false;
+         rPeekedElement = null;
+         E prev = rIterator.prev();
+         hasPeeked = true;
+         peekedElement = prev;
+         return prev;
       }
 
       @Override
@@ -194,6 +181,18 @@ public final class ReverseIterators<E>
             hasPeeked = true;
          }
          return peekedElement;
+      }
+
+      @Override
+      public E peekPrev()
+      {
+         if (!rHasPeeked)
+         {
+            rPeekedElement = rIterator.prev();
+            rIterator.next(); // reset to original position
+            rHasPeeked = true;
+         }
+         return rPeekedElement;
       }
 
       @Override

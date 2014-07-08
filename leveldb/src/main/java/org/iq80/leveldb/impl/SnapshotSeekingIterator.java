@@ -90,7 +90,7 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
         Entry<InternalKey, Slice> prev = iterator.prev();
 
         // find the next user entry after the key we are about to return
-        findPrevUserEntry(prev.getKey().getUserKey());
+        //findPrevUserEntry(prev.getKey().getUserKey());
 
         return Maps.immutableEntry(prev.getKey().getUserKey(), prev.getValue());
    }
@@ -167,5 +167,17 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
         sb.append('}');
         return sb.toString();
     }
+
+   @Override
+   protected boolean hasNextInternal()
+   {
+      return iterator.hasNext();
+   }
+
+   @Override
+   protected boolean hasPrevInternal()
+   {
+      return iterator.hasPrev();
+   }
 
 }

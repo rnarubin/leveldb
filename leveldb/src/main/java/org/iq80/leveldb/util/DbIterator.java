@@ -1,6 +1,7 @@
 
 package org.iq80.leveldb.util;
 
+import com.google.common.base.Function;
 import com.google.common.primitives.Ints;
 
 import org.iq80.leveldb.impl.InternalKey;
@@ -122,6 +123,18 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    }
 
    @Override
+   protected boolean hasNextInternal()
+   {
+      return doubleHeap.sizeMin() > 0 && doubleHeap.peekMin().iterator.hasNext();
+   }
+
+   @Override
+   protected boolean hasPrevInternal()
+   {
+      return doubleHeap.sizeMax() > 0 && doubleHeap.peekMax().iterator.hasPrev();
+   }
+
+   @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
       if (doubleHeap.sizeMax() == 0)
@@ -130,12 +143,18 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
 
       OrdinalIterator largest = doubleHeap.removeMax();
+      boolean edge = !largest.iterator.hasNext();
       Entry<InternalKey, Slice> result = largest.iterator.prev();
 
       // if the largest iterator has more elements, put it back in the heap,
       if (largest.iterator.hasPrev())
       {
-         doubleHeap.addMax(largest);
+         if(edge){
+            doubleHeap.add(largest);
+         }
+         else{
+            doubleHeap.addMax(largest);
+         }
       }
 
       return result;
@@ -150,12 +169,18 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
 
       OrdinalIterator smallest = doubleHeap.removeMin();
+      boolean edge = !smallest.iterator.hasPrev();
       Entry<InternalKey, Slice> result = smallest.iterator.next();
 
       // if the smallest iterator has more elements, put it back in the heap,
       if (smallest.iterator.hasNext())
       {
-         doubleHeap.addMin(smallest);
+         if(edge){
+            doubleHeap.add(smallest);
+         }
+         else{
+            doubleHeap.addMin(smallest);
+         }
       }
 
       return result;
@@ -215,34 +240,74 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
 
-   private class SmallerNextElementComparator implements Comparator<OrdinalIterator>
+   protected class SmallerNextElementComparator extends ElementComparator
    {
-      @Override
-      public int compare(OrdinalIterator o1, OrdinalIterator o2)
+      public SmallerNextElementComparator()
       {
-         int result = comparator.compare(o1.iterator.peek().getKey(), o2.iterator.peek().getKey());
-         if (result == 0)
-         {
-            result = Ints.compare(o1.ordinal, o2.ordinal);
-         }
-         return result;
+         super(
+            new Function<OrdinalIterator, Boolean>(){
+               public Boolean apply(OrdinalIterator ord){
+                  return ord.iterator.hasNext();
+               }
+            },
+            new Function<OrdinalIterator, InternalKey>(){
+               public InternalKey apply(OrdinalIterator ord){
+                  return ord.iterator.peek().getKey();
+               }
+            });
       }
    }
 
-   private class LargerPrevElementComparator implements Comparator<OrdinalIterator>
+   protected class LargerPrevElementComparator extends ElementComparator
    {
+      public LargerPrevElementComparator()
+      {
+         super(
+            new Function<OrdinalIterator, Boolean>(){
+               public Boolean apply(OrdinalIterator ord){
+                  return ord.iterator.hasPrev();
+               }
+            },
+            new Function<OrdinalIterator, InternalKey>(){
+               public InternalKey apply(OrdinalIterator ord){
+                  return ord.iterator.peekPrev().getKey();
+               }
+            }
+         );
+      }
+      
+      @Override
+      public int compare(OrdinalIterator o1, OrdinalIterator o2){
+         return -super.compare(o1, o2); //negative for reverse comparison to get larger items
+      }
+   }
+   
+   private abstract class ElementComparator implements Comparator<OrdinalIterator>{
+      private final Function<OrdinalIterator, Boolean> hasFollowing;
+      private final Function<OrdinalIterator, InternalKey> peekFollowing;
+
+      public ElementComparator(Function<OrdinalIterator, Boolean> hasFollowing, Function<OrdinalIterator, InternalKey> peekFollowing){
+         this.hasFollowing = hasFollowing;
+         this.peekFollowing = peekFollowing;
+      }
       @Override
       public int compare(OrdinalIterator o1, OrdinalIterator o2)
       {
-         int result =
-               comparator.compare(o1.iterator.peekPrev().getKey(), o2.iterator.peekPrev().getKey());
-         if (result == 0)
+         if (hasFollowing.apply(o1))
          {
-            result = Ints.compare(o1.ordinal, o2.ordinal);
+            if (hasFollowing.apply(o2))
+            {
+               //both iterators have a next element
+               int result = comparator.compare(peekFollowing.apply(o1), peekFollowing.apply(o2));
+               return result == 0 ? Ints.compare(o1.ordinal, o2.ordinal) : result;
+            }
+            return -1; //o2 does not have a next element, consider o1 less than the empty o2
          }
-         return -result;
+         if(hasFollowing.apply(o2)){
+            return 1; //o1 does not have a next element, consider o2 less than the empty o1
+         }
+         return 0; //neither o1 nor o2 have a next element, consider them equals as empty iterators in this direction
       }
-
+      
    }
-
 }

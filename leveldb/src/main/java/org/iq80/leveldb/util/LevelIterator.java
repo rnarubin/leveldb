@@ -85,6 +85,18 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
         }
     }
 
+   @Override
+   protected boolean hasNextInternal()
+   {
+      return currentHasNext();
+   }
+
+   @Override
+   protected boolean hasPrevInternal()
+   {
+      return currentHasPrev();
+   }
+
     @Override
     protected Entry<InternalKey, Slice> getNextElement()
     {
@@ -92,6 +104,17 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
         // because otherwise we'll have called inputs.next() before throwing
         // the first NPE, and the next time around we'll call inputs.next()
         // again, incorrectly moving beyond the error.
+        if (currentHasNext()) {
+            return current.next();
+        }
+        else {
+            // set current to empty iterator to avoid extra calls to user iterators
+            current = null;
+            return null;
+        }
+    }
+    
+    private boolean currentHasNext(){
         boolean currentHasNext = false;
         while (true) {
             if (current != null) {
@@ -109,19 +132,10 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
                 break;
             }
         }
-        if (currentHasNext) {
-            return current.next();
-        }
-        else {
-            // set current to empty iterator to avoid extra calls to user iterators
-            current = null;
-            return null;
-        }
+        return currentHasNext;
     }
-
-   @Override
-   protected Entry<InternalKey, Slice> getPrevElement()
-   {
+    
+    private boolean currentHasPrev(){
         boolean currentHasPrev = false;
         while (true) {
             if (current != null) {
@@ -139,7 +153,13 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
                 break;
             }
         }
-        if (currentHasPrev) {
+        return currentHasPrev;
+    }
+
+   @Override
+   protected Entry<InternalKey, Slice> getPrevElement()
+   {
+        if (currentHasPrev()) {
             return current.prev();
         }
         else {

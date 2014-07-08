@@ -19,7 +19,6 @@
 package org.iq80.leveldb.util;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -29,12 +28,8 @@ import java.util.Random;
 
 import junit.framework.TestCase;
 
-import org.fusesource.leveldbjni.internal.NativeComparator.ComparatorJNI;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
-import org.iq80.leveldb.impl.ReverseSeekingIterator;
-
-import com.google.common.base.Function;
 
 public class DoubleHeapIteratorTest extends TestCase
 {

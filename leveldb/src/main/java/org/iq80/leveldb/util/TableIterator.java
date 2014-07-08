@@ -51,6 +51,18 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
         }
     }
 
+   @Override
+   protected boolean hasNextInternal()
+   {
+      return currentHasNext();
+   }
+
+   @Override
+   protected boolean hasPrevInternal()
+   {
+      return currentHasPrev();
+   }
+
     @Override
     protected Entry<Slice, Slice> getNextElement()
     {
@@ -58,6 +70,30 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
         // because otherwise we'll have called inputs.next() before throwing
         // the first NPE, and the next time around we'll call inputs.next()
         // again, incorrectly moving beyond the error.
+        if (currentHasNext()) {
+            return current.next();
+        }
+        else {
+            // set current to empty iterator to avoid extra calls to user iterators
+            current = null;
+            return null;
+        }
+    }
+
+   @Override
+   protected Entry<Slice, Slice> getPrevElement()
+   {
+        if (currentHasPrev()) {
+            return current.prev();
+        }
+        else {
+            // set current to empty iterator to avoid extra calls to user iterators
+            current = null;
+            return null;
+        }
+   }
+    
+    private boolean currentHasNext(){
         boolean currentHasNext = false;
         while (true) {
             if (current != null) {
@@ -75,19 +111,10 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
                 break;
             }
         }
-        if (currentHasNext) {
-            return current.next();
-        }
-        else {
-            // set current to empty iterator to avoid extra calls to user iterators
-            current = null;
-            return null;
-        }
+        return currentHasNext;
     }
-
-   @Override
-   protected Entry<Slice, Slice> getPrevElement()
-   {
+    
+    private boolean currentHasPrev(){
         boolean currentHasPrev = false;
         while (true) {
             if (current != null) {
@@ -105,15 +132,8 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
                 break;
             }
         }
-        if (currentHasPrev) {
-            return current.prev();
-        }
-        else {
-            // set current to empty iterator to avoid extra calls to user iterators
-            current = null;
-            return null;
-        }
-   }
+        return currentHasPrev;
+    }
 
     private BlockIterator getNextBlock()
     {
