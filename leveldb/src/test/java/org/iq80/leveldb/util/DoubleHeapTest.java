@@ -18,6 +18,7 @@
 
 package org.iq80.leveldb.util;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -42,6 +43,76 @@ public class DoubleHeapTest extends TestCase
          nums.add(Pair.of(i, rand.nextInt()));
       }
       Collections.shuffle(nums, rand);
+   }
+   
+   public void testSmallRemove(){
+      Pair<Integer, Integer> a,b,c;
+      a = Pair.of(7, 32);
+      b = Pair.of(3, 87);
+      c = Pair.of(15, 46);
+      DoubleHeap<Pair<Integer, Integer>> dh = populateDH(Arrays.asList(a,b,c));
+
+      assertEquals(b, dh.removeMin());
+      assertEquals(a, dh.removeMin());
+
+      assertEquals(3, dh.size()); //three items still exist in either heap
+      assertEquals(1, dh.sizeMin()); //only c exists in the min heap
+      assertEquals(3, dh.sizeMax()); //all items still exist in the max heap
+
+      assertEquals(a, dh.removeMax());
+
+      assertEquals(2, dh.size()); //a has been removed from both heaps
+      assertEquals(1, dh.sizeMin()); //only c exists in the min heap
+      assertEquals(2, dh.sizeMax());
+      
+      assertEquals(c, dh.peekMax());
+      assertEquals(c, dh.removeMin());
+      assertEquals(c, dh.peekMax());
+      
+      assertEquals(2, dh.size());
+      assertEquals(0, dh.sizeMin());
+      assertEquals(2, dh.sizeMax());
+      
+      assertNull(dh.removeMin());
+      
+      assertEquals(2, dh.size());
+      assertEquals(0, dh.sizeMin());
+      assertEquals(2, dh.sizeMax());
+      
+      dh.addMax(a);
+      
+      assertEquals(3, dh.size());
+      assertEquals(0, dh.sizeMin());
+      assertEquals(3, dh.sizeMax());
+      assertNull(dh.removeMin());
+      
+      dh.add(a);
+      
+      assertEquals(3, dh.size());
+      assertEquals(1, dh.sizeMin());
+      assertEquals(3, dh.sizeMax());
+      
+      assertEquals(a, dh.peekMax());
+      assertEquals(a, dh.peekMin());
+
+      assertEquals(a, dh.removeMax());
+
+      assertEquals(a, dh.peekMin());
+      assertEquals(c, dh.peekMax());
+      
+      assertEquals(a, dh.removeMin());
+      assertEquals(c, dh.removeMax());
+      assertEquals(b, dh.removeMax());
+
+      assertEquals(0, dh.size());
+      assertEquals(0, dh.sizeMin());
+      assertEquals(0, dh.sizeMax());
+      
+      assertNull(dh.removeMin());
+      assertNull(dh.removeMax());
+      
+      
+      
    }
    
    public void testSequentialAddRemove(){

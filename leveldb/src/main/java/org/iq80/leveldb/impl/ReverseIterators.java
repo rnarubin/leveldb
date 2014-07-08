@@ -23,7 +23,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 
-
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Lists;
 
@@ -36,37 +35,40 @@ public final class ReverseIterators<E>
    // reimplements several methods and classes from com.google.common.collect.Iterators
    // in addition to further reversing functionality and convenience methods
    // in order to accommodate reverse iteration
-    
-   public static <T> ListReverseIterator<T> listReverseIterator(ListIterator<T> listIter){
+
+   public static <T> ListReverseIterator<T> listReverseIterator(ListIterator<T> listIter)
+   {
       return new ListReverseIterator<T>(listIter);
    }
-     
-   public static <T> ListReverseIterator<T> listReverseIterator(List<T> list){
+
+   public static <T> ListReverseIterator<T> listReverseIterator(List<T> list)
+   {
       return listReverseIterator(list.listIterator());
    }
-     
-   public static <T> ListReverseIterator<T> listReverseIterator(Collection<T> collection){
+
+   public static <T> ListReverseIterator<T> listReverseIterator(Collection<T> collection)
+   {
       return listReverseIterator(Lists.newArrayList(collection));
    }
-   
+
    public static <T> ReversePeekingIterator<T> reversePeekingIterator(
          ListIterator<? extends T> listIter)
    {
       return reversePeekingIterator(ReverseIterators.listReverseIterator(listIter));
    }
-   
+
    public static <T> ReversePeekingIterator<T> reversePeekingIterator(
          List<? extends T> list)
    {
       return reversePeekingIterator(ReverseIterators.listReverseIterator(list));
    }
-   
+
    public static <T> ReversePeekingIterator<T> reversePeekingIterator(
          Collection<? extends T> collection)
    {
       return reversePeekingIterator(ReverseIterators.listReverseIterator(collection));
    }
-   
+
    public static <T> ReversePeekingIterator<T> reversePeekingIterator(
          ReverseIterator<? extends T> iterator)
    {
@@ -78,13 +80,16 @@ public final class ReverseIterators<E>
       }
       return new ReversePeekingImpl<T>(iterator);
    }
-   
-   private static class ListReverseIterator<E> implements ReverseIterator<E>{
+
+   private static class ListReverseIterator<E> implements ReverseIterator<E>
+   {
       private final ListIterator<E> iter;
-      
-      public ListReverseIterator(ListIterator<E> listIterator){
+
+      public ListReverseIterator(ListIterator<E> listIterator)
+      {
          this.iter = listIterator;
       }
+
       @Override
       public boolean hasNext()
       {
@@ -114,28 +119,29 @@ public final class ReverseIterators<E>
       {
          return iter.hasPrevious();
       }
-      
+
    }
 
-   private static class ReversePeekingImpl<E> extends PeekingImpl<E>
+   private static class ReversePeekingImpl<E>
          implements
+            PeekingIterator<E>,
             ReversePeekingIterator<E>
    {
       private final ReverseIterator<? extends E> rIterator;
       private boolean rHasPeeked;
       private E rPeekedElement;
+      private boolean hasPeeked;
+      private E peekedElement;
 
       public ReversePeekingImpl(ReverseIterator<? extends E> iterator)
       {
-         super(iterator);
-         this.rIterator = iterator;
+         this.rIterator = checkNotNull(iterator);
       }
 
       @Override
-      public void remove()
+      public boolean hasNext()
       {
-         checkState(!rHasPeeked, "Can't remove after you've peeked at previous");
-         super.remove();
+         return hasPeeked || rIterator.hasNext();
       }
 
       @Override
@@ -147,14 +153,12 @@ public final class ReverseIterators<E>
       @Override
       public E prev()
       {
-         if (!rHasPeeked)
-         {
-            return rIterator.prev();
-         }
-         E result = rPeekedElement;
          rHasPeeked = false;
          rPeekedElement = null;
-         return result;
+         E prev = rIterator.prev();
+         hasPeeked = true;
+         peekedElement = prev;
+         return prev;
       }
 
       @Override
@@ -163,63 +167,21 @@ public final class ReverseIterators<E>
          if (!rHasPeeked)
          {
             rPeekedElement = rIterator.prev();
+            rIterator.next(); // reset to original position
             rHasPeeked = true;
          }
          return rPeekedElement;
       }
 
-   }
-
-   /*
-    * Copyright (C) 2007 The Guava Authors
-    * 
-    * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
-    * except in compliance with the License. You may obtain a copy of the License at
-    * 
-    * http://www.apache.org/licenses/LICENSE-2.0
-    * 
-    * Unless required by applicable law or agreed to in writing, software distributed under the
-    * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-    * either express or implied. See the License for the specific language governing permissions and
-    * limitations under the License.
-    */
-
-   private static class PeekingImpl<E> implements PeekingIterator<E>
-   {
-
-      private final Iterator<? extends E> iterator;
-      private boolean hasPeeked;
-      private E peekedElement;
-
-      public PeekingImpl(Iterator<? extends E> iterator)
-      {
-         this.iterator = checkNotNull(iterator);
-      }
-
-      @Override
-      public boolean hasNext()
-      {
-         return hasPeeked || iterator.hasNext();
-      }
-
       @Override
       public E next()
       {
-         if (!hasPeeked)
-         {
-            return iterator.next();
-         }
-         E result = peekedElement;
          hasPeeked = false;
          peekedElement = null;
-         return result;
-      }
-
-      @Override
-      public void remove()
-      {
-         checkState(!hasPeeked, "Can't remove after you've peeked at next");
-         iterator.remove();
+         E next = rIterator.next();
+         rHasPeeked = true;
+         rPeekedElement = next;
+         return next;
       }
 
       @Override
@@ -227,15 +189,19 @@ public final class ReverseIterators<E>
       {
          if (!hasPeeked)
          {
-            peekedElement = iterator.next();
+            peekedElement = rIterator.next();
+            rIterator.prev();
             hasPeeked = true;
          }
          return peekedElement;
       }
-   }
-   
-   /*
-    * end copyright
-    */
 
+      @Override
+      public void remove()
+      {
+         checkState(!(hasPeeked || rHasPeeked),
+               "Can't remove after peeking at next or previous");
+         rIterator.remove();
+      }
+   }
 }

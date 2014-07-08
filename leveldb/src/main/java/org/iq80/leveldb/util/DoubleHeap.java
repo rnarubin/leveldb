@@ -19,6 +19,7 @@
 package org.iq80.leveldb.util;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
@@ -62,10 +63,22 @@ public class DoubleHeap<E>
 
    public void add(E e)
    {
-      Node<E> n = new Node<>(e);
-      nodes.put(e, n);
-      heaps.get(MIN_HEAP).add(n);
-      heaps.get(MAX_HEAP).add(n);
+      if(nodes.containsKey(e)){
+         addSingle(MIN_HEAP, e);
+         addSingle(MAX_HEAP, e);
+      }
+      else{
+         Node<E> n = new Node<>(e);
+         nodes.put(e, n);
+         heaps.get(MIN_HEAP).add(n);
+         heaps.get(MAX_HEAP).add(n);
+      }
+   }
+   
+   public void addAll(Collection<E> c){
+      for(E e:c){
+         add(e);
+      }
    }
    
    public void addMin(E e){
@@ -92,6 +105,7 @@ public class DoubleHeap<E>
       }
       else{
          n = new Node<E>(e);
+         nodes.put(e, n);
       }
       heaps.get(whichHeap).add(n);
    }
@@ -163,6 +177,9 @@ public class DoubleHeap<E>
          if (arr.size() > 1)
          {
             siftUp(arr.size() - 1, n);
+         }
+         else{
+            n.index[selfIndex] = 0;
          }
       }
 
