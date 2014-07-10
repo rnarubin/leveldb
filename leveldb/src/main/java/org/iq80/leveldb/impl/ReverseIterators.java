@@ -21,6 +21,9 @@ package org.iq80.leveldb.impl;
 import java.util.Collection;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map.Entry;
+
+import org.iq80.leveldb.DBIterator;
 
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Lists;
@@ -79,6 +82,7 @@ public final class ReverseIterators<E>
       }
       return new ReversePeekingImpl<T>(iterator);
    }
+   
 
    private static class ListReverseIterator<E> implements ReverseIterator<E>
    {
@@ -202,5 +206,59 @@ public final class ReverseIterators<E>
                "Can't remove after peeking at next or previous");
          rIterator.remove();
       }
+   }
+
+   public static ReverseSeekingIterator<byte[], byte[]> wrap(final DBIterator dbIter){
+      return new ReverseSeekingIterator<byte[], byte[]>(){
+         @Override
+         public void seekToFirst(){
+            dbIter.seekToFirst();
+         }
+
+         @Override
+         public void seek(byte[] targetKey){
+            dbIter.seek(targetKey);
+         }
+
+         @Override
+         public Entry<byte[], byte[]> peek(){
+            return dbIter.peekNext();
+         }
+
+         @Override
+         public Entry<byte[], byte[]> next(){
+            return dbIter.next();
+         }
+
+         @Override
+         public void remove(){
+            dbIter.remove();
+         }
+
+         @Override
+         public boolean hasNext(){
+            return dbIter.hasNext();
+         }
+
+         @Override
+         public Entry<byte[], byte[]> peekPrev(){
+            return dbIter.peekPrev();
+         }
+
+         @Override
+         public Entry<byte[], byte[]> prev(){
+            return dbIter.prev();
+         }
+
+         @Override
+         public boolean hasPrev(){
+            return dbIter.hasPrev();
+         }
+
+         @Override
+         public void seekToLast(){
+            dbIter.seekToLast();
+         }
+      };
    }
 }
