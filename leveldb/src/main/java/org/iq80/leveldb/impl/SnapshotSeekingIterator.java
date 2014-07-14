@@ -89,8 +89,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
 
         Entry<InternalKey, Slice> prev = iterator.prev();
 
-        // find the next user entry after the key we are about to return
-        //findPrevUserEntry(prev.getKey().getUserKey());
+        // find the previous user entry before the key we are about to return
+        findPrevUserEntry(prev.getKey().getUserKey());
 
         return Maps.immutableEntry(prev.getKey().getUserKey(), prev.getValue());
    }
@@ -149,7 +149,7 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
             }
             else if (internalKey.getValueType() == ValueType.VALUE) {
                 // is this value masked by a prior deletion record?
-                if (deletedKey == null || userComparator.compare(internalKey.getUserKey(), deletedKey) > 0) {
+                if (deletedKey == null || userComparator.compare(internalKey.getUserKey(), deletedKey) < 0) {
                     return;
                 }
             }
