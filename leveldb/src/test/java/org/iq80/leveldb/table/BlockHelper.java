@@ -18,12 +18,15 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Charsets;
+
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
 import org.testng.Assert;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
@@ -73,6 +76,27 @@ public class BlockHelper
         }
         try {
             seekingIterator.next();
+            fail("expected NoSuchElementException");
+        }
+        catch (NoSuchElementException expected) {
+        }
+    }
+    
+    public static <K, V> void assertReverseSequence(ReverseSeekingIterator<K, V> rSeekingIterator, Iterable<? extends Entry<K, V>> reversedEntries){
+       for(Entry<K, V> entry: reversedEntries){
+          assertTrue(rSeekingIterator.hasPrev());
+          assertEntryEquals(rSeekingIterator.peekPrev(), entry);
+          assertEntryEquals(rSeekingIterator.prev(), entry);
+       }
+
+        try {
+            rSeekingIterator.peekPrev();
+            fail("expected NoSuchElementException");
+        }
+        catch (NoSuchElementException expected) {
+        }
+        try {
+            rSeekingIterator.prev();
             fail("expected NoSuchElementException");
         }
         catch (NoSuchElementException expected) {

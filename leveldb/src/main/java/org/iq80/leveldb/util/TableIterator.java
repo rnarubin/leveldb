@@ -87,7 +87,6 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
             return current.prev();
         }
         else {
-            // set current to empty iterator to avoid extra calls to user iterators
             current = null;
             return null;
         }
@@ -123,6 +122,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
             if (!(currentHasPrev)) {
                 if (blockIterator.hasPrev()) {
                     current = getPrevBlock();
+                    current.seekToLast();
                 }
                 else {
                     break;

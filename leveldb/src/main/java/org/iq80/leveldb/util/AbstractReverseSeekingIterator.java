@@ -3,19 +3,21 @@ package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import com.google.common.base.Function;
+
+import java.security.NoSuchAlgorithmException;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
+import java.util.concurrent.Callable;
 
 public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSeekingIterator<K, V>
 {
-   private boolean rHasPeeked;
    private Entry<K, V> rPeekedElement;
-   private boolean hasPeeked;
    private Entry<K, V> peekedElement;
 
    @Override
    public final void seekToFirst()
    {
-      rHasPeeked = hasPeeked = false;
       rPeekedElement = peekedElement = null;
       seekToFirstInternal();
    }
@@ -23,7 +25,6 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public void seekToLast()
    {
-      rHasPeeked = hasPeeked = false;
       rPeekedElement = peekedElement = null;
       seekToLastInternal();
    }
@@ -31,7 +32,6 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final void seek(K targetKey)
    {
-      rHasPeeked = hasPeeked = false;
       rPeekedElement = peekedElement = null;
       seekInternal(targetKey);
    }
@@ -39,22 +39,23 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final boolean hasNext()
    {
-      return hasPeeked || hasNextInternal();
+      return peekedElement != null || hasNextInternal();
    }
 
    @Override
    public final boolean hasPrev()
    {
-      return rHasPeeked || hasPrevInternal();
+      return rPeekedElement != null || hasPrevInternal();
    }
 
    @Override
    public final Entry<K, V> next()
    {
-      hasPeeked = false;
       peekedElement = null;
       Entry<K, V> next = getNextElement();
-      rHasPeeked = true;
+      if(next == null){
+         throw new NoSuchElementException();
+      }
       rPeekedElement = next;
       return next;
    }
@@ -62,10 +63,11 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> prev()
    {
-      rHasPeeked = false;
       rPeekedElement = null;
       Entry<K, V> prev = getPrevElement();
-      hasPeeked = true;
+      if(prev == null){
+         throw new NoSuchElementException();
+      }
       peekedElement = prev;
       return prev;
    }
@@ -73,11 +75,13 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> peek()
    {
-      if (!hasPeeked)
+      if (peekedElement == null)
       {
          peekedElement = getNextElement();
-         getPrevElement();
-         hasPeeked = true;
+         if(peekedElement == null){
+            throw new NoSuchElementException();
+         }
+         getPrevElement(); //reset to original position
       }
       return peekedElement;
    }
@@ -85,11 +89,12 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> peekPrev()
    {
-      if (!rHasPeeked)
-      {
+      if (rPeekedElement == null){
          rPeekedElement = getPrevElement();
+         if(rPeekedElement == null){
+            throw new NoSuchElementException();
+         }
          getNextElement(); // reset to original position
-         rHasPeeked = true;
       }
       return rPeekedElement;
    }

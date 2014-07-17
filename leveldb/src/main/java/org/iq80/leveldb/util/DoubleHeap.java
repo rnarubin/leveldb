@@ -132,24 +132,24 @@ public class DoubleHeap<E>
       
       return n.data;
    }
-   
+
    public E peekMin(){
       return peekSingle(MIN_HEAP);
    }
-   
+
    public E peekMax(){
       return peekSingle(MAX_HEAP);
    }
-   
+
    private E peekSingle(int whichHeap){
       Node<E> peek = heaps.get(whichHeap).peek();
       return peek==null?null:peek.data;
    }
-   
+
    private static int other(int whichHeap){
       return whichHeap^1;
    }
-   
+
    private static class Heap<E>
    {
       private final Comparator<E> comparator;
@@ -162,7 +162,7 @@ public class DoubleHeap<E>
          this.selfIndex = selfIndex;
          arr = new ArrayList<>();
       }
-      
+
       public void clear(){
          arr.clear();
       }

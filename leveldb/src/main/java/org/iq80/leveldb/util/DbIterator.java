@@ -2,12 +2,12 @@
 package org.iq80.leveldb.util;
 
 import com.google.common.base.Function;
-import com.google.common.primitives.Ints;
 
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
@@ -17,24 +17,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
          InternalIterator
 {
 
-   /*
-    * NOTE: This code has been specifically tuned for performance of the DB iterator methods. Before
-    * committing changes to this code, make sure that the performance of the DB benchmark with the
-    * following parameters has not regressed:
-    * 
-    * --num=10000000 --benchmarks=fillseq,readrandom,readseq,readseq,readseq
-    * 
-    * The code in this class purposely does not use the SeekingIterator interface, but instead used
-    * the concrete implementations. This is because we want the hot spot compiler to inline the code
-    * from the concrete iterators, and this can not happen with truly polymorphic call-sites. If a
-    * future version of hot spot supports inlining of truly polymorphic call-sites, this code can be
-    * made much simpler.
-    */
-
-   private final MemTableIterator memTableIterator;
-   private final MemTableIterator immutableMemTableIterator;
-   private final List<InternalTableIterator> level0Files;
-   private final List<LevelIterator> levels;
+   private final List<OrdinalIterator> ordinalIterators;
 
    private final Comparator<InternalKey> comparator;
 
@@ -46,11 +29,25 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
          List<LevelIterator> levels,
          Comparator<InternalKey> comparator)
    {
-      this.memTableIterator = memTableIterator;
-      this.immutableMemTableIterator = immutableMemTableIterator;
-      this.level0Files = level0Files;
-      this.levels = levels;
       this.comparator = comparator;
+      
+      ordinalIterators = new ArrayList<>();
+      int ordinal = 0;
+      if(memTableIterator != null){
+         ordinalIterators.add(new OrdinalIterator(ordinal++, memTableIterator));
+      }
+      
+      if(immutableMemTableIterator != null){
+         ordinalIterators.add(new OrdinalIterator(ordinal++, immutableMemTableIterator));
+      }
+      for (InternalTableIterator level0File : level0Files)
+      {
+         ordinalIterators.add(new OrdinalIterator(ordinal++, level0File));
+      }
+      for (LevelIterator level : levels)
+      {
+         ordinalIterators.add(new OrdinalIterator(ordinal++, level));
+      }
 
       this.doubleHeap = new DoubleHeap<>(new SmallerNextElementComparator(), new LargerPrevElementComparator());
       resetPriorityQueue();
@@ -59,21 +56,8 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected void seekToFirstInternal()
    {
-      if (memTableIterator != null)
-      {
-         memTableIterator.seekToFirst();
-      }
-      if (immutableMemTableIterator != null)
-      {
-         immutableMemTableIterator.seekToFirst();
-      }
-      for (InternalTableIterator level0File : level0Files)
-      {
-         level0File.seekToFirst();
-      }
-      for (LevelIterator level : levels)
-      {
-         level.seekToFirst();
+      for(OrdinalIterator ord:ordinalIterators){
+         ord.iterator.seekToFirst();
       }
       resetPriorityQueue();
    }
@@ -81,21 +65,8 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected void seekToLastInternal()
    {
-      if (memTableIterator != null)
-      {
-         memTableIterator.seekToLast();
-      }
-      if (immutableMemTableIterator != null)
-      {
-         immutableMemTableIterator.seekToLast();
-      }
-      for (InternalTableIterator level0File : level0Files)
-      {
-         level0File.seekToLast();
-      }
-      for (LevelIterator level : levels)
-      {
-         level.seekToLast();
+      for(OrdinalIterator ord:ordinalIterators){
+         ord.iterator.seekToLast();
       }
       resetPriorityQueue();
    }
@@ -103,21 +74,8 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected void seekInternal(InternalKey targetKey)
    {
-      if (memTableIterator != null)
-      {
-         memTableIterator.seek(targetKey);
-      }
-      if (immutableMemTableIterator != null)
-      {
-         immutableMemTableIterator.seek(targetKey);
-      }
-      for (InternalTableIterator level0File : level0Files)
-      {
-         level0File.seek(targetKey);
-      }
-      for (LevelIterator level : levels)
-      {
-         level.seek(targetKey);
+      for(OrdinalIterator ord:ordinalIterators){
+         ord.iterator.seek(targetKey);
       }
       resetPriorityQueue();
    }
@@ -143,18 +101,16 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
 
       OrdinalIterator largest = doubleHeap.removeMax();
-      boolean edge = !largest.iterator.hasNext();
+      boolean hadNext = largest.iterator.hasNext();
       Entry<InternalKey, Slice> result = largest.iterator.prev();
 
       // if the largest iterator has more elements, put it back in the heap,
       if (largest.iterator.hasPrev())
       {
-         if(edge){
-            doubleHeap.add(largest);
-         }
-         else{
-            doubleHeap.addMax(largest);
-         }
+         doubleHeap.addMax(largest);
+      }
+      if(!hadNext){
+         doubleHeap.addMin(largest);
       }
 
       return result;
@@ -169,18 +125,17 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
 
       OrdinalIterator smallest = doubleHeap.removeMin();
-      boolean edge = !smallest.iterator.hasPrev();
+      boolean hadPrev = smallest.iterator.hasPrev();
       Entry<InternalKey, Slice> result = smallest.iterator.next();
 
-      // if the smallest iterator has more elements, put it back in the heap,
+      // if the smallest iterator has more elements, put it back in the heap
       if (smallest.iterator.hasNext())
       {
-         if(edge){
-            doubleHeap.add(smallest);
-         }
-         else{
-            doubleHeap.addMin(smallest);
-         }
+         doubleHeap.addMin(smallest);
+      }
+      if(!hadPrev){
+         //it must have a prev now because we've advanced to next
+         doubleHeap.addMax(smallest);
       }
 
       return result;
@@ -188,28 +143,13 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
 
    private void resetPriorityQueue()
    {
-      int i = 0;
       doubleHeap.clear();
-      if (memTableIterator != null && memTableIterator.hasNext())
-      {
-         doubleHeap.add(new OrdinalIterator(i++, memTableIterator));
-      }
-      if (immutableMemTableIterator != null && immutableMemTableIterator.hasNext())
-      {
-         doubleHeap.add(new OrdinalIterator(i++, immutableMemTableIterator));
-      }
-      for (InternalTableIterator level0File : level0Files)
-      {
-         if (level0File.hasNext())
-         {
-            doubleHeap.add(new OrdinalIterator(i++, level0File));
+      for(OrdinalIterator ord:ordinalIterators){
+         if(ord.iterator.hasNext()){
+            doubleHeap.addMin(ord);
          }
-      }
-      for (LevelIterator level : levels)
-      {
-         if (level.hasNext())
-         {
-            doubleHeap.add(new OrdinalIterator(i++, level));
+         if(ord.iterator.hasPrev()){
+            doubleHeap.addMax(ord);
          }
       }
    }
@@ -219,10 +159,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    {
       final StringBuilder sb = new StringBuilder();
       sb.append("DbIterator");
-      sb.append("{memTableIterator=").append(memTableIterator);
-      sb.append(", immutableMemTableIterator=").append(immutableMemTableIterator);
-      sb.append(", level0Files=").append(level0Files);
-      sb.append(", levels=").append(levels);
+      sb.append("{iterators=").append(ordinalIterators);
       sb.append(", comparator=").append(comparator);
       sb.append('}');
       return sb.toString();
@@ -299,7 +236,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
             {
                //both iterators have a next element
                int result = comparator.compare(peekFollowing.apply(o1), peekFollowing.apply(o2));
-               return result == 0 ? Ints.compare(o1.ordinal, o2.ordinal) : result;
+               return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
             }
             return -1; //o2 does not have a next element, consider o1 less than the empty o2
          }

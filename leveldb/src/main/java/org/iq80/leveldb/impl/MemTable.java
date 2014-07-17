@@ -24,6 +24,7 @@ import org.testng.collections.Lists;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -122,14 +123,19 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
          // equal to the target
          // this would not be compatible with reverse iteration
          // iterator = Iterators.peekingIterator(table.tailMap(targetKey).entrySet().iterator());
+         Set<Entry<InternalKey, Slice>> set = table.tailMap(targetKey).entrySet();
 
-         // instead, use the whole entry set and search for the target key
-         // keySet() returns a sorted ascending list, so we go with binary search
+         // instead, find the smallest key greater than or equal to the targetKey in the table
+          Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
+          if(ceiling == null){ //no keys >= targetKey
+             return;
+          }
+          //then initialize the iterator at that key's location within the entryset (find the index with binary search)
          List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
          List<InternalKey> keyList = Lists.newArrayList(table.keySet());
          iterator =
                ReverseIterators.reversePeekingIterator(entryList.listIterator(Collections.binarySearch(
-                     keyList, targetKey, table.comparator())));
+                     keyList, ceiling.getKey(), table.comparator())));
       }
 
       @Override

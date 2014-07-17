@@ -19,6 +19,7 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
+import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
@@ -111,6 +112,10 @@ public class BlockTest
 
     private void blockTest(int blockRestartInterval, List<BlockEntry> entries)
     {
+       List<BlockEntry> reverseEntries = Arrays.asList(new BlockEntry[entries.size()]); 
+       Collections.copy(reverseEntries, entries);
+       Collections.reverse(reverseEntries);
+
         BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator());
 
         for (BlockEntry entry : entries) {
@@ -125,13 +130,23 @@ public class BlockTest
         assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
         BlockIterator blockIterator = block.iterator();
+        Assert.assertFalse(blockIterator.hasPrev());
         BlockHelper.assertSequence(blockIterator, entries);
+        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
 
         blockIterator.seekToFirst();
+        Assert.assertFalse(blockIterator.hasPrev());
+        BlockHelper.assertSequence(blockIterator, entries);
+        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+
+        blockIterator.seekToLast();
+        Assert.assertFalse(blockIterator.hasNext());
+        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
         BlockHelper.assertSequence(blockIterator, entries);
 
         for (BlockEntry entry : entries) {
             List<BlockEntry> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
+            List<BlockEntry> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());
             blockIterator.seek(entry.getKey());
             BlockHelper.assertSequence(blockIterator, nextEntries);
 
@@ -140,6 +155,15 @@ public class BlockTest
 
             blockIterator.seek(BlockHelper.after(entry));
             BlockHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
+
+            blockIterator.seek(BlockHelper.before(entry));
+            BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+
+            blockIterator.seek(entry.getKey());
+            BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+
+            blockIterator.seek(BlockHelper.after(entry));
+            BlockHelper.assertReverseSequence(blockIterator, prevEntries);
         }
 
         blockIterator.seek(Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));

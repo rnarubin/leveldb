@@ -18,7 +18,9 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
+
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
@@ -36,6 +38,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import junit.framework.Assert;
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertTrue;
 
@@ -115,6 +118,10 @@ abstract public class TableTest
     private void tableTest(int blockSize, int blockRestartInterval, List<BlockEntry> entries)
             throws IOException
     {
+       List<BlockEntry> reverseEntries = Arrays.asList(new BlockEntry[entries.size()]); 
+       Collections.copy(reverseEntries, entries);
+       Collections.reverse(reverseEntries);
+       
         reopenFile();
         Options options = new Options().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
         TableBuilder builder = new TableBuilder(options, fileChannel, new BytewiseComparator());
@@ -126,10 +133,19 @@ abstract public class TableTest
 
         Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true);
 
-        SeekingIterator<Slice, Slice> seekingIterator = table.iterator();
+        ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
+        Assert.assertFalse(seekingIterator.hasPrev());
         BlockHelper.assertSequence(seekingIterator, entries);
+        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToFirst();
+        Assert.assertFalse(seekingIterator.hasPrev());
+        BlockHelper.assertSequence(seekingIterator, entries);
+        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+
+        seekingIterator.seekToLast();
+        Assert.assertFalse(seekingIterator.hasNext());
+        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
         BlockHelper.assertSequence(seekingIterator, entries);
 
         long lastApproximateOffset = 0;

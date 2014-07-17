@@ -25,6 +25,7 @@ import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.iq80.leveldb.util.SliceOutput;
 
 import java.util.Comparator;
+import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
@@ -34,6 +35,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    private final SliceInput data;
    private final Slice restartPositions;
    private final int restartCount;
+   private int prevPosition;
    private int restartIndex;
    private final Comparator<Slice> comparator;
 
@@ -52,7 +54,6 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
       this.restartPositions = restartPositions.slice();
       this.restartCount = this.restartPositions.length() / SIZE_OF_INT;
-      this.restartIndex = restartCount;
 
       this.comparator = comparator;
 
@@ -68,7 +69,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public boolean hasPrev()
    {
-      return prevEntry != null;
+      return prevEntry != null || currentPosition() > 0;
    }
 
    @Override
@@ -84,8 +85,13 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public BlockEntry peekPrev()
    {
-      if (!hasPrev())
-      {
+      if(prevEntry == null && currentPosition() > 0){
+         //this case should only occur after seeking under certain conditions
+         BlockEntry peeked = prev();
+         next();
+         prevEntry = peeked;
+      }
+      else if(prevEntry == null){
          throw new NoSuchElementException();
       }
       return prevEntry;
@@ -99,7 +105,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
          throw new NoSuchElementException();
       }
 
-      BlockEntry entry = nextEntry;
+      prevEntry = nextEntry;
 
       if (!data.isReadable())
       {
@@ -108,34 +114,45 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       else
       {
          // read entry at current data position
-         prevEntry = nextEntry;
-         nextEntry = readEntryAndAdvanceIndex(data, prevEntry);
+         nextEntry = readEntry(data, prevEntry);
       }
-
-      return entry;
+      return prevEntry;
    }
 
    @Override
    public BlockEntry prev()
    {
-      if (!hasPrev())
-      {
+      int original = currentPosition();
+      if(original == 0){
          throw new NoSuchElementException();
       }
-
-      BlockEntry entry = prevEntry;
-
-      if (data.position() <= 0)
-      {
-         prevEntry = null;
-      }
-      else
-      {
-         nextEntry = prevEntry;
-         prevEntry = readPreviousEntryAndAdvanceIndex(data, nextEntry);
+      
+      seekToRestartPosition(getPreviousRestart(restartIndex, original));
+      while(data.position() < original && data.isReadable()){
+         prevEntry = nextEntry;
+         nextEntry = readEntry(data, prevEntry);
       }
 
-      return entry;
+      return nextEntry;
+   }
+   
+   private int getPreviousRestart(int startIndex, int position){
+      while(getRestartPoint(startIndex) >= position){
+         if(startIndex == 0){
+            throw new NoSuchElementException();
+         }
+         startIndex--;
+      }
+      return startIndex;
+   }
+   
+   private int currentPosition(){
+      //lags data.position because of the nextEntry read-ahead
+      if(nextEntry != null){
+         //return data.position() - (nextEntry.getKey().length() + nextEntry.getValue().length());
+         return prevPosition;
+      }
+      return data.position();
    }
 
    @Override
@@ -159,11 +176,9 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public void seekToLast()
    {
-      if (restartCount > 0)
-      {
-         seekToRestartPosition(restartCount - 1);
-         while (nextEntry != null)
-         {
+      if(restartCount > 0){
+         seekToRestartPosition(Math.max(0, restartCount-1));
+         while(hasNext()){
             next();
          }
       }
@@ -211,19 +226,10 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       {
          if (comparator.compare(peek().getKey(), targetKey) >= 0)
          {
-            if (prevEntry == null && left > 0)
-            {
-               prevEntry = readPreviousEntry(left - 1, nextEntry);
-            }
             break;
          }
       }
 
-   }
-
-   private int getRestartPoint(int index)
-   {
-      return restartPositions.getInt(index * SIZE_OF_INT);
    }
 
    /**
@@ -242,11 +248,15 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       // clear the entries to assure key is not prefixed
       nextEntry = null;
       prevEntry = null;
-
+      
       restartIndex = restartPosition;
 
-      // read the next entry
-      nextEntry = readEntry(data, prevEntry);
+      // read the entry
+      nextEntry = readEntry(data, null);
+   }
+   
+   private int getRestartPoint(int index){
+      return restartPositions.getInt(index * SIZE_OF_INT);
    }
 
    /**
@@ -255,9 +265,11 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
     * 
     * @return true if an entry was read
     */
-   private static BlockEntry readEntry(SliceInput data, BlockEntry previousEntry)
+   private BlockEntry readEntry(SliceInput data, BlockEntry previousEntry)
    {
       Preconditions.checkNotNull(data, "data is null");
+
+      prevPosition = data.position();
 
       // read entry header
       int sharedKeyLength = VariableLengthQuantity.readVariableLengthInt(data);
@@ -280,44 +292,4 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
       return new BlockEntry(key, value);
    }
-
-   private BlockEntry readEntryAndAdvanceIndex(SliceInput data, BlockEntry previousEntry)
-   {
-      BlockEntry ret = readEntry(data, previousEntry);
-
-      while (restartIndex + 1 < restartCount && getRestartPoint(restartIndex + 1) < data.position())
-      {
-         restartIndex++;
-      }
-
-      return ret;
-
-   }
-
-   private BlockEntry readPreviousEntry(int restartPosition, BlockEntry target)
-   {
-      data.setPosition(getRestartPoint(restartPosition));
-      BlockEntry prev = null;
-      BlockEntry entry = readEntry(data, prev);
-      while (!entry.equals(target))
-      {
-         prev = entry;
-         entry = readEntry(data, prev);
-      }
-      return prev;
-   }
-
-   private BlockEntry readPreviousEntryAndAdvanceIndex(SliceInput data, BlockEntry nextEntry)
-   {
-      BlockEntry ret = readPreviousEntry(restartIndex, nextEntry);
-
-      while (restartIndex + 1 < restartCount && getRestartPoint(restartIndex + 1) < data.position())
-      {
-         restartIndex++;
-      }
-
-      return ret;
-
-   }
-
 }
