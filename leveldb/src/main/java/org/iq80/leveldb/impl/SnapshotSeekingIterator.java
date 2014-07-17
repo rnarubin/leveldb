@@ -36,6 +36,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
     //indicates whether the iterator has been advanced to the next or previous user entry with the appropriate snapshot version
     private ValidDirection snapshotValidDirection = NONE;
     
+    private Slice lastNext, lastPrev;
+    
     protected enum ValidDirection{
        NEXT, PREV, NONE
     }
@@ -77,13 +79,16 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
     @Override
     protected Entry<Slice, Slice> getNextElement()
     {
-        findNextUserEntry(null);
+        //findNextUserEntry(lastNext);
+        findNextUserEntry();
 
         if (!iterator.hasNext()) {
             return null;
         }
 
         Entry<InternalKey, Slice> next = iterator.next();
+        lastNext = next.getKey().getUserKey();
+        lastPrev = null;
         snapshotValidDirection = PREV;
 
         return Maps.immutableEntry(next.getKey().getUserKey(), next.getValue());
@@ -92,19 +97,23 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected Entry<Slice, Slice> getPrevElement()
    {
-        findPrevUserEntry(null);
+        //findPrevUserEntry(lastPrev);
+        findPrevUserEntry();
 
         if (!iterator.hasPrev()) {
             return null;
         }
 
         Entry<InternalKey, Slice> prev = iterator.prev();
+        lastNext = null;
+        lastPrev = prev.getKey().getUserKey();
         snapshotValidDirection = NEXT;
 
         return Maps.immutableEntry(prev.getKey().getUserKey(), prev.getValue());
    }
 
-    private void findNextUserEntry(Slice deletedKey)
+    //private void findNextUserEntry(Slice deletedKey)
+    private void findNextUserEntry()
     {
       /*
        * when reverse iteration was not implemented, the snapshot iterator was always kept in a
@@ -118,6 +127,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
        if(snapshotValidDirection == NEXT){
           return;
        }
+
+       Slice deletedKey = snapshotValidDirection==PREV?iterator.peekPrev().getKey().getUserKey():null;
 
        while(iterator.hasNext()){
             // Peek the next entry and parse the key
@@ -149,11 +160,13 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
        snapshotValidDirection = NEXT;
     }
 
-    private void findPrevUserEntry(Slice deletedKey)
+    //private void findPrevUserEntry(Slice deletedKey)
+    private void findPrevUserEntry()
     {
         if (snapshotValidDirection == PREV) {
             return;
         }
+       Slice deletedKey = snapshotValidDirection==NEXT?iterator.peek().getKey().getUserKey():null;
 
         while (iterator.hasPrev()){
             // Peek the previous entry and parse the key
@@ -196,14 +209,14 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected boolean hasNextInternal()
    {
-      findNextUserEntry(null);
+      findNextUserEntry();
       return iterator.hasNext();
    }
 
    @Override
    protected boolean hasPrevInternal()
    {
-      findPrevUserEntry(null);
+      findPrevUserEntry();
       return iterator.hasPrev();
    }
 
