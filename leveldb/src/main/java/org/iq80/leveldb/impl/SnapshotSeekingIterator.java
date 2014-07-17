@@ -128,7 +128,10 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
           return;
        }
 
-       Slice deletedKey = snapshotValidDirection==PREV?iterator.peekPrev().getKey().getUserKey():null;
+      Slice deletedKey =
+            snapshotValidDirection == PREV && iterator.hasPrev()
+                  ? iterator.peekPrev().getKey().getUserKey()
+                  : null;
 
        while(iterator.hasNext()){
             // Peek the next entry and parse the key
@@ -166,7 +169,10 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
         if (snapshotValidDirection == PREV) {
             return;
         }
-       Slice deletedKey = snapshotValidDirection==NEXT?iterator.peek().getKey().getUserKey():null;
+      Slice deletedKey =
+            snapshotValidDirection == NEXT && iterator.hasNext()
+                  ? iterator.peek().getKey().getUserKey()
+                  : null;
 
         while (iterator.hasPrev()){
             // Peek the previous entry and parse the key

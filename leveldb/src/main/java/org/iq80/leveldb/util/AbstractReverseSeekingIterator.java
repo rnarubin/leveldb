@@ -3,12 +3,9 @@ package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
-import com.google.common.base.Function;
 
-import java.security.NoSuchAlgorithmException;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
-import java.util.concurrent.Callable;
 
 public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSeekingIterator<K, V>
 {

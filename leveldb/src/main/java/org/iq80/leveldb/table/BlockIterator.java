@@ -25,7 +25,6 @@ import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.iq80.leveldb.util.SliceOutput;
 
 import java.util.Comparator;
-import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;

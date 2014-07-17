@@ -128,6 +128,9 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
          // instead, find the smallest key greater than or equal to the targetKey in the table
           Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
           if(ceiling == null){ //no keys >= targetKey
+             if(table.size() > 0){
+                seekToLast();
+             }
              return;
           }
           //then initialize the iterator at that key's location within the entryset (find the index with binary search)

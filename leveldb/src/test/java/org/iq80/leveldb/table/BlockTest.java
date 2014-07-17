@@ -19,7 +19,6 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
-import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
@@ -130,17 +129,17 @@ public class BlockTest
         assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
         BlockIterator blockIterator = block.iterator();
-        Assert.assertFalse(blockIterator.hasPrev());
+        BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry>emptyList());
         BlockHelper.assertSequence(blockIterator, entries);
         BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
 
         blockIterator.seekToFirst();
-        Assert.assertFalse(blockIterator.hasPrev());
+        BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry>emptyList());
         BlockHelper.assertSequence(blockIterator, entries);
         BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
 
         blockIterator.seekToLast();
-        Assert.assertFalse(blockIterator.hasNext());
+        BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry>emptyList());
         BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
         BlockHelper.assertSequence(blockIterator, entries);
 

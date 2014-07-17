@@ -26,7 +26,6 @@ import org.iq80.leveldb.util.Slices;
 import org.testng.Assert;
 
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;

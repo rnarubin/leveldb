@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
+
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
@@ -56,6 +57,7 @@ import static org.iq80.leveldb.CompressionType.NONE;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.table.BlockHelper.afterString;
 import static org.iq80.leveldb.table.BlockHelper.assertSequence;
+import static org.iq80.leveldb.table.BlockHelper.assertReverseSequence;
 import static org.iq80.leveldb.table.BlockHelper.beforeString;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -875,6 +877,9 @@ public class DbImplTest
     private void testDb(DbStringWrapper db, List<Entry<String, String>> entries)
             throws IOException
     {
+       
+       List<Entry<String, String>> reverseEntries = newArrayList(entries);
+       Collections.reverse(reverseEntries);
 
         for (Entry<String, String> entry : entries) {
             db.put(entry.getKey(), entry.getValue());
@@ -885,14 +890,24 @@ public class DbImplTest
             assertEquals(actual, entry.getValue(), "Key: " + entry.getKey());
         }
 
-        SeekingIterator<String, String> seekingIterator = db.iterator();
+        ReverseSeekingIterator<String, String> seekingIterator = db.iterator();
+        assertReverseSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
         assertSequence(seekingIterator, entries);
+        assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToFirst();
+        assertReverseSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
+        assertSequence(seekingIterator, entries);
+        assertReverseSequence(seekingIterator, reverseEntries);
+
+        seekingIterator.seekToLast();
+        assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
+        assertReverseSequence(seekingIterator, reverseEntries);
         assertSequence(seekingIterator, entries);
 
         for (Entry<String, String> entry : entries) {
             List<Entry<String, String>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
+            List<Entry<String, String>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());
             seekingIterator.seek(entry.getKey());
             assertSequence(seekingIterator, nextEntries);
 
@@ -901,6 +916,15 @@ public class DbImplTest
 
             seekingIterator.seek(afterString(entry));
             assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+
+            seekingIterator.seek(beforeString(entry));
+            assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
+
+            seekingIterator.seek(entry.getKey());
+            assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
+
+            seekingIterator.seek(afterString(entry));
+            assertReverseSequence(seekingIterator, prevEntries);
         }
 
         Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
@@ -1106,7 +1130,7 @@ public class DbImplTest
             db.delete(toByteArray(key));
         }
 
-        public SeekingIterator<String, String> iterator()
+        public ReverseSeekingIterator<String, String> iterator()
         {
             return new StringDbIterator(db.iterator());
         }
@@ -1202,7 +1226,7 @@ public class DbImplTest
 
     }
 
-    private static class StringDbIterator implements SeekingIterator<String, String>
+    private static class StringDbIterator implements ReverseSeekingIterator<String, String>
     {
         private DBIterator iterator;
 
@@ -1251,5 +1275,29 @@ public class DbImplTest
         {
             return Maps.immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
         }
+
+      @Override
+      public Entry<String, String> peekPrev()
+      {
+         return adapt(iterator.peekPrev());
+      }
+
+      @Override
+      public Entry<String, String> prev()
+      {
+         return adapt(iterator.prev());
+      }
+
+      @Override
+      public boolean hasPrev()
+      {
+         return iterator.hasPrev();
+      }
+
+      @Override
+      public void seekToLast()
+      {
+         iterator.seekToLast();
+      }
     }
 }
