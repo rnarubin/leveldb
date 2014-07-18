@@ -3,25 +3,36 @@ package org.iq80.leveldb.util;
 
 import com.google.common.base.Function;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
+
+import static org.iq80.leveldb.util.DbIterator.ValidQuickCheck.*;
 
 public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey, Slice>
       implements
          InternalIterator
 {
 
-   private final List<OrdinalIterator> ordinalIterators;
+   private final ArrayList<OrdinalIterator> ordinalIterators;
+   private final ElementComparator smallerNext, largerPrev;
+   private ValidQuickCheck quickCheck = NONE;
 
    private final Comparator<InternalKey> comparator;
 
-   private final DoubleHeap<OrdinalIterator> doubleHeap;
+   //private final DoubleHeap<OrdinalIterator> doubleHeap;
+   protected enum ValidQuickCheck{
+      //indicates whether the ordinal iterators list can be checked at index 0 or size-1 for the min or max item respectively
+      MIN, MAX, NONE
+   }
 
    public DbIterator(MemTableIterator memTableIterator,
          MemTableIterator immutableMemTableIterator,
@@ -48,8 +59,11 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       {
          ordinalIterators.add(new OrdinalIterator(ordinal++, level));
       }
+      
+      smallerNext = new SmallerNextElementComparator();
+      largerPrev = new LargerPrevElementComparator();
 
-      this.doubleHeap = new DoubleHeap<>(new SmallerNextElementComparator(), new LargerPrevElementComparator());
+      //this.doubleHeap = new DoubleHeap<>(new SmallerNextElementComparator(), new LargerPrevElementComparator());
       resetPriorityQueue();
    }
 
@@ -79,22 +93,84 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
       resetPriorityQueue();
    }
+   
+   private boolean hasExtreme(Function<ReverseSeekingIterator<InternalKey, Slice>, Boolean> hasFollowing){ 
+      for(OrdinalIterator ord:ordinalIterators){
+         if(hasFollowing.apply(ord.iterator)){
+            return true;
+         }
+      }
+      return false;
+   }
+
+   private boolean hasMin(){
+      return hasExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasNext());
+   }
+
+   private boolean hasMax(){
+      return hasExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasPrev());
+   }
+   
+   private ReverseSeekingIterator<InternalKey, Slice> extremeToEnd(Function<ReverseSeekingIterator<InternalKey, Slice>, Boolean> hasFollowing, ElementComparator elemCompare, final ValidQuickCheck quickCheckDirection, final int endIndex){
+      /*
+       * in the DoubleHeap approach it proved difficult to coordinate the two heaps when reverse iterations is necessary
+       * instead, just perform linear search of the iterators for the min or max item
+       * there tends to be only a small number of iterators (less than 10) even when the database contains a substantial number of items (in the millions)
+       */
+      int extremeIndex = endIndex; //minIndex = 0 or maxIndex = list.size()-1
+      OrdinalIterator extreme = ordinalIterators.get(extremeIndex);
+
+      if(quickCheck != quickCheckDirection){ //quickCheck != MIN or != MAX
+         for(int i = 0; i < ordinalIterators.size(); i++){
+            OrdinalIterator following = ordinalIterators.get(i);
+            if(hasFollowing.apply(following.iterator) && (!hasFollowing.apply(extreme.iterator) || elemCompare.compare(following, extreme) < 0)){
+               //if the following iterator hasNext (or hasPrev, larger, etc.) and the current minimum does not
+               //or if the following is simply smaller
+               //we've found a new minimum
+               extremeIndex = i;
+               extreme = following;
+            }
+         }
+         Collections.swap(ordinalIterators, extremeIndex, endIndex); //move the min to 0 or max to list.size()-1
+         quickCheck = quickCheckDirection; //keep record of this for quick lookup
+      }
+
+      return extreme.iterator;
+      
+   }
+
+   private ReverseSeekingIterator<InternalKey, Slice> minToFront(){
+      return extremeToEnd(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasNext(), smallerNext, MIN, 0);
+   }
+
+   private ReverseSeekingIterator<InternalKey, Slice> maxToBack(){
+      return extremeToEnd(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasPrev(), largerPrev, MAX, ordinalIterators.size()-1);
+   }
 
    @Override
    protected boolean hasNextInternal()
    {
-      return doubleHeap.sizeMin() > 0 && doubleHeap.peekMin().iterator.hasNext();
+      return (quickCheck == MIN && ordinalIterators.get(0).iterator.hasNext()) || hasMin();
    }
 
    @Override
    protected boolean hasPrevInternal()
    {
-      return doubleHeap.sizeMax() > 0 && doubleHeap.peekMax().iterator.hasPrev();
+      return (quickCheck == MAX && ordinalIterators.get(ordinalIterators.size()-1).iterator.hasPrev()) || hasMin();
    }
 
    @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
+      if(!hasPrevInternal()){
+         return null;
+      }
+
+      Entry<InternalKey, Slice> max = maxToBack().prev();
+      quickCheck = NONE;
+      
+      return max;
+      /*
       if (doubleHeap.sizeMax() == 0)
       {
          return null;
@@ -109,16 +185,27 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       {
          doubleHeap.addMax(largest);
       }
-      if(!hadNext){
+      //if(!hadNext){
+      if(largest.iterator.hasNext()){
          doubleHeap.addMin(largest);
       }
 
       return result;
+      */
    }
 
    @Override
    protected Entry<InternalKey, Slice> getNextElement()
    {
+      if(!hasNextInternal()){
+         return null;
+      }
+      
+      Entry<InternalKey, Slice> min = minToFront().next();
+      quickCheck = NONE; //min just advanced, quick check isn't valid to check the min
+
+      return min;
+      /*
       if (doubleHeap.sizeMin() == 0)
       {
          return null;
@@ -133,17 +220,20 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       {
          doubleHeap.addMin(smallest);
       }
-      if(!hadPrev){
-         //it must have a prev now because we've advanced to next
+      //if(!hadPrev){
+      if(smallest.iterator.hasPrev()){
          doubleHeap.addMax(smallest);
       }
 
       return result;
+      */
    }
 
    private void resetPriorityQueue()
    {
-      doubleHeap.clear();
+      quickCheck = NONE;
+      //doubleHeap.clear();
+      /*
       for(OrdinalIterator ord:ordinalIterators){
          if(ord.iterator.hasNext()){
             doubleHeap.addMin(ord);
@@ -152,6 +242,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
             doubleHeap.addMax(ord);
          }
       }
+      */
    }
 
    @Override

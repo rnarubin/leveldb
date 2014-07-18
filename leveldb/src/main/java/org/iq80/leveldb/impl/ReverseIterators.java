@@ -19,19 +19,18 @@
 package org.iq80.leveldb.impl;
 
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.Map.Entry;
 
-import org.iq80.leveldb.DBIterator;
-
+import com.google.common.base.Function;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Lists;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
-public final class ReverseIterators<E>
+public final class ReverseIterators
 {
 
    // reimplements several methods and classes from com.google.common.collect.Iterators
@@ -83,6 +82,21 @@ public final class ReverseIterators<E>
       return new ReversePeekingImpl<T>(iterator);
    }
    
+   public static <T extends Iterator<?>> Function<T, Boolean> hasNext(){
+      return new Function<T, Boolean>(){
+         public Boolean apply(T iter){
+            return iter.hasNext();
+         }
+      };
+   }
+   
+   public static <T extends ReverseIterator<?>> Function<T, Boolean> hasPrev(){
+      return new Function<T, Boolean>(){
+         public Boolean apply(T iter){
+            return iter.hasPrev();
+         }
+      };
+   }
 
    private static class ListReverseIterator<E> implements ReverseIterator<E>
    {
@@ -208,57 +222,4 @@ public final class ReverseIterators<E>
       }
    }
 
-   public static ReverseSeekingIterator<byte[], byte[]> wrap(final DBIterator dbIter){
-      return new ReverseSeekingIterator<byte[], byte[]>(){
-         @Override
-         public void seekToFirst(){
-            dbIter.seekToFirst();
-         }
-
-         @Override
-         public void seek(byte[] targetKey){
-            dbIter.seek(targetKey);
-         }
-
-         @Override
-         public Entry<byte[], byte[]> peek(){
-            return dbIter.peekNext();
-         }
-
-         @Override
-         public Entry<byte[], byte[]> next(){
-            return dbIter.next();
-         }
-
-         @Override
-         public void remove(){
-            dbIter.remove();
-         }
-
-         @Override
-         public boolean hasNext(){
-            return dbIter.hasNext();
-         }
-
-         @Override
-         public Entry<byte[], byte[]> peekPrev(){
-            return dbIter.peekPrev();
-         }
-
-         @Override
-         public Entry<byte[], byte[]> prev(){
-            return dbIter.prev();
-         }
-
-         @Override
-         public boolean hasPrev(){
-            return dbIter.hasPrev();
-         }
-
-         @Override
-         public void seekToLast(){
-            dbIter.seekToLast();
-         }
-      };
-   }
 }
