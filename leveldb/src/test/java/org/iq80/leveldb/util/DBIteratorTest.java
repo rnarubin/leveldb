@@ -97,7 +97,7 @@ public class DBIteratorTest extends TestCase
 
       StringDbIterator actual = new StringDbIterator(db.iterator());
       int i = 0;
-      for(Entry<String, String> expected:entries)
+      for (Entry<String, String> expected : entries)
       {
          assertTrue(actual.hasNext());
          Entry<String, String> p = actual.peek();
@@ -120,7 +120,7 @@ public class DBIteratorTest extends TestCase
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToLast();
       int i = 0;
-      for(Entry<String, String> expected:entries)
+      for (Entry<String, String> expected : entries)
       {
          assertTrue(actual.hasPrev());
          assertEquals("Item #" + i + " peek mismatch", expected, actual.peekPrev());
@@ -144,7 +144,8 @@ public class DBIteratorTest extends TestCase
             ReverseIterators.reversePeekingIterator(entries);
       ReverseSeekingIterator<String, String> actual = new StringDbIterator(db.iterator());
 
-      // take mixed forward and backward steps up the list then down the list (favoring forward to reach the end, then backward)
+      // take mixed forward and backward steps up the list then down the list (favoring forward to
+// reach the end, then backward)
       int pos = 0;
       int randForward = 12, randBack = 4;// [-4, 7] inclusive, initially favor forward steps
       int steps = randForward + 1;
@@ -181,17 +182,20 @@ public class DBIteratorTest extends TestCase
          steps = rand.nextInt(randForward) - randBack;
       } while (pos > 0);
    }
-   
-   public boolean hasFollowing(int direction, ReverseIterator<?> iter){
-      return direction<0?iter.hasPrev():iter.hasNext();
+
+   public boolean hasFollowing(int direction, ReverseIterator<?> iter)
+   {
+      return direction < 0 ? iter.hasPrev() : iter.hasNext();
    }
-   
-   public <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter){
-      return direction<0?iter.peekPrev():iter.peek();
+
+   public <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter)
+   {
+      return direction < 0 ? iter.peekPrev() : iter.peek();
    }
-   
-   public <T> T getFollowing(int direction, ReverseIterator<T> iter){
-      return direction<0?iter.prev():iter.next();
+
+   public <T> T getFollowing(int direction, ReverseIterator<T> iter)
+   {
+      return direction < 0 ? iter.prev() : iter.next();
    }
 
    private static class StringDbIterator implements ReverseSeekingIterator<String, String>

@@ -148,7 +148,6 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    private int currentPosition(){
       //lags data.position because of the nextEntry read-ahead
       if(nextEntry != null){
-         //return data.position() - (nextEntry.getKey().length() + nextEntry.getValue().length());
          return prevPosition;
       }
       return data.position();

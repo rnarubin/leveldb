@@ -119,13 +119,7 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seek(InternalKey targetKey)
       {
-         // previous implementation; returns a view of the map only containing keys greater than or
-         // equal to the target
-         // this would not be compatible with reverse iteration
-         // iterator = Iterators.peekingIterator(table.tailMap(targetKey).entrySet().iterator());
-         Set<Entry<InternalKey, Slice>> set = table.tailMap(targetKey).entrySet();
-
-         // instead, find the smallest key greater than or equal to the targetKey in the table
+         // find the smallest key greater than or equal to the targetKey in the table
           Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
           if(ceiling == null){ //no keys >= targetKey
              if(table.size() > 0){

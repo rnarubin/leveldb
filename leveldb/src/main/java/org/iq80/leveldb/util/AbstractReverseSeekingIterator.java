@@ -3,7 +3,6 @@ package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
-
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
@@ -50,7 +49,8 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    {
       peekedElement = null;
       Entry<K, V> next = getNextElement();
-      if(next == null){
+      if (next == null)
+      {
          throw new NoSuchElementException();
       }
       rPeekedElement = next;
@@ -62,7 +62,8 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    {
       rPeekedElement = null;
       Entry<K, V> prev = getPrevElement();
-      if(prev == null){
+      if (prev == null)
+      {
          throw new NoSuchElementException();
       }
       peekedElement = prev;
@@ -75,10 +76,11 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
       if (peekedElement == null)
       {
          peekedElement = getNextElement();
-         if(peekedElement == null){
+         if (peekedElement == null)
+         {
             throw new NoSuchElementException();
          }
-         getPrevElement(); //reset to original position
+         getPrevElement(); // reset to original position
       }
       return peekedElement;
    }
@@ -86,9 +88,11 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> peekPrev()
    {
-      if (rPeekedElement == null){
+      if (rPeekedElement == null)
+      {
          rPeekedElement = getPrevElement();
-         if(rPeekedElement == null){
+         if (rPeekedElement == null)
+         {
             throw new NoSuchElementException();
          }
          getNextElement(); // reset to original position
@@ -103,10 +107,16 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    }
 
    protected abstract void seekToLastInternal();
+
    protected abstract void seekToFirstInternal();
+
    protected abstract void seekInternal(K targetKey);
+
    protected abstract boolean hasNextInternal();
+
    protected abstract boolean hasPrevInternal();
+
    protected abstract Entry<K, V> getNextElement();
+
    protected abstract Entry<K, V> getPrevElement();
 }

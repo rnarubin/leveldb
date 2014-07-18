@@ -99,9 +99,10 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    
    private ReverseSeekingIterator<InternalKey, Slice> getExtreme(Function<ReverseSeekingIterator<InternalKey, Slice>, Boolean> hasFollowing, ElementComparator elemCompare){
       /*
-       * in the DoubleHeap approach it proved difficult to coordinate the two heaps when reverse iterations is necessary
+       * in the DoubleHeap approach it proved difficult to coordinate the two heaps when reverse iteration is necessary
        * instead, just perform linear search of the iterators for the min or max item
        * there tends to be only a small number of iterators (less than 10) even when the database contains a substantial number of items (in the millions)
+       * (the c++ implementation, as of this writing, also uses linear search)
        */
       OrdinalIterator extreme = ordinalIterators.get(0);
 
