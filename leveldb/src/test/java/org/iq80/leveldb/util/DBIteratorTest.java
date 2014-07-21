@@ -54,11 +54,11 @@ public class DBIteratorTest extends TestCase
       Random rand = new Random(0);
 
       entries = new ArrayList<>();
-      int items = 100_000;
+      int items = 10_000_000;
       for (int i = 0; i < items; i++)
       {
          StringBuilder sb = new StringBuilder();
-         for (int j = 0; j < 20; j++)
+         for (int j = 0; j < 30; j++)
          {
             sb.append((char) ('a' + rand.nextInt(26)));
          }
@@ -90,7 +90,7 @@ public class DBIteratorTest extends TestCase
    {
       for (Entry<String, String> e : entries)
       {
-         db.put(e.getKey().getBytes(), e.getValue().getBytes());
+         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
       }
 
       Collections.sort(entries, new StringDbIterator.EntryCompare());
@@ -112,7 +112,7 @@ public class DBIteratorTest extends TestCase
    {
       for (Entry<String, String> e : entries)
       {
-         db.put(e.getKey().getBytes(), e.getValue().getBytes());
+         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
       }
 
       Collections.sort(entries, new StringDbIterator.ReverseEntryCompare());
@@ -123,8 +123,10 @@ public class DBIteratorTest extends TestCase
       for (Entry<String, String> expected : entries)
       {
          assertTrue(actual.hasPrev());
-         assertEquals("Item #" + i + " peek mismatch", expected, actual.peekPrev());
-         assertEquals("Item #" + i + " mismatch", expected, actual.prev());
+         Entry<String, String> p = actual.peekPrev();
+         assertEquals("Item #" + i + " peek mismatch", expected, p);
+         Entry<String, String> n = actual.prev();
+         assertEquals("Item #" + i + " mismatch", expected, n);
          i++;
       }
    }
@@ -135,7 +137,7 @@ public class DBIteratorTest extends TestCase
 
       for (Entry<String, String> e : entries)
       {
-         db.put(e.getKey().getBytes(), e.getValue().getBytes());
+         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
       }
 
       Collections.sort(entries, new StringDbIterator.EntryCompare());

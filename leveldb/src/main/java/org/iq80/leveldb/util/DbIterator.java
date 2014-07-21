@@ -2,6 +2,7 @@
 package org.iq80.leveldb.util;
 
 import com.google.common.base.Function;
+import com.google.common.base.Predicate;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.iq80.leveldb.impl.InternalKey;
@@ -80,7 +81,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
    
-   private boolean hasExtreme(Function<ReverseSeekingIterator<InternalKey, Slice>, Boolean> hasFollowing){ 
+   private boolean hasExtreme(Predicate<ReverseSeekingIterator<InternalKey, Slice>> hasFollowing){ 
       for(OrdinalIterator ord:ordinalIterators){
          if(hasFollowing.apply(ord.iterator)){
             return true;
@@ -97,7 +98,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       return hasExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasPrev());
    }
    
-   private ReverseSeekingIterator<InternalKey, Slice> getExtreme(Function<ReverseSeekingIterator<InternalKey, Slice>, Boolean> hasFollowing, ElementComparator elemCompare){
+   private ReverseSeekingIterator<InternalKey, Slice> getExtreme(Predicate<ReverseSeekingIterator<InternalKey, Slice>> hasFollowing, ElementComparator elemCompare){
       /*
        * in the DoubleHeap approach it proved difficult to coordinate the two heaps when reverse iteration is necessary
        * instead, just perform linear search of the iterators for the min or max item
@@ -105,10 +106,12 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
        * (the c++ implementation, as of this writing, also uses linear search)
        */
       OrdinalIterator extreme = ordinalIterators.get(0);
-
+      
       for(int i = 1; i < ordinalIterators.size(); i++){
          OrdinalIterator ord = ordinalIterators.get(i);
-         if(hasFollowing.apply(ord.iterator) && (!hasFollowing.apply(extreme.iterator) || elemCompare.compare(ord, extreme) < 0)){
+         if(hasFollowing.apply(ord.iterator) 
+               && (!hasFollowing.apply(extreme.iterator) 
+                     || elemCompare.compare(ord, extreme) < 0)){
             //if the following iterator hasNext (or hasPrev, larger, etc.) and the current minimum does not
             //or if the following is simply smaller
             //we've found a new minimum
@@ -117,7 +120,6 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
 
       return extreme.iterator;
-      
    }
 
    private ReverseSeekingIterator<InternalKey, Slice> getMin(){
@@ -188,8 +190,8 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       public SmallerNextElementComparator()
       {
          super(
-            new Function<OrdinalIterator, Boolean>(){
-               public Boolean apply(OrdinalIterator ord){
+            new Predicate<OrdinalIterator>(){
+               public boolean apply(OrdinalIterator ord){
                   return ord.iterator.hasNext();
                }
             },
@@ -206,8 +208,8 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       public LargerPrevElementComparator()
       {
          super(
-            new Function<OrdinalIterator, Boolean>(){
-               public Boolean apply(OrdinalIterator ord){
+            new Predicate<OrdinalIterator>(){
+               public boolean apply(OrdinalIterator ord){
                   return ord.iterator.hasPrev();
                }
             },
@@ -226,10 +228,10 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    }
    
    private abstract class ElementComparator implements Comparator<OrdinalIterator>{
-      private final Function<OrdinalIterator, Boolean> hasFollowing;
+      private final Predicate<OrdinalIterator> hasFollowing;
       private final Function<OrdinalIterator, InternalKey> peekFollowing;
 
-      public ElementComparator(Function<OrdinalIterator, Boolean> hasFollowing, Function<OrdinalIterator, InternalKey> peekFollowing){
+      public ElementComparator(Predicate<OrdinalIterator> hasFollowing, Function<OrdinalIterator, InternalKey> peekFollowing){
          this.hasFollowing = hasFollowing;
          this.peekFollowing = peekFollowing;
       }

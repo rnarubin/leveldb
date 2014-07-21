@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.ListIterator;
 
 import com.google.common.base.Function;
+import com.google.common.base.Predicate;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Lists;
 
@@ -82,17 +83,17 @@ public final class ReverseIterators
       return new ReversePeekingImpl<T>(iterator);
    }
    
-   public static <T extends Iterator<?>> Function<T, Boolean> hasNext(){
-      return new Function<T, Boolean>(){
-         public Boolean apply(T iter){
+   public static <T extends Iterator<?>> Predicate<T> hasNext(){
+      return new Predicate<T>(){
+         public boolean apply(T iter){
             return iter.hasNext();
          }
       };
    }
    
-   public static <T extends ReverseIterator<?>> Function<T, Boolean> hasPrev(){
-      return new Function<T, Boolean>(){
-         public Boolean apply(T iter){
+   public static <T extends ReverseIterator<?>> Predicate<T> hasPrev(){
+      return new Predicate<T>(){
+         public boolean apply(T iter){
             return iter.hasPrev();
          }
       };

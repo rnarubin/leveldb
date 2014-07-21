@@ -8,12 +8,16 @@ import org.iq80.leveldb.impl.TableCache;
 import java.util.List;
 import java.util.Map.Entry;
 
+import org.iq80.leveldb.util.TableIterator.CurrentOrigin;
+import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
+
 public final class LevelIterator extends AbstractReverseSeekingIterator<InternalKey, Slice> implements InternalIterator
 {
     private final TableCache tableCache;
     private final List<FileMetaData> files;
     private final InternalKeyComparator comparator;
     private InternalTableIterator current;
+    private CurrentOrigin currentOrigin = NONE; //see TableIterator for explanation of this enum's functionality
     private int index;
 
     public LevelIterator(TableCache tableCache, List<FileMetaData> files, InternalKeyComparator comparator)
@@ -29,6 +33,7 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
         // reset index to before first and clear the data iterator
         index = 0;
         current = null;
+        currentOrigin = NONE;
     }
 
    @Override
@@ -36,6 +41,7 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
    {
       index = files.size()-1;
       current = openFile(index);
+      currentOrigin = PREV;
       current.seekToLastInternal();
    }
 
@@ -81,7 +87,8 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             current.seek(targetKey);
         }
         else {
-            current = null;
+           current = null;
+           currentOrigin = NONE;
         }
     }
 
@@ -108,8 +115,6 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             return current.next();
         }
         else {
-            // set current to empty iterator to avoid extra calls to user iterators
-            current = null;
             return null;
         }
     }
@@ -120,7 +125,12 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             if (current != null) {
                 currentHasNext = current.hasNext();
             }
-            if (!(currentHasNext)) {
+            if (!currentHasNext) {
+               if(currentOrigin == PREV){
+                  //current came from PREV, so the index currently points at the index of current's file
+                  //we want to check the next file, however
+                  index++;
+               }
                 if (index < files.size()) {
                     current = openNextFile();
                 }
@@ -131,6 +141,10 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             else {
                 break;
             }
+        } 
+        if(!currentHasNext){
+           current = null;
+           currentOrigin = NONE;
         }
         return currentHasNext;
     }
@@ -141,9 +155,13 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             if (current != null) {
                 currentHasPrev = current.hasPrev();
             }
-            if (!(currentHasPrev)) {
+            if (!currentHasPrev) {
+               if(currentOrigin == NEXT){
+                  index--;
+               }
                 if (index > 0) {
                     current = openPrevFile();
+                    current.seekToLast();
                 }
                 else {
                     break;
@@ -152,6 +170,10 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             else {
                 break;
             }
+        }
+        if(!currentHasPrev){
+           current = null;
+           currentOrigin = NONE;
         }
         return currentHasPrev;
     }
@@ -163,8 +185,6 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
             return current.prev();
         }
         else {
-            // set current to empty iterator to avoid extra calls to user iterators
-            current = null;
             return null;
         }
    }
@@ -175,11 +195,13 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
 
     private InternalTableIterator openNextFile()
     {
+       currentOrigin = NEXT;
        return openFile(index++);
     }
 
     private InternalTableIterator openPrevFile()
     {
+       currentOrigin = PREV;
        return openFile(--index);
     }
 
