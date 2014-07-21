@@ -54,7 +54,7 @@ public class DBIteratorTest extends TestCase
       Random rand = new Random(0);
 
       entries = new ArrayList<>();
-      int items = 10_000_000;
+      int items = 1_000_000;
       for (int i = 0; i < items; i++)
       {
          StringBuilder sb = new StringBuilder();

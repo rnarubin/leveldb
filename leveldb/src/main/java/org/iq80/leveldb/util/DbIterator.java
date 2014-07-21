@@ -4,14 +4,12 @@ package org.iq80.leveldb.util;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
