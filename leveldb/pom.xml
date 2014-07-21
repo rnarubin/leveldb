@@ -15,43 +15,12 @@
     <name>${project.artifactId}</name>
     <description>Port of LevelDB to Java</description>
 
-	<distributionManagement>
-		<repository>
-			<id>cleversafe.net</id>
-			<name>Cleversafe Internal Releases</name>
-			<url>http://maven.ad.cleversafe.com/artifactory/libs-staging-local</url>
-		</repository>
-		<snapshotRepository>
-			<id>cleversafe.snapshots</id>
-			<name>Cleversafe Internal Snapshots</name>
-			<url>http://maven.ad.cleversafe.com/artifactory/libs-snapshot-local</url>
-		</snapshotRepository>
-		<site>
-			<id>website</id>
-			<url>scp://build@build.cleversafe.net/var/www/site/</url>
-		</site>
-	</distributionManagement>
-
     <repositories>
-           <repository>
-                   <snapshots>
-                           <enabled>false</enabled>
-                   </snapshots>
-                   <id>central</id>
-                   <name>Cleversafe Internal Releases</name>
-                   <url>http://maven.ad.cleversafe.com/artifactory/releases/</url>
-           </repository>
-           <repository>
-                   <releases>
-                           <enabled>false</enabled>
-                   </releases>
-                   <snapshots>
-                           <enabled>false</enabled>
-                   </snapshots>
-                   <id>cleversafe.snapshots</id>
-                   <name>Cleversafe Internal Snapshots</name>
-                   <url>http://maven.ad.cleversafe.com/artifactory/snapshots/</url>
-           </repository>
+        <repository>
+            <id>fusesource.nexus.snapshot</id>
+            <name>FuseSource Community Snapshot Repository</name>
+            <url>http://repo.fusesource.com/nexus/content/groups/public-snapshots</url>
+        </repository>
     </repositories>
 
     <dependencies>
