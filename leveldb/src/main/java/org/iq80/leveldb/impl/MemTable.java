@@ -122,7 +122,7 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
           Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
           if(ceiling == null){ //no keys >= targetKey
              if(table.size() > 0){
-                seekToLast();
+                seekToEnd();
              }
              return;
           }
@@ -133,7 +133,7 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
                ReverseIterators.reversePeekingIterator(entryList.listIterator(Collections.binarySearch(
                      keyList, ceiling.getKey(), table.comparator())));
       }
-
+      
       @Override
       public InternalEntry peek()
       {
@@ -157,6 +157,17 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seekToLast()
       {
+         if(table.size() == 0){
+            seekToFirst();
+            return;
+         }
+         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
+         iterator =
+               ReverseIterators.reversePeekingIterator(entryList.listIterator(entryList.size()-1));
+      }
+      
+      @Override
+      public void seekToEnd(){
          List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
          iterator =
                ReverseIterators.reversePeekingIterator(entryList.listIterator(entryList.size()));

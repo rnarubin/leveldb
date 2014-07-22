@@ -30,8 +30,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
     {
         this.table = table;
         this.blockIterator = blockIterator;
-        current = null;
-        currentOrigin = NONE;
+        clearCurrent();
     }
 
     @Override
@@ -39,17 +38,25 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
     {
         // reset index to before first and clear the data iterator
         blockIterator.seekToFirst();
-        current = null;
-        currentOrigin = NONE;
+        clearCurrent();
     }
 
    @Override
    protected void seekToLastInternal()
    {
-      blockIterator.seekToLast();
-      current = null;
-      currentOrigin = NONE;
+      blockIterator.seekToEnd();
+      clearCurrent();
+      if(currentHasPrev()){
+         current.prev();
+      }
    }
+   
+   @Override
+   public void seekToEnd(){
+      blockIterator.seekToEnd();
+      clearCurrent();
+   }
+   
 
     @Override
     protected void seekInternal(Slice targetKey)
@@ -64,8 +71,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
             current.seek(targetKey);
         }
         else {
-            current = null;
-            currentOrigin = NONE;
+           clearCurrent();
         }
     }
 
@@ -134,8 +140,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
             }
         }
         if(!currentHasNext){
-            current = null;
-            currentOrigin = NONE;
+           clearCurrent();
         }
         return currentHasNext;
     }
@@ -152,7 +157,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
                }
                 if (blockIterator.hasPrev()) {
                     current = getPrevBlock();
-                    current.seekToLast();
+                    current.seekToEnd();
                 }
                 else {
                     break;
@@ -163,8 +168,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
             }
         }
         if(!currentHasPrev){
-            current = null;
-            currentOrigin = NONE;
+           clearCurrent();
         }
         return currentHasPrev;
     }
@@ -182,6 +186,11 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
         Block dataBlock = table.openBlock(blockHandle);
         currentOrigin = PREV;
         return dataBlock.iterator();
+    }
+    
+    private void clearCurrent(){
+       current = null;
+       currentOrigin = NONE;
     }
 
     @Override

@@ -37,6 +37,7 @@ import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.impl.SnapshotSeekingIterator;
 
 import com.google.common.collect.Maps;
 
@@ -119,6 +120,7 @@ public class DBIteratorTest extends TestCase
 
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToLast();
+      actual.next();
       int i = 0;
       for (Entry<String, String> expected : entries)
       {
@@ -273,6 +275,13 @@ public class DBIteratorTest extends TestCase
       public void seekToLast()
       {
          iterator.seekToLast();
+      }
+      
+      @Override
+      public void seekToEnd(){
+         // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
+         // testing as of yet
+         throw new UnsupportedOperationException();
       }
 
       public static class EntryCompare implements Comparator<Entry<String, String>>

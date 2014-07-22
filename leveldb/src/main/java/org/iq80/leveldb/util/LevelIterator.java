@@ -44,6 +44,14 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
       currentOrigin = PREV;
       current.seekToLastInternal();
    }
+   
+   @Override
+   public void seekToEnd(){
+      index = files.size()-1;
+      current = openFile(index);
+      currentOrigin = PREV;
+      current.seekToEnd();
+   }
 
     @Override
     protected void seekInternal(InternalKey targetKey)
@@ -161,7 +169,7 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
                }
                 if (index > 0) {
                     current = openPrevFile();
-                    current.seekToLast();
+                    current.seekToEnd();
                 }
                 else {
                     break;

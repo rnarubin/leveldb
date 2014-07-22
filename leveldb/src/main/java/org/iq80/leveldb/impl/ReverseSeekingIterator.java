@@ -22,4 +22,5 @@ import java.util.Map.Entry;
 public interface ReverseSeekingIterator<K,V> extends SeekingIterator<K, V>, ReversePeekingIterator<Entry<K,V>>
 {
     void seekToLast();
+    void seekToEnd();
 }

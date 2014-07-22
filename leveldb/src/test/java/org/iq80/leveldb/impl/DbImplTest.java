@@ -43,6 +43,7 @@ import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
 
+import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
@@ -771,7 +772,8 @@ public class DbImplTest
     public void testSingleEntrySingle()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        //DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new JniDbStringWrapper(new Options().errorIfExists(false), databaseDir);
         testDb(db, immutableEntry("name", "dain sundstrom"));
     }
 
@@ -780,6 +782,7 @@ public class DbImplTest
             throws Exception
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        //DbStringWrapper db = new JniDbStringWrapper(new Options(), databaseDir);
 
         List<Entry<String, String>> entries = Arrays.asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
@@ -901,10 +904,14 @@ public class DbImplTest
         assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToLast();
-        assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
-        assertReverseSequence(seekingIterator, reverseEntries);
+        if(reverseEntries.size() > 0){
+           assertSequence(seekingIterator, reverseEntries.get(0));
+           seekingIterator.seekToLast();
+           assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+        }
         assertSequence(seekingIterator, entries);
 
+        int i = 0;
         for (Entry<String, String> entry : entries) {
             List<Entry<String, String>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
             List<Entry<String, String>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());
@@ -930,6 +937,7 @@ public class DbImplTest
         Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
         seekingIterator.seek(endKey.toString(Charsets.UTF_8));
         assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
+        assertReverseSequence(seekingIterator, reverseEntries);
     }
 
     @BeforeMethod
@@ -1086,6 +1094,45 @@ public class DbImplTest
             return sharedKeyBytes;
         }
     }
+    
+    private class JniDbStringWrapper extends DbStringWrapper{
+       private DB jnidb;
+       public JniDbStringWrapper(Options options, File databaseDir)
+          throws IOException
+       {
+          jnidb = new JniDBFactory().open(databaseDir, options);
+          opened.add(this);
+       }
+       
+       @Override
+        public ReverseSeekingIterator<String, String> iterator()
+        {
+            return new StringDbIterator(jnidb.iterator());
+        }
+       
+       @Override
+       public void close(){
+          try{
+             jnidb.close();
+          }catch(Exception ignore){}
+       }
+       
+       @Override
+        public void put(String key, String value)
+        {
+            jnidb.put(toByteArray(key), toByteArray(value));
+        }
+       
+       @Override
+        public String get(String key)
+        {
+            byte[] slice = jnidb.get(toByteArray(key));
+            if (slice == null) {
+                return null;
+            }
+            return new String(slice, UTF_8);
+        }
+    }
 
     private class DbStringWrapper
     {
@@ -1100,6 +1147,13 @@ public class DbImplTest
             this.databaseDir = databaseDir;
             this.db = new DbImpl(options, databaseDir);
             opened.add(this);
+        }
+        
+        private DbStringWrapper(){
+           //crash and burn
+           options = null;
+           databaseDir = null;
+           db = null;
         }
 
         public String get(String key)
@@ -1298,6 +1352,14 @@ public class DbImplTest
       public void seekToLast()
       {
          iterator.seekToLast();
+      }
+
+      @Override
+      public void seekToEnd()
+      {
+         // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
+         // testing as of yet
+         throw new UnsupportedOperationException();
       }
     }
 }

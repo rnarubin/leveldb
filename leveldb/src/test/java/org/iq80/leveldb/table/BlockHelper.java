@@ -87,6 +87,7 @@ public class BlockHelper
           assertEntryEquals(rSeekingIterator.peekPrev(), entry);
           assertEntryEquals(rSeekingIterator.prev(), entry);
        }
+       assertFalse(rSeekingIterator.hasPrev());
 
         try {
             rSeekingIterator.peekPrev();

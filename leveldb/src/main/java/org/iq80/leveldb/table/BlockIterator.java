@@ -176,9 +176,18 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    {
       if(restartCount > 0){
          seekToRestartPosition(Math.max(0, restartCount-1));
-         while(hasNext()){
+         while(data.isReadable()){
+            //seek until reaching the last entry
             next();
          }
+      }
+   }
+   
+   @Override
+   public void seekToEnd(){
+      if(restartCount > 0){
+         seekToLast();
+         next();
       }
    }
 

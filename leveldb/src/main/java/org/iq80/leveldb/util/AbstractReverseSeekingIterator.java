@@ -105,7 +105,7 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    {
       throw new UnsupportedOperationException();
    }
-
+   
    protected abstract void seekToLastInternal();
 
    protected abstract void seekToFirstInternal();

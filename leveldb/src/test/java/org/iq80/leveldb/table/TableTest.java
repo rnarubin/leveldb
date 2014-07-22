@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map.Entry;
 
 import junit.framework.Assert;
 import static java.util.Arrays.asList;
@@ -133,18 +134,21 @@ abstract public class TableTest
         Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true);
 
         ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
-        Assert.assertFalse(seekingIterator.hasPrev());
+        BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>>emptyList());
         BlockHelper.assertSequence(seekingIterator, entries);
         BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToFirst();
-        Assert.assertFalse(seekingIterator.hasPrev());
+        BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>>emptyList());
         BlockHelper.assertSequence(seekingIterator, entries);
         BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToLast();
-        Assert.assertFalse(seekingIterator.hasNext());
-        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+        if(reverseEntries.size() > 0){
+           BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
+           seekingIterator.seekToLast();
+           BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+        }
         BlockHelper.assertSequence(seekingIterator, entries);
 
         long lastApproximateOffset = 0;
@@ -167,6 +171,7 @@ abstract public class TableTest
         Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
         seekingIterator.seek(endKey);
         BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry>emptyList());
+        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
         long approximateOffset = table.getApproximateOffsetOf(endKey);
         assertTrue(approximateOffset >= lastApproximateOffset);

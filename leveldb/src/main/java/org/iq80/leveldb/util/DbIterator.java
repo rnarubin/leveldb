@@ -67,9 +67,18 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    protected void seekToLastInternal()
    {
       for(OrdinalIterator ord:ordinalIterators){
-         ord.iterator.seekToLast();
+         ord.iterator.seekToEnd();
       }
+      getPrevElement();
    }
+   
+   @Override
+   public void seekToEnd(){
+       for(OrdinalIterator ord:ordinalIterators){
+         ord.iterator.seekToEnd();
+       }
+   }
+
 
    @Override
    protected void seekInternal(InternalKey targetKey)

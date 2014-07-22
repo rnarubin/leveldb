@@ -139,8 +139,11 @@ public class BlockTest
         BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
 
         blockIterator.seekToLast();
-        BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry>emptyList());
-        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+        if(reverseEntries.size() > 0){
+           BlockHelper.assertSequence(blockIterator, reverseEntries.get(0));
+           blockIterator.seekToLast();
+           BlockHelper.assertReverseSequence(blockIterator, reverseEntries.subList(1, reverseEntries.size()));
+        }
         BlockHelper.assertSequence(blockIterator, entries);
 
         for (BlockEntry entry : entries) {
@@ -167,6 +170,7 @@ public class BlockTest
 
         blockIterator.seek(Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
         BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry>emptyList());
+        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
 
     }
 }

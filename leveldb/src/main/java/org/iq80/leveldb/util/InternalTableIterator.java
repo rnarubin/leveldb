@@ -31,6 +31,11 @@ public class InternalTableIterator extends AbstractReverseSeekingIterator<Intern
     {
         tableIterator.seek(targetKey.encode());
     }
+    
+    @Override
+    public void seekToEnd(){
+       tableIterator.seekToEnd();
+    }
 
     @Override
     protected Entry<InternalKey, Slice> getNextElement()
