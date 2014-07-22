@@ -772,8 +772,8 @@ public class DbImplTest
     public void testSingleEntrySingle()
             throws Exception
     {
-        //DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
-        DbStringWrapper db = new JniDbStringWrapper(new Options().errorIfExists(false), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        //DbStringWrapper db = new JniDbStringWrapper(new Options().errorIfExists(false), databaseDir);
         testDb(db, immutableEntry("name", "dain sundstrom"));
     }
 
