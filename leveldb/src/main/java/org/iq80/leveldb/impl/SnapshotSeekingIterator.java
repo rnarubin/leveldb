@@ -66,13 +66,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected void seekToLastInternal()
    {
-      iterator.seekToLast();
-      while((iterator.hasNext() && iterator.hasPrev())
-            && iterator.peek().getKey().getUserKey().equals(iterator.peekPrev().getKey().getUserKey())){
-         //advance to the last unique entry
-         iterator.prev();
-      }
-      snapshotValidDirection = NONE;
+      seekToEnd();
+      getPrevElement();
    }
    
    @Override

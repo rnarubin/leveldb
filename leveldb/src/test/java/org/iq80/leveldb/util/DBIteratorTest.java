@@ -28,9 +28,12 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.impl.ReverseIterator;
@@ -38,6 +41,7 @@ import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SnapshotSeekingIterator;
+import org.testng.collections.Lists;
 
 import com.google.common.collect.Maps;
 
@@ -89,10 +93,7 @@ public class DBIteratorTest extends TestCase
 
    public void testForwardIteration()
    {
-      for (Entry<String, String> e : entries)
-      {
-         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
-      }
+      putAll(db, entries);
 
       Collections.sort(entries, new StringDbIterator.EntryCompare());
 
@@ -111,10 +112,7 @@ public class DBIteratorTest extends TestCase
 
    public void testReverseIteration()
    {
-      for (Entry<String, String> e : entries)
-      {
-         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
-      }
+      putAll(db, entries);
 
       Collections.sort(entries, new StringDbIterator.ReverseEntryCompare());
 
@@ -137,10 +135,7 @@ public class DBIteratorTest extends TestCase
    {
       Random rand = new Random(0);
 
-      for (Entry<String, String> e : entries)
-      {
-         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
-      }
+      putAll(db, entries);
 
       Collections.sort(entries, new StringDbIterator.EntryCompare());
 
@@ -186,18 +181,78 @@ public class DBIteratorTest extends TestCase
          steps = rand.nextInt(randForward) - randBack;
       } while (pos > 0);
    }
+   
+   public void testSeekPastContentsWithDeletesAndReverse(){
+      String keys[] = {"a","b","c","d","e","f"};
+      int deleteIndex[] = {2, 3, 5};
 
-   public boolean hasFollowing(int direction, ReverseIterator<?> iter)
+      List<Entry<String, String>> keyvals = new ArrayList<>();
+      for(String key:keys){
+         keyvals.add(Maps.immutableEntry(key, "v"+key));
+      }
+      
+      for(int i = 0, d = 0; i < keyvals.size(); i++){
+         Entry<String, String> e = keyvals.get(i);
+         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
+         if(d < deleteIndex.length && i == deleteIndex[d]){
+            db.delete(e.getKey().getBytes(UTF_8));
+            d++;
+         }
+      }
+      
+      Set<Entry<String, String>> expectedSet = new TreeSet<>(new Comparator<Entry<String, String>>(){
+         public int compare(Entry<String, String> o1, Entry<String, String> o2)
+         {
+            return o1.getKey().compareTo(o2.getKey());
+         }
+      });
+      expectedSet.addAll(keyvals);
+      List<Entry<String, String>> expected = new ArrayList<>(expectedSet);
+      
+      StringDbIterator actual = new StringDbIterator(db.iterator());
+      actual.seek("f");
+      for(int i = expected.size()-2; i >= 0; i--){
+         assertTrue(actual.hasPrev());
+         assertEquals(expected.get(i), actual.peekPrev());
+         assertEquals(expected.get(i), actual.prev());
+      }
+      assertFalse(actual.hasPrev());
+
+      actual.seek("g");
+      assertFalse(actual.hasNext());
+      for(int i = expected.size()-1; i >= 0; i--){
+         assertTrue(actual.hasPrev());
+         assertEquals(expected.get(i), actual.peekPrev());
+         assertEquals(expected.get(i), actual.prev());
+      }
+      assertFalse(actual.hasPrev());
+      
+      //recreating a strange set of circumstances encountered in the field
+      actual.seek("g");
+      assertFalse(actual.hasNext());
+      actual.seekToLast();
+      assertEquals(expected.get(expected.size()-1), actual.peek());
+      assertTrue(actual.hasPrev());
+      assertEquals(expected.get(expected.size()-2), actual.prev());
+   }
+
+   private void putAll(DB db, Iterable<Entry<String, String>> entries){
+      for(Entry<String, String> e:entries){
+         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
+      }
+   }
+
+   private boolean hasFollowing(int direction, ReverseIterator<?> iter)
    {
       return direction < 0 ? iter.hasPrev() : iter.hasNext();
    }
 
-   public <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter)
+   private <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter)
    {
       return direction < 0 ? iter.peekPrev() : iter.peek();
    }
 
-   public <T> T getFollowing(int direction, ReverseIterator<T> iter)
+   private <T> T getFollowing(int direction, ReverseIterator<T> iter)
    {
       return direction < 0 ? iter.prev() : iter.next();
    }
