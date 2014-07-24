@@ -810,7 +810,11 @@ public class DbImplTest
                 immutableEntry("scotch/strong", "Lagavulin"));
 
         for (int i = 1; i < entries.size(); i++) {
-            testDb(db, entries);
+           List<Entry<String, String>> incrementalEntries = new ArrayList<>();
+           for(Entry<String, String> e:entries){
+              incrementalEntries.add(immutableEntry(e.getKey(), "v"+i+":"+e.getValue()));
+           }
+            testDb(db, incrementalEntries);
         }
     }
 

@@ -24,20 +24,20 @@ import org.iq80.leveldb.util.Slice;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
-import static org.iq80.leveldb.impl.SnapshotSeekingIterator.ValidDirection.*;
+import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.*;
 
 public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterator<Slice, Slice>
 {
    private final DbIterator iterator;
    private final SnapshotImpl snapshot;
    private final Comparator<Slice> userComparator;
-   // indicates whether the iterator has been advanced to the next or previous user entry with the
-// appropriate snapshot version
-   private ValidDirection snapshotValidDirection = NONE;
+   // indicates the direction in which the iterator was last advanced
+   private Direction direction;
+   private Entry<InternalKey, Slice> savedEntry;
 
-   protected enum ValidDirection
+   protected enum Direction
    {
-      NEXT, PREV, NONE
+      FORWARD, REVERSE
    }
 
    public SnapshotSeekingIterator(
@@ -49,6 +49,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
       this.snapshot = snapshot;
       this.userComparator = userComparator;
       this.snapshot.getVersion().retain();
+      this.savedEntry = null;
+      this.direction = FORWARD;
    }
 
    public void close()
@@ -60,7 +62,8 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    protected void seekToFirstInternal()
    {
       iterator.seekToFirst();
-      snapshotValidDirection = NONE;
+      direction = FORWARD;
+      findNextUserEntry(false, null);
    }
 
    @Override
@@ -73,141 +76,123 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    public void seekToEnd(){
       iterator.seekToEnd();
-      snapshotValidDirection = NONE;
+      savedEntry = null;
+      direction = REVERSE;
    }
-
+   
    @Override
    protected void seekInternal(Slice targetKey)
    {
       iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
-      snapshotValidDirection = NONE;
+      findNextUserEntry(false, null);
+      direction = REVERSE; //the next user entry has been found, but not yet advanced
+
    }
 
    @Override
    protected Entry<Slice, Slice> getNextElement()
    {
-      findNextUserEntry();
-      
+      if(direction == REVERSE){
+         if(!iterator.hasNext()){
+            savedEntry = null;
+            return null;
+         }
+         direction = FORWARD;
 
-      if (!iterator.hasNext())
-      {
-         return null;
+         //the last valid entry was returned by getPrevElement
+         //so iterator's next must be the valid entry
+      }
+      else{
+         findNextUserEntry(true, savedEntry==null?null:savedEntry.getKey().getUserKey());
+
+         if (!iterator.hasNext())
+         {
+            return null;
+         }
       }
 
-      Entry<InternalKey, Slice> next = iterator.next();
-      snapshotValidDirection = PREV;
+      savedEntry = iterator.next();
 
-      return Maps.immutableEntry(next.getKey().getUserKey(), next.getValue());
+      return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
    }
 
    @Override
    protected Entry<Slice, Slice> getPrevElement()
    {
-      findPrevUserEntry();
+      if(direction == FORWARD){
+         if(!iterator.hasPrev()){
+            savedEntry = null;
+            return null;
+         }
+         direction = REVERSE;
+         //the last valid entry was returned by getNextElement
+         //so iterator's prev must be the valid entry
+         savedEntry = iterator.prev();
+      }
+      else{
+         findPrevUserEntry();
 
-      if (!iterator.hasPrev())
-      {
-         return null;
+         if (savedEntry == null)
+         {
+            return null;
+         }
       }
 
-      Entry<InternalKey, Slice> prev = iterator.prev();
-      snapshotValidDirection = NEXT;
+      //savedEntry = iterator.prev();
 
-      return Maps.immutableEntry(prev.getKey().getUserKey(), prev.getValue());
+      return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
    }
 
-   private void findNextUserEntry()
+   private void findNextUserEntry(boolean skipping, Slice skipKey)
    {
-      /*
-       * when reverse iteration was not implemented, the snapshot iterator was always kept in a
-       * state where the next entry was guaranteed to be in the appropriate version (by calling this
-       * findNextUserEntry function when advancing next). With reverse iteration, however, this
-       * state of validity cannot be maintained when the iterator may be arbitrarily advanced
-       * forwards or backwards without excessive forward/backward advancing. Therefore, we keep a
-       * record of which direction (if any) is currently at a valid position in which the following
-       * entry is in the correct version
-       */
-      if (snapshotValidDirection == NEXT)
-      {
-         return;
+      if(skipKey == null){
+         skipping = false;
       }
-
-      Slice deletedKey =
-            snapshotValidDirection == PREV && iterator.hasPrev()
-                  ? iterator.peekPrev().getKey().getUserKey()
-                  : null;
-
-      while (iterator.hasNext())
-      {
+      while(iterator.hasNext()){
          InternalKey internalKey = iterator.peek().getKey();
-
-         // skip entries created after our snapshot
-         if (internalKey.getSequenceNumber() > snapshot.getLastSequence())
-         {
-            iterator.next();
-            continue;
-         }
-
-         // if the next entry is a deletion, skip all subsequent entries for that key
-         if (internalKey.getValueType() == ValueType.DELETION)
-         {
-            deletedKey = internalKey.getUserKey();
-         }
-         else if (internalKey.getValueType() == ValueType.VALUE)
-         {
-            // is this value masked by a prior deletion record?
-            if (deletedKey == null
-                  || userComparator.compare(internalKey.getUserKey(), deletedKey) > 0)
-            {
-               break;
+         if(internalKey.getSequenceNumber() <= snapshot.getLastSequence()){
+            switch(internalKey.getValueType()){
+               case DELETION:
+                  skipKey = internalKey.getUserKey();
+                  skipping = true;
+                  break;
+               case VALUE:
+                  if(!skipping || userComparator.compare(internalKey.getUserKey(), skipKey) > 0){
+                     return;
+                  }
+                  break;
             }
          }
          iterator.next();
       }
-      // either a break from the loop, so the peek entry was valid (and next will be valid)
-      // or hasNext is false: there are no items, but the direction is valid
-      snapshotValidDirection = NEXT;
+      savedEntry = null;
    }
 
    private void findPrevUserEntry()
    {
-      if (snapshotValidDirection == PREV)
-      {
-         return;
-      }
-      Slice deletedKey =
-            snapshotValidDirection == NEXT && iterator.hasNext()
-                  ? iterator.peek().getKey().getUserKey()
-                  : null;
-
-      while (iterator.hasPrev())
-      {
-         InternalKey internalKey = iterator.peekPrev().getKey();
-
-         // skip entries created after our snapshot
-         if (internalKey.getSequenceNumber() > snapshot.getLastSequence())
-         {
-            iterator.prev();
-            continue;
-         }
-
-         // if the next entry is a deletion, skip all subsequent entries for that key
-         if (internalKey.getValueType() == ValueType.DELETION)
-         {
-            deletedKey = internalKey.getUserKey();
-         }
-         else if (internalKey.getValueType() == ValueType.VALUE)
-         {
-            // is this value masked by a prior deletion record?
-            if (deletedKey == null
-                  || userComparator.compare(internalKey.getUserKey(), deletedKey) < 0)
-            {
+      ValueType valueType = ValueType.DELETION;
+      while(iterator.hasPrev()){
+         Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+         InternalKey internalKey = peekPrev.getKey();
+         if(internalKey.getSequenceNumber() <= snapshot.getLastSequence()){
+            if(valueType != ValueType.DELETION && (savedEntry == null || userComparator.compare(internalKey.getUserKey(), savedEntry.getKey().getUserKey()) < 0)){
                break;
+            }
+            valueType = internalKey.getValueType();
+            if(valueType == ValueType.DELETION){
+               savedEntry = null;
+            }
+            else{
+               savedEntry = peekPrev;
             }
          }
          iterator.prev();
       }
-      snapshotValidDirection = PREV;
+      
+      if(valueType == ValueType.DELETION){
+         savedEntry = null;
+         direction = FORWARD;
+      }
    }
 
    @Override
@@ -224,14 +209,29 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected boolean hasNextInternal()
    {
-      findNextUserEntry();
+      if(direction == FORWARD){
+         findNextUserEntry(true, savedEntry==null?null:savedEntry.getKey().getUserKey());
+         // calls to findNextUserEntry without skipping will place the iterator in a state where
+         // next() is valid, which is the same as a state of coming from a reverse advance
+         direction = REVERSE; 
+      }
       return iterator.hasNext();
    }
 
    @Override
    protected boolean hasPrevInternal()
    {
-      findPrevUserEntry();
+      if(direction == REVERSE){
+         findPrevUserEntry();
+         if(savedEntry != null){
+            //findPrevUserEntry places the iterator before the valid user entry
+            //so hasPrev after this call is answered by hasNext
+            //but the has... functions should not advance the iterator
+            //so advance forward to a position effectively the same as before this call
+            // (though not exactly identical if deletions are present)
+            getNextElement();
+         }
+      }
       return iterator.hasPrev();
    }
 

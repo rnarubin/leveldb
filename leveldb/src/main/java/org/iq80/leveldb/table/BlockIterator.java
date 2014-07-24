@@ -186,6 +186,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public void seekToEnd(){
       if(restartCount > 0){
+         //TODO might be able to accomplish with setting data position
          seekToLast();
          next();
       }

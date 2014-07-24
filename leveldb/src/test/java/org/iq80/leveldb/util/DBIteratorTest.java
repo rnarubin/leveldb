@@ -206,12 +206,15 @@ public class DBIteratorTest extends TestCase
             return o1.getKey().compareTo(o2.getKey());
          }
       });
+      for(int i = deleteIndex.length-1; i >= 0; i--){
+         keyvals.remove(deleteIndex[i]);
+      }
       expectedSet.addAll(keyvals);
       List<Entry<String, String>> expected = new ArrayList<>(expectedSet);
       
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seek("f");
-      for(int i = expected.size()-2; i >= 0; i--){
+      for(int i = expected.size()-1; i >= 0; i--){
          assertTrue(actual.hasPrev());
          assertEquals(expected.get(i), actual.peekPrev());
          assertEquals(expected.get(i), actual.prev());
@@ -231,9 +234,21 @@ public class DBIteratorTest extends TestCase
       actual.seek("g");
       assertFalse(actual.hasNext());
       actual.seekToLast();
-      assertEquals(expected.get(expected.size()-1), actual.peek());
+      List<Entry<String, String>> items = new ArrayList<>();
+      Entry<String, String> peek = actual.peek();
+      items.add(peek);
+      assertEquals(expected.get(expected.size()-1), peek);
       assertTrue(actual.hasPrev());
-      assertEquals(expected.get(expected.size()-2), actual.prev());
+      Entry<String, String> prev = actual.prev();
+      items.add(prev);
+      assertEquals(expected.get(expected.size()-2), prev);
+      
+      while(actual.hasPrev()){
+         items.add(actual.prev());
+      }
+      
+      Collections.reverse(items);
+      assertEquals(expected, items);
    }
 
    private void putAll(DB db, Iterable<Entry<String, String>> entries){
