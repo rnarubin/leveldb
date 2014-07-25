@@ -43,7 +43,6 @@ import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
 
-import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
@@ -773,7 +772,6 @@ public class DbImplTest
             throws Exception
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
-        //DbStringWrapper db = new JniDbStringWrapper(new Options().errorIfExists(false), databaseDir);
         testDb(db, immutableEntry("name", "dain sundstrom"));
     }
 
@@ -782,7 +780,6 @@ public class DbImplTest
             throws Exception
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
-        //DbStringWrapper db = new JniDbStringWrapper(new Options(), databaseDir);
 
         List<Entry<String, String>> entries = Arrays.asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
@@ -1096,45 +1093,6 @@ public class DbImplTest
             }
 
             return sharedKeyBytes;
-        }
-    }
-    
-    private class JniDbStringWrapper extends DbStringWrapper{
-       private DB jnidb;
-       public JniDbStringWrapper(Options options, File databaseDir)
-          throws IOException
-       {
-          jnidb = new JniDBFactory().open(databaseDir, options);
-          opened.add(this);
-       }
-       
-       @Override
-        public ReverseSeekingIterator<String, String> iterator()
-        {
-            return new StringDbIterator(jnidb.iterator());
-        }
-       
-       @Override
-       public void close(){
-          try{
-             jnidb.close();
-          }catch(Exception ignore){}
-       }
-       
-       @Override
-        public void put(String key, String value)
-        {
-            jnidb.put(toByteArray(key), toByteArray(value));
-        }
-       
-       @Override
-        public String get(String key)
-        {
-            byte[] slice = jnidb.get(toByteArray(key));
-            if (slice == null) {
-                return null;
-            }
-            return new String(slice, UTF_8);
         }
     }
 
