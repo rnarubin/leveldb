@@ -1,11 +1,7 @@
 
 package org.iq80.leveldb.util;
 
-import com.google.common.base.Function;
-import com.google.common.base.Predicate;
-
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
@@ -20,7 +16,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
 {
 
    private final ArrayList<OrdinalIterator> ordinalIterators;
-   private final ElementComparator smallerNext, largerPrev;
+   private final Comparator<OrdinalIterator> smallerNext, largerPrev;
 
    private final Comparator<InternalKey> comparator;
 
@@ -88,71 +84,71 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
    
-   private boolean hasExtreme(Predicate<ReverseSeekingIterator<InternalKey, Slice>> hasFollowing){ 
-      for(OrdinalIterator ord:ordinalIterators){
-         if(hasFollowing.apply(ord.iterator)){
-            return true;
-         }
-      }
-      return false;
-   }
-
-   private boolean hasMin(){
-      return hasExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasNext());
-   }
-
-   private boolean hasMax(){
-      return hasExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasPrev());
-   }
-   
-   private ReverseSeekingIterator<InternalKey, Slice> getExtreme(Predicate<ReverseSeekingIterator<InternalKey, Slice>> hasFollowing, ElementComparator elemCompare){
+   private ReverseSeekingIterator<InternalKey, Slice> getMin(){
       /*
        * in the DoubleHeap approach it proved difficult to coordinate the two heaps when reverse iteration is necessary
        * instead, just perform linear search of the iterators for the min or max item
        * there tends to be only a small number of iterators (less than 10) even when the database contains a substantial number of items (in the millions)
        * (the c++ implementation, as of this writing, also uses linear search)
        */
-      OrdinalIterator extreme = ordinalIterators.get(0);
+      OrdinalIterator min = ordinalIterators.get(0);
       
       for(int i = 1; i < ordinalIterators.size(); i++){
          OrdinalIterator ord = ordinalIterators.get(i);
-         if(hasFollowing.apply(ord.iterator) 
-               && (!hasFollowing.apply(extreme.iterator) 
-                     || elemCompare.compare(ord, extreme) < 0)){
+         if(ord.iterator.hasNext() 
+               && (!min.iterator.hasNext() 
+                     || smallerNext.compare(ord, min) < 0)){
             //if the following iterator hasNext (or hasPrev, larger, etc.) and the current minimum does not
             //or if the following is simply smaller
             //we've found a new minimum
-            extreme = ord;
+            min = ord;
          }
       }
 
-      return extreme.iterator;
-   }
-
-   private ReverseSeekingIterator<InternalKey, Slice> getMin(){
-      return getExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasNext(), smallerNext);
+      return min.iterator;
    }
 
    private ReverseSeekingIterator<InternalKey, Slice> getMax(){
-      return getExtreme(ReverseIterators.<ReverseSeekingIterator<InternalKey, Slice>>hasPrev(), largerPrev);
+      OrdinalIterator max = ordinalIterators.get(0);
+      
+      for(int i = 1; i < ordinalIterators.size(); i++){
+         OrdinalIterator ord = ordinalIterators.get(i);
+         if(ord.iterator.hasPrev() 
+               && (!max.iterator.hasPrev() 
+                     || largerPrev.compare(ord, max) < 0)){
+            max = ord;
+         }
+      }
+
+      return max.iterator;
    }
 
    @Override
    protected boolean hasNextInternal()
    {
-      return hasMin();
+      for(OrdinalIterator ord:ordinalIterators){
+         if(ord.iterator.hasNext()){
+            return true;
+         }
+      }
+      return false;
    }
 
    @Override
    protected boolean hasPrevInternal()
    {
-      return hasMax();
+      for(OrdinalIterator ord:ordinalIterators){
+         if(ord.iterator.hasPrev()){
+            return true;
+         }
+      }
+      return false;
    }
 
    @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
-      if(!hasMax()){
+      if(!hasPrevInternal()){
          return null;
       }
 
@@ -162,7 +158,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> getNextElement()
    {
-      if(!hasMin()){
+      if(!hasNextInternal()){
          return null;
       }
       
@@ -192,74 +188,46 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       }
    }
 
-   protected class SmallerNextElementComparator extends ElementComparator
+   protected class SmallerNextElementComparator implements Comparator<OrdinalIterator> 
    {
-      public SmallerNextElementComparator()
-      {
-         super(
-            new Predicate<OrdinalIterator>(){
-               public boolean apply(OrdinalIterator ord){
-                  return ord.iterator.hasNext();
-               }
-            },
-            new Function<OrdinalIterator, InternalKey>(){
-               public InternalKey apply(OrdinalIterator ord){
-                  return ord.iterator.peek().getKey();
-               }
-            });
-      }
-   }
-
-   protected class LargerPrevElementComparator extends ElementComparator
-   {
-      public LargerPrevElementComparator()
-      {
-         super(
-            new Predicate<OrdinalIterator>(){
-               public boolean apply(OrdinalIterator ord){
-                  return ord.iterator.hasPrev();
-               }
-            },
-            new Function<OrdinalIterator, InternalKey>(){
-               public InternalKey apply(OrdinalIterator ord){
-                  return ord.iterator.peekPrev().getKey();
-               }
-            }
-         );
-      }
-      
-      @Override
-      public int compare(OrdinalIterator o1, OrdinalIterator o2){
-         return -super.compare(o1, o2); //negative for reverse comparison to get larger items
-      }
-   }
-   
-   private abstract class ElementComparator implements Comparator<OrdinalIterator>{
-      private final Predicate<OrdinalIterator> hasFollowing;
-      private final Function<OrdinalIterator, InternalKey> peekFollowing;
-
-      public ElementComparator(Predicate<OrdinalIterator> hasFollowing, Function<OrdinalIterator, InternalKey> peekFollowing){
-         this.hasFollowing = hasFollowing;
-         this.peekFollowing = peekFollowing;
-      }
       @Override
       public int compare(OrdinalIterator o1, OrdinalIterator o2)
       {
-         if (hasFollowing.apply(o1))
+         if (o1.iterator.hasNext())
          {
-            if (hasFollowing.apply(o2))
+            if (o2.iterator.hasNext())
             {
                //both iterators have a next element
-               int result = comparator.compare(peekFollowing.apply(o1), peekFollowing.apply(o2));
+               int result = comparator.compare(o1.iterator.peek().getKey(), o2.iterator.peek().getKey());
                return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
             }
             return -1; //o2 does not have a next element, consider o1 less than the empty o2
          }
-         if(hasFollowing.apply(o2)){
+         if(o2.iterator.hasNext()){
             return 1; //o1 does not have a next element, consider o2 less than the empty o1
          }
          return 0; //neither o1 nor o2 have a next element, consider them equals as empty iterators in this direction
       }
-      
+   }
+
+   protected class LargerPrevElementComparator implements Comparator<OrdinalIterator>
+   {
+      @Override
+      public int compare(OrdinalIterator o1, OrdinalIterator o2)
+      {
+         if (o1.iterator.hasPrev())
+         {
+            if (o2.iterator.hasPrev())
+            {
+               int result = comparator.compare(o1.iterator.peekPrev().getKey(), o2.iterator.peekPrev().getKey());
+               return -(result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result);
+            }
+            return 1; 
+         }
+         if(o2.iterator.hasPrev()){
+            return -1; 
+         }
+         return 0;
+      }
    }
 }
