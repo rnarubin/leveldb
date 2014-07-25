@@ -75,7 +75,7 @@
 				<enabled>false</enabled>
 			</releases>
 			<snapshots>
-				<enabled>false</enabled>
+				<enabled>true</enabled>
 			</snapshots>
 			<id>cleversafe.snapshots</id>
 			<name>Cleversafe Internal Snapshots</name>
