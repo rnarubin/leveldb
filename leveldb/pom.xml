@@ -9,6 +9,7 @@
     </parent>
 
     <artifactId>leveldb</artifactId>
+    <version>0.8-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>${project.artifactId}</name>
