@@ -69,12 +69,12 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected void seekToLastInternal()
    {
-      seekToEnd();
+      seekToEndInternal();
       getPrevElement();
    }
    
    @Override
-   public void seekToEnd(){
+   public void seekToEndInternal(){
       iterator.seekToEnd();
       savedEntry = null;
       direction = REVERSE;

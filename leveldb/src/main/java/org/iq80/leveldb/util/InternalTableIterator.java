@@ -1,6 +1,7 @@
 package org.iq80.leveldb.util;
 
 import com.google.common.collect.Maps;
+
 import org.iq80.leveldb.impl.InternalKey;
 
 import java.util.Map.Entry;
@@ -33,7 +34,7 @@ public class InternalTableIterator extends AbstractReverseSeekingIterator<Intern
     }
     
     @Override
-    public void seekToEnd(){
+    public void seekToEndInternal(){
        tableIterator.seekToEnd();
     }
 
@@ -56,7 +57,25 @@ public class InternalTableIterator extends AbstractReverseSeekingIterator<Intern
         }
         return null;
    }
-   
+
+   @Override
+   protected Entry<InternalKey, Slice> peekInternal(){
+      if(tableIterator.hasNext()){
+         Entry<Slice, Slice> peek = tableIterator.peek();
+         return Maps.immutableEntry(new InternalKey(peek.getKey()), peek.getValue());
+      }
+      return null;
+   }
+
+   @Override
+   protected Entry<InternalKey, Slice> peekPrevInternal(){
+      if(tableIterator.hasPrev()){
+         Entry<Slice, Slice> peekPrev = tableIterator.peekPrev();
+         return Maps.immutableEntry(new InternalKey(peekPrev.getKey()), peekPrev.getValue());
+      }
+      return null;
+   }
+
     @Override
     public String toString()
     {

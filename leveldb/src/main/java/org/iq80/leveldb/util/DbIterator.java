@@ -69,7 +69,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    }
    
    @Override
-   public void seekToEnd(){
+   public void seekToEndInternal(){
        for(OrdinalIterator ord:ordinalIterators){
          ord.iterator.seekToEnd();
        }
@@ -146,23 +146,27 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    }
 
    @Override
-   protected Entry<InternalKey, Slice> getPrevElement()
+   protected Entry<InternalKey, Slice> getNextElement()
    {
-      if(!hasPrevInternal()){
-         return null;
-      }
-
-      return getMax().prev();
+      return hasNextInternal() ? getMin().next() : null;
    }
 
    @Override
-   protected Entry<InternalKey, Slice> getNextElement()
+   protected Entry<InternalKey, Slice> getPrevElement()
    {
-      if(!hasNextInternal()){
-         return null;
-      }
-      
-      return getMin().next();
+      return hasPrevInternal() ? getMax().prev() : null;
+   }
+
+   @Override
+   protected Entry<InternalKey, Slice> peekInternal()
+   {
+      return hasNextInternal() ? getMin().peek() : null;
+   }
+
+   @Override
+   protected Entry<InternalKey, Slice> peekPrevInternal()
+   {
+      return hasPrevInternal() ? getMax().peekPrev() : null;
    }
 
    @Override

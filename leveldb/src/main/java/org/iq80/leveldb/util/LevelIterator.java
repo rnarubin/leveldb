@@ -46,7 +46,7 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
    }
    
    @Override
-   public void seekToEnd(){
+   public void seekToEndInternal(){
       index = files.size()-1;
       current = openFile(index);
       currentOrigin = PREV;
@@ -119,14 +119,25 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
         // because otherwise we'll have called inputs.next() before throwing
         // the first NPE, and the next time around we'll call inputs.next()
         // again, incorrectly moving beyond the error.
-        if (currentHasNext()) {
-            return current.next();
-        }
-        else {
-            return null;
-        }
+        return currentHasNext() ? current.next() : null;
     }
-    
+
+   @Override
+   protected Entry<InternalKey, Slice> getPrevElement()
+   {
+        return currentHasPrev() ? current.prev() : null;
+   }
+
+   @Override
+   protected Entry<InternalKey, Slice> peekInternal(){
+      return currentHasNext() ? current.peek() : null;
+   }
+
+   @Override
+   protected Entry<InternalKey, Slice> peekPrevInternal(){
+      return currentHasPrev() ? current.peekPrev() : null;
+   }
+
     private boolean currentHasNext(){
         boolean currentHasNext = false;
         while (true) {
@@ -185,17 +196,6 @@ public final class LevelIterator extends AbstractReverseSeekingIterator<Internal
         }
         return currentHasPrev;
     }
-
-   @Override
-   protected Entry<InternalKey, Slice> getPrevElement()
-   {
-        if (currentHasPrev()) {
-            return current.prev();
-        }
-        else {
-            return null;
-        }
-   }
    
    private InternalTableIterator openFile(int i){
       return tableCache.newIterator(files.get(i));
