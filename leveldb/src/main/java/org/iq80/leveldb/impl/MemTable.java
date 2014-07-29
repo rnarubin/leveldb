@@ -100,7 +100,7 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
 
       public MemTableIterator()
       {
-         iterator = ReverseIterators.reversePeekingIterator(table.entrySet());
+         seekToFirst();
       }
 
       @Override
@@ -112,7 +112,7 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seekToFirst()
       {
-         iterator = ReverseIterators.reversePeekingIterator(table.entrySet());
+         makeIteratorAtIndex(0);
       }
 
       @Override
@@ -126,26 +126,22 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
              }
              return;
           }
-          //then initialize the iterator at that key's location within the entryset (find the index with binary search)
-         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
+          //then initialize the iterator at that key's location within the entryset
+          //(find the index with binary search)
          List<InternalKey> keyList = Lists.newArrayList(table.keySet());
-         iterator =
-               ReverseIterators.reversePeekingIterator(entryList.listIterator(Collections.binarySearch(
-                     keyList, ceiling.getKey(), table.comparator())));
+         makeIteratorAtIndex(Collections.binarySearch(keyList, ceiling.getKey(), table.comparator()));
       }
       
       @Override
-      public InternalEntry peek()
+      public Entry<InternalKey, Slice> peek()
       {
-         Entry<InternalKey, Slice> entry = iterator.peek();
-         return new InternalEntry(entry.getKey(), entry.getValue());
+         return iterator.peek();
       }
 
       @Override
-      public InternalEntry next()
+      public Entry<InternalKey, Slice> next()
       {
-         Entry<InternalKey, Slice> entry = iterator.next();
-         return new InternalEntry(entry.getKey(), entry.getValue());
+         return iterator.next();
       }
 
       @Override
@@ -161,16 +157,17 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
             seekToFirst();
             return;
          }
-         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
-         iterator =
-               ReverseIterators.reversePeekingIterator(entryList.listIterator(entryList.size()-1));
+         makeIteratorAtIndex(table.size()-1);
       }
       
       @Override
       public void seekToEnd(){
+         makeIteratorAtIndex(table.size());
+      }
+      
+      private void makeIteratorAtIndex(int index){
          List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
-         iterator =
-               ReverseIterators.reversePeekingIterator(entryList.listIterator(entryList.size()));
+         iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
       }
 
       @Override
