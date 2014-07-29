@@ -275,8 +275,6 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
     */
    private BlockEntry readEntry(SliceInput data, BlockEntry previousEntry)
    {
-      Preconditions.checkNotNull(data, "data is null");
-
       prevPosition = data.position();
 
       // read entry header

@@ -95,12 +95,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       
       for(int i = 1; i < ordinalIterators.size(); i++){
          OrdinalIterator ord = ordinalIterators.get(i);
-         if(ord.iterator.hasNext() 
-               && (!min.iterator.hasNext() 
-                     || smallerNext.compare(ord, min) < 0)){
-            //if the following iterator hasNext (or hasPrev, larger, etc.) and the current minimum does not
-            //or if the following is simply smaller
-            //we've found a new minimum
+         if(smallerNext.compare(ord, min) < 0){
             min = ord;
          }
       }
@@ -113,9 +108,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       
       for(int i = 1; i < ordinalIterators.size(); i++){
          OrdinalIterator ord = ordinalIterators.get(i);
-         if(ord.iterator.hasPrev() 
-               && (!max.iterator.hasPrev() 
-                     || largerPrev.compare(ord, max) < 0)){
+         if(largerPrev.compare(ord, max) > 0){
             max = ord;
          }
       }
@@ -148,25 +141,25 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> getNextElement()
    {
-      return hasNextInternal() ? getMin().next() : null;
+      return getMin().next();
    }
 
    @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
-      return hasPrevInternal() ? getMax().prev() : null;
+      return getMax().prev();
    }
 
    @Override
    protected Entry<InternalKey, Slice> peekInternal()
    {
-      return hasNextInternal() ? getMin().peek() : null;
+      return getMin().peek();
    }
 
    @Override
    protected Entry<InternalKey, Slice> peekPrevInternal()
    {
-      return hasPrevInternal() ? getMax().peekPrev() : null;
+      return getMax().peekPrev();
    }
 
    @Override
@@ -224,12 +217,12 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
             if (o2.iterator.hasPrev())
             {
                int result = comparator.compare(o1.iterator.peekPrev().getKey(), o2.iterator.peekPrev().getKey());
-               return -(result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result);
+               return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
             }
-            return 1; 
+            return 1; //if o2 has no prev, return o1 as larger
          }
          if(o2.iterator.hasPrev()){
-            return -1; 
+            return -1; //if o1 has no prev, return o2 as larger
          }
          return 0;
       }
