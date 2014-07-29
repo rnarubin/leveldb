@@ -1,7 +1,6 @@
 
 package org.iq80.leveldb.util;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
@@ -90,7 +89,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
       resetHeap();
    }
 
-   private Pair<OrdinalIterator, Integer> getMax(){
+   private Tuple<OrdinalIterator, Integer> getMaxAndIndex(){
       /*
        * forward iteration can take advantage of the heap ordering but reverse iteration cannot,
        * requiring linear search. there were attempts to maintain two parallel heaps, one min-heap
@@ -110,7 +109,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
          }
       }
 
-      return Pair.of(max, maxIndex);
+      return Tuple.of(max, maxIndex);
    }
 
    @Override
@@ -142,9 +141,9 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> getPrevElement()
    {
-      Pair<OrdinalIterator, Integer> maxAndIndex = getMax();
-      OrdinalIterator ord = maxAndIndex.getLeft();
-      int index = maxAndIndex.getRight();
+      Tuple<OrdinalIterator, Integer> maxAndIndex = getMaxAndIndex();
+      OrdinalIterator ord = maxAndIndex.item1;
+      int index = maxAndIndex.item2;
       
       Entry<InternalKey, Slice> prev = ord.iterator.prev();
       siftUp(heap, smallerNext, index, heap[index]);
@@ -162,7 +161,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    @Override
    protected Entry<InternalKey, Slice> peekPrevInternal()
    {
-      return getMax().getLeft().iterator.peekPrev();
+      return getMaxAndIndex().item1.iterator.peekPrev();
    }
 
    private void resetHeap(){
@@ -264,6 +263,20 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
             return -1; //if o1 has no prev, return o2 as larger
          }
          return 0;
+      }
+   }
+   
+   private static class Tuple<T1, T2>{
+      final T1 item1;
+      final T2 item2;
+      
+      public Tuple(T1 item1, T2 item2){
+         this.item1 = item1;
+         this.item2 = item2;
+      }
+      
+      public static <A, B> Tuple<A, B> of(A a, B b){
+         return new Tuple<A, B>(a, b);
       }
    }
 }
