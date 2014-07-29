@@ -30,7 +30,7 @@ public final class DbIterator extends AbstractReverseSeekingIterator<InternalKey
    {
       this.userComparator = userComparator;
       
-      ArrayList<OrdinalIterator> ordinalIterators = new ArrayList<>();
+      ArrayList<OrdinalIterator> ordinalIterators = new ArrayList<OrdinalIterator>();
       int ordinal = 0;
       if(memTableIterator != null){
          ordinalIterators.add(new OrdinalIterator(ordinal++, memTableIterator));

@@ -807,7 +807,7 @@ public class DbImplTest
                 immutableEntry("scotch/strong", "Lagavulin"));
 
         for (int i = 1; i < entries.size(); i++) {
-           List<Entry<String, String>> incrementalEntries = new ArrayList<>();
+           List<Entry<String, String>> incrementalEntries = new ArrayList<Entry<String, String>>();
            for(Entry<String, String> e:entries){
               incrementalEntries.add(immutableEntry(e.getKey(), "v"+i+":"+e.getValue()));
            }
@@ -912,7 +912,6 @@ public class DbImplTest
         }
         assertSequence(seekingIterator, entries);
 
-        int i = 0;
         for (Entry<String, String> entry : entries) {
             List<Entry<String, String>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
             List<Entry<String, String>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());

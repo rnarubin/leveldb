@@ -28,7 +28,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Random;
@@ -40,8 +39,6 @@ import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.impl.SnapshotSeekingIterator;
-import org.testng.collections.Lists;
 
 import com.google.common.collect.Maps;
 
@@ -58,8 +55,8 @@ public class DBIteratorTest extends TestCase
    {
       Random rand = new Random(0);
 
-      entries = new ArrayList<>();
-      int items = 1_000_000;
+      entries = new ArrayList<Entry<String, String>>();
+      int items = 1000000;
       for (int i = 0; i < items; i++)
       {
          StringBuilder sb = new StringBuilder();
@@ -186,7 +183,7 @@ public class DBIteratorTest extends TestCase
       String keys[] = {"a","b","c","d","e","f"};
       int deleteIndex[] = {2, 3, 5};
 
-      List<Entry<String, String>> keyvals = new ArrayList<>();
+      List<Entry<String, String>> keyvals = new ArrayList<Entry<String, String>>();
       for(String key:keys){
          keyvals.add(Maps.immutableEntry(key, "v"+key));
       }
@@ -200,7 +197,7 @@ public class DBIteratorTest extends TestCase
          }
       }
       
-      Set<Entry<String, String>> expectedSet = new TreeSet<>(new Comparator<Entry<String, String>>(){
+      Set<Entry<String, String>> expectedSet = new TreeSet<Entry<String, String>>(new Comparator<Entry<String, String>>(){
          public int compare(Entry<String, String> o1, Entry<String, String> o2)
          {
             return o1.getKey().compareTo(o2.getKey());
@@ -210,7 +207,7 @@ public class DBIteratorTest extends TestCase
          keyvals.remove(deleteIndex[i]);
       }
       expectedSet.addAll(keyvals);
-      List<Entry<String, String>> expected = new ArrayList<>(expectedSet);
+      List<Entry<String, String>> expected = new ArrayList<Entry<String, String>>(expectedSet);
       
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seek("f");
@@ -234,7 +231,7 @@ public class DBIteratorTest extends TestCase
       actual.seek("g");
       assertFalse(actual.hasNext());
       actual.seekToLast();
-      List<Entry<String, String>> items = new ArrayList<>();
+      List<Entry<String, String>> items = new ArrayList<Entry<String, String>>();
       Entry<String, String> peek = actual.peek();
       items.add(peek);
       assertEquals(expected.get(expected.size()-1), peek);

@@ -38,7 +38,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 
-import junit.framework.Assert;
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertTrue;
 

@@ -61,7 +61,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
       this.comparator = comparator;
       
-      prevCache = new ArrayDeque<>();
+      prevCache = new ArrayDeque<CacheEntry>();
       prevCacheRestartIndex = -1;
 
       seekToFirst();
