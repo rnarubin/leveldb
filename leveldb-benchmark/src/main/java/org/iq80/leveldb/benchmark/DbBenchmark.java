@@ -459,7 +459,7 @@ public class DbBenchmark
 
     private void readReverse()
     {
-        for (int loops = 0; loops < 5; loops++) {
+        for (int loops = 0; loops < 3; loops++) {
             DBIterator iterator = db_.iterator();
             iterator.seekToLast();
             for (int i = 0; i < reads_ && iterator.hasPrev(); i++) {
