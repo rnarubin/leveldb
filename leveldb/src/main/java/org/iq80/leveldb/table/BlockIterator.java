@@ -24,7 +24,9 @@ import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.iq80.leveldb.util.SliceOutput;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
@@ -40,6 +42,9 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
    private BlockEntry nextEntry;
    private BlockEntry prevEntry;
+   
+   private final Deque<CacheEntry> prevCache;
+   private int prevCacheRestartIndex;
 
    public BlockIterator(Slice data, Slice restartPositions, Comparator<Slice> comparator)
    {
@@ -55,6 +60,9 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       this.restartCount = this.restartPositions.length() / SIZE_OF_INT;
 
       this.comparator = comparator;
+      
+      prevCache = new ArrayDeque<CacheEntry>();
+      prevCacheRestartIndex = -1;
 
       seekToFirst();
    }
@@ -114,6 +122,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       {
          // read entry at current data position
          nextEntry = readEntry(data, prevEntry);
+         resetCache();
       }
       return prevEntry;
    }
@@ -126,10 +135,26 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
          throw new NoSuchElementException();
       }
       
-      seekToRestartPosition(getPreviousRestart(restartIndex, original));
-      while(data.position() < original && data.isReadable()){
-         prevEntry = nextEntry;
-         nextEntry = readEntry(data, prevEntry);
+      int previousRestart = getPreviousRestart(restartIndex, original);
+      if(previousRestart == prevCacheRestartIndex && prevCache.size() > 0){
+         CacheEntry prevState = prevCache.pop();
+         nextEntry = prevState.entry;
+         prevPosition = prevState.prevPosition;
+         data.setPosition(prevState.dataPosition);
+         
+         CacheEntry peek = prevCache.peek();
+         prevEntry = peek==null?null:peek.entry;
+      }
+      else{
+         seekToRestartPosition(previousRestart);
+         prevCacheRestartIndex = previousRestart;
+         prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+         while(data.position() < original && data.isReadable()){
+            prevEntry = nextEntry;
+            nextEntry = readEntry(data, prevEntry);
+            prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+         }
+         prevCache.pop(); //we don't want to cache the last entry because that's returned with this call
       }
 
       return nextEntry;
@@ -257,6 +282,8 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       nextEntry = null;
       prevEntry = null;
       
+      resetCache();
+      
       restartIndex = restartPosition;
 
       // read the entry
@@ -275,8 +302,6 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
     */
    private BlockEntry readEntry(SliceInput data, BlockEntry previousEntry)
    {
-      Preconditions.checkNotNull(data, "data is null");
-
       prevPosition = data.position();
 
       // read entry header
@@ -299,5 +324,21 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       Slice value = data.readSlice(valueLength);
 
       return new BlockEntry(key, value);
+   }
+   
+   private void resetCache(){
+      prevCache.clear();
+      prevCacheRestartIndex = -1;
+   }
+   
+   private static class CacheEntry{
+      public final BlockEntry entry;
+      public final int prevPosition, dataPosition;
+      
+      public CacheEntry(BlockEntry entry, int prevPosition, int dataPosition){
+         this.entry = entry;
+         this.prevPosition = prevPosition;
+         this.dataPosition = dataPosition;
+      }
    }
 }

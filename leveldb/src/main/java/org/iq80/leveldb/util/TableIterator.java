@@ -52,7 +52,7 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
    }
    
    @Override
-   public void seekToEnd(){
+   public void seekToEndInternal(){
       blockIterator.seekToEnd();
       clearCurrent();
    }
@@ -94,25 +94,27 @@ public final class TableIterator extends AbstractReverseSeekingIterator<Slice, S
         // because otherwise we'll have called inputs.next() before throwing
         // the first NPE, and the next time around we'll call inputs.next()
         // again, incorrectly moving beyond the error.
-        if (currentHasNext()) {
-            return current.next();
-        }
-        else {
-            return null;
-        }
+        return currentHasNext() ? current.next() : null;
     }
 
    @Override
    protected Entry<Slice, Slice> getPrevElement()
    {
-        if (currentHasPrev()) {
-            return current.prev();
-        }
-        else {
-            return null;
-        }
+        return currentHasPrev() ? current.prev() : null;
    }
-    
+
+   @Override
+   protected Entry<Slice, Slice> peekInternal()
+   {
+      return currentHasNext() ? current.peek() : null;
+   }
+
+   @Override
+   protected Entry<Slice, Slice> peekPrevInternal()
+   {
+      return currentHasPrev() ? current.peekPrev() : null;
+   }
+
     private boolean currentHasNext(){
         boolean currentHasNext = false;
         while (true) {

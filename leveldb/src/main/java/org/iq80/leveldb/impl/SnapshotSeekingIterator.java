@@ -69,12 +69,12 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected void seekToLastInternal()
    {
-      seekToEnd();
+      seekToEndInternal();
       getPrevElement();
    }
    
    @Override
-   public void seekToEnd(){
+   public void seekToEndInternal(){
       iterator.seekToEnd();
       savedEntry = null;
       direction = REVERSE;
@@ -138,9 +138,25 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
          }
       }
 
-      //savedEntry = iterator.prev();
-
       return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
+   }
+
+   @Override
+   protected Entry<Slice, Slice> peekInternal(){
+      if(hasNextInternal()){
+         Entry<InternalKey, Slice> peek = iterator.peek();
+         return Maps.immutableEntry(peek.getKey().getUserKey(), peek.getValue());
+      }
+      return null;
+   }
+
+   @Override
+   protected Entry<Slice, Slice> peekPrevInternal(){
+      if(hasPrevInternal()){
+         Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+         return Maps.immutableEntry(peekPrev.getKey().getUserKey(), peekPrev.getValue());
+      }
+      return null;
    }
 
    private void findNextUserEntry(boolean skipping, Slice skipKey)

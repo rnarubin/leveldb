@@ -31,6 +31,12 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
       rPeekedElement = peekedElement = null;
       seekInternal(targetKey);
    }
+   
+   @Override
+   public final void seekToEnd(){
+      rPeekedElement = peekedElement = null;
+      seekToEndInternal();
+   }
 
    @Override
    public final boolean hasNext()
@@ -75,12 +81,10 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    {
       if (peekedElement == null)
       {
-         peekedElement = getNextElement();
-         if (peekedElement == null)
-         {
+         peekedElement = peekInternal();
+         if(peekedElement == null){
             throw new NoSuchElementException();
          }
-         getPrevElement(); // reset to original position
       }
       return peekedElement;
    }
@@ -90,12 +94,10 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    {
       if (rPeekedElement == null)
       {
-         rPeekedElement = getPrevElement();
-         if (rPeekedElement == null)
-         {
+         rPeekedElement = peekPrevInternal();
+         if(rPeekedElement == null){
             throw new NoSuchElementException();
          }
-         getNextElement(); // reset to original position
       }
       return rPeekedElement;
    }
@@ -106,17 +108,33 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
       throw new UnsupportedOperationException();
    }
    
+   //non-abstract; in case the iterator implementation provides
+   //a more efficient means of peeking, it can override this method
+   protected Entry<K, V> peekInternal(){
+      Entry<K, V> ret = getNextElement();
+      if(ret == null){
+         throw new NoSuchElementException();
+      }
+      getPrevElement();
+      return ret;
+   }
+
+   protected Entry<K, V> peekPrevInternal(){
+      Entry<K, V> ret = getPrevElement();
+      if(ret == null){
+         throw new NoSuchElementException();
+      }
+      getNextElement();
+      return ret;
+   }
+   
    protected abstract void seekToLastInternal();
-
    protected abstract void seekToFirstInternal();
-
+   protected abstract void seekToEndInternal();
    protected abstract void seekInternal(K targetKey);
-
    protected abstract boolean hasNextInternal();
-
    protected abstract boolean hasPrevInternal();
 
    protected abstract Entry<K, V> getNextElement();
-
    protected abstract Entry<K, V> getPrevElement();
 }
