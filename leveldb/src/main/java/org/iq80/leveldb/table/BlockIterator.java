@@ -42,7 +42,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
    private BlockEntry nextEntry;
    private BlockEntry prevEntry;
-   
+
    private final Deque<CacheEntry> prevCache;
    private int prevCacheRestartIndex;
 
@@ -60,7 +60,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       this.restartCount = this.restartPositions.length() / SIZE_OF_INT;
 
       this.comparator = comparator;
-      
+
       prevCache = new ArrayDeque<CacheEntry>();
       prevCacheRestartIndex = -1;
 
@@ -92,13 +92,15 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public BlockEntry peekPrev()
    {
-      if(prevEntry == null && currentPosition() > 0){
-         //this case should only occur after seeking under certain conditions
+      if (prevEntry == null && currentPosition() > 0)
+      {
+         // this case should only occur after seeking under certain conditions
          BlockEntry peeked = prev();
          next();
          prevEntry = peeked;
       }
-      else if(prevEntry == null){
+      else if (prevEntry == null)
+      {
          throw new NoSuchElementException();
       }
       return prevEntry;
@@ -131,48 +133,58 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    public BlockEntry prev()
    {
       int original = currentPosition();
-      if(original == 0){
+      if (original == 0)
+      {
          throw new NoSuchElementException();
       }
-      
+
       int previousRestart = getPreviousRestart(restartIndex, original);
-      if(previousRestart == prevCacheRestartIndex && prevCache.size() > 0){
+      if (previousRestart == prevCacheRestartIndex && prevCache.size() > 0)
+      {
          CacheEntry prevState = prevCache.pop();
          nextEntry = prevState.entry;
          prevPosition = prevState.prevPosition;
          data.setPosition(prevState.dataPosition);
-         
+
          CacheEntry peek = prevCache.peek();
-         prevEntry = peek==null?null:peek.entry;
+         prevEntry = peek == null ? null : peek.entry;
       }
-      else{
+      else
+      {
          seekToRestartPosition(previousRestart);
          prevCacheRestartIndex = previousRestart;
          prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
-         while(data.position() < original && data.isReadable()){
+         while (data.position() < original && data.isReadable())
+         {
             prevEntry = nextEntry;
             nextEntry = readEntry(data, prevEntry);
             prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
          }
-         prevCache.pop(); //we don't want to cache the last entry because that's returned with this call
+         prevCache.pop(); // we don't want to cache the last entry because that's returned with this
+// call
       }
 
       return nextEntry;
    }
-   
-   private int getPreviousRestart(int startIndex, int position){
-      while(getRestartPoint(startIndex) >= position){
-         if(startIndex == 0){
+
+   private int getPreviousRestart(int startIndex, int position)
+   {
+      while (getRestartPoint(startIndex) >= position)
+      {
+         if (startIndex == 0)
+         {
             throw new NoSuchElementException();
          }
          startIndex--;
       }
       return startIndex;
    }
-   
-   private int currentPosition(){
-      //lags data.position because of the nextEntry read-ahead
-      if(nextEntry != null){
+
+   private int currentPosition()
+   {
+      // lags data.position because of the nextEntry read-ahead
+      if (nextEntry != null)
+      {
          return prevPosition;
       }
       return data.position();
@@ -199,19 +211,23 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
    @Override
    public void seekToLast()
    {
-      if(restartCount > 0){
-         seekToRestartPosition(Math.max(0, restartCount-1));
-         while(data.isReadable()){
-            //seek until reaching the last entry
+      if (restartCount > 0)
+      {
+         seekToRestartPosition(Math.max(0, restartCount - 1));
+         while (data.isReadable())
+         {
+            // seek until reaching the last entry
             next();
          }
       }
    }
-   
+
    @Override
-   public void seekToEnd(){
-      if(restartCount > 0){
-         //TODO might be able to accomplish with setting data position
+   public void seekToEnd()
+   {
+      if (restartCount > 0)
+      {
+         // TODO might be able to accomplish with setting data position
          seekToLast();
          next();
       }
@@ -281,16 +297,17 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
       // clear the entries to assure key is not prefixed
       nextEntry = null;
       prevEntry = null;
-      
+
       resetCache();
-      
+
       restartIndex = restartPosition;
 
       // read the entry
       nextEntry = readEntry(data, null);
    }
-   
-   private int getRestartPoint(int index){
+
+   private int getRestartPoint(int index)
+   {
       return restartPositions.getInt(index * SIZE_OF_INT);
    }
 
@@ -325,17 +342,20 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
 
       return new BlockEntry(key, value);
    }
-   
-   private void resetCache(){
+
+   private void resetCache()
+   {
       prevCache.clear();
       prevCacheRestartIndex = -1;
    }
-   
-   private static class CacheEntry{
+
+   private static class CacheEntry
+   {
       public final BlockEntry entry;
       public final int prevPosition, dataPosition;
-      
-      public CacheEntry(BlockEntry entry, int prevPosition, int dataPosition){
+
+      public CacheEntry(BlockEntry entry, int prevPosition, int dataPosition)
+      {
          this.entry = entry;
          this.prevPosition = prevPosition;
          this.dataPosition = dataPosition;

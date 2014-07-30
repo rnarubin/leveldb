@@ -72,38 +72,42 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
       seekToEndInternal();
       getPrevElement();
    }
-   
+
    @Override
-   public void seekToEndInternal(){
+   public void seekToEndInternal()
+   {
       iterator.seekToEnd();
       savedEntry = null;
       direction = REVERSE;
    }
-   
+
    @Override
    protected void seekInternal(Slice targetKey)
    {
       iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
       findNextUserEntry(false, null);
-      direction = REVERSE; //the next user entry has been found, but not yet advanced
+      direction = REVERSE; // the next user entry has been found, but not yet advanced
 
    }
 
    @Override
    protected Entry<Slice, Slice> getNextElement()
    {
-      if(direction == REVERSE){
-         if(!iterator.hasNext()){
+      if (direction == REVERSE)
+      {
+         if (!iterator.hasNext())
+         {
             savedEntry = null;
             return null;
          }
          direction = FORWARD;
 
-         //the last valid entry was returned by getPrevElement
-         //so iterator's next must be the valid entry
+         // the last valid entry was returned by getPrevElement
+         // so iterator's next must be the valid entry
       }
-      else{
-         findNextUserEntry(true, savedEntry==null?null:savedEntry.getKey().getUserKey());
+      else
+      {
+         findNextUserEntry(true, savedEntry == null ? null : savedEntry.getKey().getUserKey());
 
          if (!iterator.hasNext())
          {
@@ -119,17 +123,20 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected Entry<Slice, Slice> getPrevElement()
    {
-      if(direction == FORWARD){
-         if(!iterator.hasPrev()){
+      if (direction == FORWARD)
+      {
+         if (!iterator.hasPrev())
+         {
             savedEntry = null;
             return null;
          }
          direction = REVERSE;
-         //the last valid entry was returned by getNextElement
-         //so iterator's prev must be the valid entry
+         // the last valid entry was returned by getNextElement
+         // so iterator's prev must be the valid entry
          savedEntry = iterator.prev();
       }
-      else{
+      else
+      {
          findPrevUserEntry();
 
          if (savedEntry == null)
@@ -142,8 +149,10 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    }
 
    @Override
-   protected Entry<Slice, Slice> peekInternal(){
-      if(hasNextInternal()){
+   protected Entry<Slice, Slice> peekInternal()
+   {
+      if (hasNextInternal())
+      {
          Entry<InternalKey, Slice> peek = iterator.peek();
          return Maps.immutableEntry(peek.getKey().getUserKey(), peek.getValue());
       }
@@ -151,8 +160,10 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    }
 
    @Override
-   protected Entry<Slice, Slice> peekPrevInternal(){
-      if(hasPrevInternal()){
+   protected Entry<Slice, Slice> peekPrevInternal()
+   {
+      if (hasPrevInternal())
+      {
          Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
          return Maps.immutableEntry(peekPrev.getKey().getUserKey(), peekPrev.getValue());
       }
@@ -161,19 +172,24 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
 
    private void findNextUserEntry(boolean skipping, Slice skipKey)
    {
-      if(skipKey == null){
+      if (skipKey == null)
+      {
          skipping = false;
       }
-      while(iterator.hasNext()){
+      while (iterator.hasNext())
+      {
          InternalKey internalKey = iterator.peek().getKey();
-         if(internalKey.getSequenceNumber() <= snapshot.getLastSequence()){
-            switch(internalKey.getValueType()){
-               case DELETION:
+         if (internalKey.getSequenceNumber() <= snapshot.getLastSequence())
+         {
+            switch (internalKey.getValueType())
+            {
+               case DELETION :
                   skipKey = internalKey.getUserKey();
                   skipping = true;
                   break;
-               case VALUE:
-                  if(!skipping || userComparator.compare(internalKey.getUserKey(), skipKey) > 0){
+               case VALUE :
+                  if (!skipping || userComparator.compare(internalKey.getUserKey(), skipKey) > 0)
+                  {
                      return;
                   }
                   break;
@@ -187,25 +203,33 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    private void findPrevUserEntry()
    {
       ValueType valueType = ValueType.DELETION;
-      while(iterator.hasPrev()){
+      while (iterator.hasPrev())
+      {
          Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
          InternalKey internalKey = peekPrev.getKey();
-         if(internalKey.getSequenceNumber() <= snapshot.getLastSequence()){
-            if(valueType != ValueType.DELETION && (savedEntry == null || userComparator.compare(internalKey.getUserKey(), savedEntry.getKey().getUserKey()) < 0)){
+         if (internalKey.getSequenceNumber() <= snapshot.getLastSequence())
+         {
+            if (valueType != ValueType.DELETION
+                  && (savedEntry == null || userComparator.compare(internalKey.getUserKey(),
+                        savedEntry.getKey().getUserKey()) < 0))
+            {
                break;
             }
             valueType = internalKey.getValueType();
-            if(valueType == ValueType.DELETION){
+            if (valueType == ValueType.DELETION)
+            {
                savedEntry = null;
             }
-            else{
+            else
+            {
                savedEntry = peekPrev;
             }
          }
          iterator.prev();
       }
-      
-      if(valueType == ValueType.DELETION){
+
+      if (valueType == ValueType.DELETION)
+      {
          savedEntry = null;
          direction = FORWARD;
       }
@@ -225,11 +249,12 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected boolean hasNextInternal()
    {
-      if(direction == FORWARD){
-         findNextUserEntry(true, savedEntry==null?null:savedEntry.getKey().getUserKey());
+      if (direction == FORWARD)
+      {
+         findNextUserEntry(true, savedEntry == null ? null : savedEntry.getKey().getUserKey());
          // calls to findNextUserEntry without skipping will place the iterator in a state where
          // next() is valid, which is the same as a state of coming from a reverse advance
-         direction = REVERSE; 
+         direction = REVERSE;
       }
       return iterator.hasNext();
    }
@@ -237,13 +262,15 @@ public final class SnapshotSeekingIterator extends AbstractReverseSeekingIterato
    @Override
    protected boolean hasPrevInternal()
    {
-      if(direction == REVERSE){
+      if (direction == REVERSE)
+      {
          findPrevUserEntry();
-         if(savedEntry != null){
-            //findPrevUserEntry places the iterator before the valid user entry
-            //so hasPrev after this call is answered by hasNext
-            //but the has... functions should not advance the iterator
-            //so advance forward to a position effectively the same as before this call
+         if (savedEntry != null)
+         {
+            // findPrevUserEntry places the iterator before the valid user entry
+            // so hasPrev after this call is answered by hasNext
+            // but the has... functions should not advance the iterator
+            // so advance forward to a position effectively the same as before this call
             // (though not exactly identical if deletions are present)
             getNextElement();
          }

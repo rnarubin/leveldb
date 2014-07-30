@@ -81,18 +81,24 @@ public final class ReverseIterators
       }
       return new ReversePeekingImpl<T>(iterator);
    }
-   
-   public static <T extends Iterator<?>> Predicate<T> hasNext(){
-      return new Predicate<T>(){
-         public boolean apply(T iter){
+
+   public static <T extends Iterator<?>> Predicate<T> hasNext()
+   {
+      return new Predicate<T>()
+      {
+         public boolean apply(T iter)
+         {
             return iter.hasNext();
          }
       };
    }
-   
-   public static <T extends ReverseIterator<?>> Predicate<T> hasPrev(){
-      return new Predicate<T>(){
-         public boolean apply(T iter){
+
+   public static <T extends ReverseIterator<?>> Predicate<T> hasPrev()
+   {
+      return new Predicate<T>()
+      {
+         public boolean apply(T iter)
+         {
             return iter.hasPrev();
          }
       };
@@ -141,8 +147,8 @@ public final class ReverseIterators
 
    private static class ReversePeekingImpl<E>
          implements
-            PeekingIterator<E>,
-            ReversePeekingIterator<E>
+         PeekingIterator<E>,
+         ReversePeekingIterator<E>
    {
       private final ReverseIterator<? extends E> rIterator;
       private boolean rHasPeeked;

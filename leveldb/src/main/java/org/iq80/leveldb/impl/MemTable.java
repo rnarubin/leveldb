@@ -93,7 +93,10 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       return new MemTableIterator();
    }
 
-   public class MemTableIterator implements InternalIterator, ReverseSeekingIterator<InternalKey, Slice>
+   public class MemTableIterator
+         implements
+            InternalIterator,
+            ReverseSeekingIterator<InternalKey, Slice>
    {
 
       private ReversePeekingIterator<Entry<InternalKey, Slice>> iterator;
@@ -119,19 +122,21 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       public void seek(InternalKey targetKey)
       {
          // find the smallest key greater than or equal to the targetKey in the table
-          Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
-          if(ceiling == null){ //no keys >= targetKey
-             if(table.size() > 0){
-                seekToEnd();
-             }
-             return;
-          }
-          //then initialize the iterator at that key's location within the entryset
-          //(find the index with binary search)
+         Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
+         if (ceiling == null)
+         { // no keys >= targetKey
+            if (table.size() > 0)
+            {
+               seekToEnd();
+            }
+            return;
+         }
+         // then initialize the iterator at that key's location within the entryset
+         // (find the index with binary search)
          List<InternalKey> keyList = Lists.newArrayList(table.keySet());
          makeIteratorAtIndex(Collections.binarySearch(keyList, ceiling.getKey(), table.comparator()));
       }
-      
+
       @Override
       public Entry<InternalKey, Slice> peek()
       {
@@ -153,19 +158,22 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seekToLast()
       {
-         if(table.size() == 0){
+         if (table.size() == 0)
+         {
             seekToFirst();
             return;
          }
-         makeIteratorAtIndex(table.size()-1);
+         makeIteratorAtIndex(table.size() - 1);
       }
-      
+
       @Override
-      public void seekToEnd(){
+      public void seekToEnd()
+      {
          makeIteratorAtIndex(table.size());
       }
-      
-      private void makeIteratorAtIndex(int index){
+
+      private void makeIteratorAtIndex(int index)
+      {
          List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
          iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
       }
