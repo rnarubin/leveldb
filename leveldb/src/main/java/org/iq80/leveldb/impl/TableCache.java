@@ -45,7 +45,7 @@ public class TableCache
     private final LoadingCache<Long, TableAndFile> cache;
     private final Finalizer<Table> finalizer = new Finalizer<Table>(1);
 
-    public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums)
+    public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums, final boolean useMMap)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
 
@@ -60,7 +60,7 @@ public class TableCache
                 .build(new CacheLoader<Long, TableAndFile>() {
                     public TableAndFile load(Long fileNumber)
                             throws IOException {
-                        return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums);
+                        return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums, useMMap);
                     }
                 });
     }
@@ -110,7 +110,7 @@ public class TableCache
         private final Table table;
         private FileChannel fileChannel;
 
-        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, boolean verifyChecksums)
+        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, boolean verifyChecksums, boolean useMMap)
                 throws IOException
         {
             String tableFileName = Filename.tableFileName(fileNumber);
@@ -127,7 +127,7 @@ public class TableCache
             }
 
             try {
-                if( Iq80DBFactory.USE_MMAP ) {
+                if (useMMap) {
                     table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
                 } else {
                     table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);

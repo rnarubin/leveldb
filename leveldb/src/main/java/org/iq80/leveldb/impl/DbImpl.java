@@ -152,7 +152,7 @@ public class DbImpl implements DB
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator), options.verifyChecksums());
+        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator), options.verifyChecksums(), options.useMMap());
 
         // create the version set
 
@@ -175,7 +175,7 @@ public class DbImpl implements DB
                 Preconditions.checkArgument(!options.errorIfExists(), "Database '%s' exists and the error if exists option is enabled", databaseDir);
             }
 
-            versions = new VersionSet(databaseDir, tableCache, internalKeyComparator);
+            versions = new VersionSet(databaseDir, tableCache, internalKeyComparator, options.useMMap());
 
             // load  (and recover) current version
             versions.recover();
@@ -214,7 +214,7 @@ public class DbImpl implements DB
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber);
+            this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options.useMMap());
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -857,7 +857,7 @@ public class DbImpl implements DB
                 // open a new log
                 long logNumber = versions.getNextFileNumber();
                 try {
-                    this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber);
+                    this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options.useMMap());
                 }
                 catch (IOException e) {
                     throw new RuntimeException("Unable to open new log file " +

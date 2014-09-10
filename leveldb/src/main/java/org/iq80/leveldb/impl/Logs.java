@@ -29,10 +29,10 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(File file, long fileNumber)
+    public static LogWriter createLogWriter(File file, long fileNumber, boolean useMMap)
             throws IOException
     {
-        if( Iq80DBFactory.USE_MMAP ) {
+        if( useMMap) {
             return new MMapLogWriter(file, fileNumber);
         } else {
             return new FileChannelLogWriter(file, fileNumber);

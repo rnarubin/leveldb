@@ -34,6 +34,14 @@ public class Options {
     private Logger logger = null;
     private long cacheSize;
 
+    public static final int CPU_DATA_MODEL = Integer.getInteger("sun.arch.data.model");
+
+    // We only use MMAP on 64 bit systems since it's really easy to run out of
+    // virtual address space on a 32 bit system when all the data is getting mapped
+    // into memory.  If you really want to use MMAP anyways, use -Dleveldb.mmap=true
+    public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""+(CPU_DATA_MODEL>32)));
+    private boolean useMMap = USE_MMAP_DEFAULT;
+
     static void checkArgNotNull(Object value, String name) {
         if(value==null) {
             throw new IllegalArgumentException("The "+name+" argument cannot be null");
@@ -164,5 +172,14 @@ public class Options {
     public Options paranoidChecks(boolean paranoidChecks) {
         this.paranoidChecks = paranoidChecks;
         return this;
+    }
+
+    public boolean useMMap(){
+       return useMMap;
+    }
+
+    public Options useMMap(boolean useMMap){
+       this.useMMap = useMMap;
+       return this;
     }
 }

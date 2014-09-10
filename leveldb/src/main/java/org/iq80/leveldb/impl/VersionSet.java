@@ -26,6 +26,8 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
+
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
@@ -76,16 +78,18 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
     private final File databaseDir;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
+    private final boolean useMMap;
 
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator)
+    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, boolean useMMap)
             throws IOException
     {
         this.databaseDir = databaseDir;
         this.tableCache = tableCache;
         this.internalKeyComparator = internalKeyComparator;
+        this.useMMap = useMMap;
         appendVersion(new Version(this));
 
         initializeIfNeeded();
@@ -103,7 +107,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             edit.setNextFileNumber(nextFileNumber.get());
             edit.setLastSequenceNumber(lastSequence);
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber);
+            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, useMMap);
             try {
                 writeSnapshot(log);
                 log.addRecord(edit.encode(), false);
@@ -274,7 +278,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber);
+                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, useMMap);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
