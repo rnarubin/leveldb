@@ -33,13 +33,14 @@
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
             <version>1.0.3.2</version>
+            <optional>true</optional>
         </dependency>
 
         <dependency>
             <groupId>org.iq80.snappy</groupId>
             <artifactId>snappy</artifactId>
-            <version>0.2</version>
-            <optional>true</optional>
+            <version>0.3</version>
+            <!--<optional>true</optional>-->
         </dependency>
 
         <dependency>
@@ -167,7 +168,7 @@
                   <option>-keep class com.google.common.base.Preconditions{*;}</option>
 
                   <option>-keep class org.iq80.snappy.*{*;}</option>
-                  <option>-keep class org.xerial.snappy.Snappy{*;}</option>
+                  <!--<option>-keep class org.xerial.snappy.Snappy{*;}</option>-->
                   <option>-dontnote com.google.common.cache.Striped64</option>
                   <option>-dontnote com.google.common.cache.Striped64$*</option>
                   <option>-dontnote com.google.common.util.concurrent.MoreExecutors</option>
