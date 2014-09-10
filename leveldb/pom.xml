@@ -167,7 +167,7 @@
                   <option>-keep class com.google.common.base.Preconditions{*;}</option>
 
                   <option>-keep class org.iq80.snappy.*{*;}</option>
-                  <!-- <option>-keep class org.xerial.snappy.Snappy{*;}</option> -->
+                  <option>-keep class org.xerial.snappy.Snappy{*;}</option>
                   <option>-dontnote com.google.common.cache.Striped64</option>
                   <option>-dontnote com.google.common.cache.Striped64$*</option>
                   <option>-dontnote com.google.common.util.concurrent.MoreExecutors</option>
