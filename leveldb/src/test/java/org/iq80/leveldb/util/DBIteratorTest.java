@@ -1,10 +1,10 @@
 package org.iq80.leveldb.util;
 
+import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.Options;
 
 import junit.framework.TestCase;
-import static org.iq80.leveldb.impl.Iq80DBFactory.factory;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -17,11 +17,13 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -54,7 +56,7 @@ public class DBIteratorTest extends TestCase
    protected void setUp() throws Exception
    {
       tempDir = FileUtils.createTempDir("java-leveldb-testing-temp");
-      db = factory.open(tempDir, options);
+      db = Iq80DBFactory.factory.open(tempDir, options);
    }
 
    @Override
@@ -77,16 +79,8 @@ public class DBIteratorTest extends TestCase
       Collections.sort(entries, new StringDbIterator.EntryCompare());
 
       StringDbIterator actual = new StringDbIterator(db.iterator());
-      int i = 0;
-      for (Entry<String, String> expected : entries)
-      {
-         assertTrue(actual.hasNext());
-         Entry<String, String> p = actual.peek();
-         assertEquals("Item #" + i + " peek mismatch", expected, p);
-         Entry<String, String> n = actual.next();
-         assertEquals("Item #" + i + " mismatch", expected, n);
-         i++;
-      }
+      actual.seekToFirst();
+      assertForwardSame(actual, entries);
    }
 
    public void testReverseIteration()
@@ -98,16 +92,83 @@ public class DBIteratorTest extends TestCase
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToLast();
       actual.next();
+      assertBackwardSame(actual, entries);
+   }
+   
+   private static void assertForwardSame(StringDbIterator actual, Iterable<Entry<String, String>> expected){
       int i = 0;
-      for (Entry<String, String> expected : entries)
+      for (Entry<String, String> expectedEntry : expected)
+      {
+         assertTrue(actual.hasNext());
+         Entry<String, String> p = actual.peek();
+         assertEquals("Item #" + i + " peek mismatch", expectedEntry, p);
+         Entry<String, String> n = actual.next();
+         assertEquals("Item #" + i + " mismatch", expectedEntry, n);
+         i++;
+      }
+   }
+   
+   private static void assertBackwardSame(StringDbIterator actual, Iterable<Entry<String, String>> expected){
+      int i = 0;
+      for (Entry<String, String> expectedEntry : expected)
       {
          assertTrue(actual.hasPrev());
          Entry<String, String> p = actual.peekPrev();
-         assertEquals("Item #" + i + " peek mismatch", expected, p);
+         assertEquals("Item #" + i + " peek mismatch", expectedEntry, p);
          Entry<String, String> n = actual.prev();
-         assertEquals("Item #" + i + " mismatch", expected, n);
+         assertEquals("Item #" + i + " mismatch", expectedEntry, n);
          i++;
       }
+   }
+
+   public void testForwardIterationSnapshot(){
+      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size()/2);
+      List<Entry<String, String>> firstHalf = splitList.get(0),
+                                  secondHalf = splitList.get(1);
+      putAll(db, firstHalf);
+
+      Collections.sort(firstHalf, new StringDbIterator.EntryCompare());
+      
+      StringDbIterator actual = new StringDbIterator(db.iterator());
+      
+      int i = 0;
+      for(Entry<String, String> entry:firstHalf){
+         if((i++)%3==0){
+            //delete one-third of the entries in the db
+            db.delete(entry.getKey().getBytes(UTF_8));
+         }
+      }
+      //put in another set of data
+      putAll(db, secondHalf);
+
+      //snapshot should retain the entries of the first insertion batch
+      assertForwardSame(actual, firstHalf);
+   }
+
+   public void testReverseIterationSnapshot(){
+      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size()/2);
+      List<Entry<String, String>> firstHalf = splitList.get(0),
+                                  secondHalf = splitList.get(1);
+      putAll(db, firstHalf);
+
+      Collections.sort(firstHalf, new StringDbIterator.ReverseEntryCompare());
+      
+      StringDbIterator actual = new StringDbIterator(db.iterator());
+      
+      int i = 0;
+      for(Entry<String, String> entry:firstHalf){
+         if((i++)%3==0){
+            //delete one-third of the entries in the db
+            db.delete(entry.getKey().getBytes(UTF_8));
+         }
+      }
+      //put in another set of data
+      putAll(db, secondHalf);
+
+      actual.seekToLast();
+      Entry<String, String> n = actual.next();
+      //snapshot should retain the entries of the first insertion batch
+      assertBackwardSame(actual, firstHalf);
    }
 
    public void testMixedIteration()
