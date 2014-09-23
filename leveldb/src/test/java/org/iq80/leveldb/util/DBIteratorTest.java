@@ -135,7 +135,7 @@ public class DBIteratorTest extends TestCase
       for(Entry<String, String> entry:firstHalf){
          if((i++)%3==0){
             //delete one-third of the entries in the db
-            db.delete(entry.getKey().getBytes(UTF_8));
+            delete(db, entry.getKey());
          }
       }
       //put in another set of data
@@ -159,7 +159,7 @@ public class DBIteratorTest extends TestCase
       for(Entry<String, String> entry:firstHalf){
          if((i++)%3==0){
             //delete one-third of the entries in the db
-            db.delete(entry.getKey().getBytes(UTF_8));
+            delete(db, entry.getKey());
          }
       }
       //put in another set of data
@@ -169,6 +169,45 @@ public class DBIteratorTest extends TestCase
       Entry<String, String> n = actual.next();
       //snapshot should retain the entries of the first insertion batch
       assertBackwardSame(actual, firstHalf);
+   }
+
+   public void testIterationSnapshot(){
+      put(db, "a", "0");
+      put(db, "b", "0");
+
+      put(db, "d", "0");
+      put(db, "e", "0");
+      put(db, "f", "0");
+      put(db, "g", "0");
+
+      delete(db, "a");
+      delete(db, "d");
+      delete(db, "f");
+      delete(db, "g");
+      put(db, "a", "1");
+      put(db, "e", "1");
+      put(db, "g", "1");
+
+      StringDbIterator actual = new StringDbIterator(db.iterator());
+
+      put(db, "a", "2");
+      put(db, "c", "2");
+      put(db, "c", "3");
+      put(db, "e", "2");
+      put(db, "f", "2");
+
+      String[] _expected = {"a1","b0","e1","g1"};
+      List<Entry<String, String>> expected = new ArrayList<>();
+      for(String s:_expected){
+         expected.add(Maps.immutableEntry(""+s.charAt(0), ""+s.charAt(1)));
+      }
+      
+      actual.seekToFirst();
+      assertForwardSame(actual,expected);
+
+      actual.seekToLast();
+      actual.next();
+      assertBackwardSame(actual, Lists.reverse(expected));
    }
 
    public void testMixedIteration()
@@ -235,7 +274,7 @@ public class DBIteratorTest extends TestCase
          Entry<String, String> e = keyvals.get(i);
          db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
          if(d < deleteIndex.length && i == deleteIndex[d]){
-            db.delete(e.getKey().getBytes(UTF_8));
+            delete(db, e.getKey());
             d++;
          }
       }
@@ -293,8 +332,16 @@ public class DBIteratorTest extends TestCase
 
    private void putAll(DB db, Iterable<Entry<String, String>> entries){
       for(Entry<String, String> e:entries){
-         db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
+         put(db, e.getKey(), e.getValue());
       }
+   }
+
+   private void put(DB db, String key, String val){
+      db.put(key.getBytes(UTF_8), val.getBytes(UTF_8));
+   }
+   
+   private void delete(DB db, String key){
+      db.delete(key.getBytes(UTF_8));
    }
 
    private boolean hasFollowing(int direction, ReverseIterator<?> iter)
