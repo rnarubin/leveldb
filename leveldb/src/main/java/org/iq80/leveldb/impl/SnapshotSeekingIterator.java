@@ -54,7 +54,7 @@ public final class SnapshotSeekingIterator
         this.userComparator = userComparator;
         this.snapshot.getVersion().retain();
         this.savedEntry = null;
-        this.direction = FORWARD;
+        seekToFirst();
     }
 
     public void close()
@@ -67,7 +67,6 @@ public final class SnapshotSeekingIterator
     {
         iterator.seekToFirst();
         direction = FORWARD;
-        findNextUserEntry(false, null);
     }
 
     @Override
@@ -107,7 +106,7 @@ public final class SnapshotSeekingIterator
             // so iterator's next must be the valid entry
         }
         else {
-            findNextUserEntry(true, savedEntry == null ? null : savedEntry.getKey().getUserKey());
+            findNextUserEntry(true, savedEntry);
 
             if (!iterator.hasNext()) {
                 return null;
@@ -163,11 +162,17 @@ public final class SnapshotSeekingIterator
         return null;
     }
 
-    private void findNextUserEntry(boolean skipping, Slice skipKey)
+    private void findNextUserEntry(boolean skipping, Entry<InternalKey, Slice> skipEntry)
     {
-        if (skipKey == null) {
+        Slice skipKey;
+        if (skipEntry == null) {
             skipping = false;
+            skipKey = null;
         }
+        else {
+            skipKey = skipEntry.getKey().getUserKey();
+        }
+
         while (iterator.hasNext()) {
             InternalKey internalKey = iterator.peek().getKey();
             if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
@@ -178,14 +183,15 @@ public final class SnapshotSeekingIterator
                         break;
                     case VALUE:
                         if (!skipping || userComparator.compare(internalKey.getUserKey(), skipKey) > 0) {
+                            savedEntry = null;
                             return;
                         }
                         break;
                 }
+                iterator.next();
             }
-            iterator.next();
+            savedEntry = null;
         }
-        savedEntry = null;
     }
 
     private void findPrevUserEntry()
@@ -208,32 +214,28 @@ public final class SnapshotSeekingIterator
                     savedEntry = peekPrev;
                 }
             }
+            else if (valueType == ValueType.VALUE) {
+                //we've found an entry out of this sequence after finding a value type
+                //the value type is a valid entry to return, stop advancing prev
+                return;
+            }
             iterator.prev();
         }
 
-        if (valueType == ValueType.DELETION) {
+        if (valueType == ValueType.DELETION)
+
+        {
             savedEntry = null;
             direction = FORWARD;
         }
     }
 
     @Override
-    public String toString()
-    {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("SnapshotSeekingIterator");
-        sb.append("{snapshot=").append(snapshot);
-        sb.append(", iterator=").append(iterator);
-        sb.append('}');
-        return sb.toString();
-    }
-
-    @Override
     protected boolean hasNextInternal()
     {
         if (direction == FORWARD) {
-            findNextUserEntry(true, savedEntry == null ? null : savedEntry.getKey().getUserKey());
-            // calls to findNextUserEntry without skipping will place the iterator in a state where
+            findNextUserEntry(true, savedEntry);
+            // calls to findNextUserEntry will place the iterator in a state where
             // next() is valid, which is the same as a state of coming from a reverse advance
             direction = REVERSE;
         }
@@ -249,9 +251,10 @@ public final class SnapshotSeekingIterator
                 // findPrevUserEntry places the iterator before the valid user entry
                 // so hasPrev after this call is answered by hasNext
                 // but the has... functions should not advance the iterator
-                // so advance forward to a position effectively the same as before this call
-                // (though not exactly identical if deletions are present)
-                getNextElement();
+                // so advance forward to a position that appears externally the same as before this call
+                // (though not identical if deletions are present)
+                iterator.next();
+                direction = FORWARD;
             }
         }
         return iterator.hasPrev();
