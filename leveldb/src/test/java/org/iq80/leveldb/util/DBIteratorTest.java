@@ -8,6 +8,7 @@ import junit.framework.TestCase;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -16,6 +17,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 
+import javax.annotation.concurrent.Immutable;
+
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.ReverseIterator;
@@ -23,8 +26,10 @@ import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Ordering;
 
 import static com.google.common.base.Charsets.UTF_8;
 
@@ -39,7 +44,7 @@ public class DBIteratorTest extends TestCase
    {
       Random rand = new Random(0);
 
-      entries = new ArrayList<Entry<String, String>>();
+      ArrayList<Entry<String, String>> e = new ArrayList<Entry<String, String>>();
       int items = 1000000;
       for (int i = 0; i < items; i++)
       {
@@ -48,8 +53,9 @@ public class DBIteratorTest extends TestCase
          {
             sb.append((char) ('a' + rand.nextInt(26)));
          }
-         entries.add(Maps.immutableEntry(sb.toString(), "v:" + sb.toString()));
+         e.add(Maps.immutableEntry(sb.toString(), "v:" + sb.toString()));
       }
+      entries = Collections.unmodifiableList(e);
    }
 
    @Override
@@ -76,23 +82,27 @@ public class DBIteratorTest extends TestCase
    {
       putAll(db, entries);
 
-      Collections.sort(entries, new StringDbIterator.EntryCompare());
-
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToFirst();
-      assertForwardSame(actual, entries);
+      assertForwardSame(actual, ordered(entries));
+   }
+   
+   private static List<Entry<String, String>> ordered(Collection<Entry<String, String>> c){
+      return Ordering.from(new StringDbIterator.EntryCompare()).sortedCopy(c);
+   }
+   
+   private static Collection<Entry<String, String>> reverseOrdered(Collection<Entry<String, String>> c){
+      return Ordering.from(new StringDbIterator.ReverseEntryCompare()).sortedCopy(c);
    }
 
    public void testReverseIteration()
    {
       putAll(db, entries);
 
-      Collections.sort(entries, new StringDbIterator.ReverseEntryCompare());
-
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToLast();
       actual.next();
-      assertBackwardSame(actual, entries);
+      assertBackwardSame(actual, reverseOrdered(entries));
    }
    
    private static void assertForwardSame(StringDbIterator actual, Iterable<Entry<String, String>> expected){
@@ -127,13 +137,12 @@ public class DBIteratorTest extends TestCase
                                   secondHalf = splitList.get(1);
       putAll(db, firstHalf);
 
-      Collections.sort(firstHalf, new StringDbIterator.EntryCompare());
-      
       StringDbIterator actual = new StringDbIterator(db.iterator());
       
       int i = 0;
+      Random rand = new Random(0);
       for(Entry<String, String> entry:firstHalf){
-         if((i++)%3==0){
+         if(rand.nextDouble() < 1.0/3.0){
             //delete one-third of the entries in the db
             delete(db, entry.getKey());
          }
@@ -142,22 +151,22 @@ public class DBIteratorTest extends TestCase
       putAll(db, secondHalf);
 
       //snapshot should retain the entries of the first insertion batch
-      assertForwardSame(actual, firstHalf);
+      assertForwardSame(actual, ordered(firstHalf));
    }
 
    public void testReverseIterationSnapshot(){
       List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size()/2);
       List<Entry<String, String>> firstHalf = splitList.get(0),
                                   secondHalf = splitList.get(1);
+
       putAll(db, firstHalf);
 
-      Collections.sort(firstHalf, new StringDbIterator.ReverseEntryCompare());
-      
       StringDbIterator actual = new StringDbIterator(db.iterator());
       
       int i = 0;
+      Random rand = new Random(0);
       for(Entry<String, String> entry:firstHalf){
-         if((i++)%3==0){
+         if(rand.nextDouble() < 1.0/3.0){
             //delete one-third of the entries in the db
             delete(db, entry.getKey());
          }
@@ -166,9 +175,9 @@ public class DBIteratorTest extends TestCase
       putAll(db, secondHalf);
 
       actual.seekToLast();
-      Entry<String, String> n = actual.next();
+      actual.next();
       //snapshot should retain the entries of the first insertion batch
-      assertBackwardSame(actual, firstHalf);
+      assertBackwardSame(actual, reverseOrdered(firstHalf));
    }
 
    public void testIterationSnapshot(){
@@ -216,14 +225,12 @@ public class DBIteratorTest extends TestCase
 
       putAll(db, entries);
 
-      Collections.sort(entries, new StringDbIterator.EntryCompare());
-
       ReversePeekingIterator<Entry<String, String>> expected =
-            ReverseIterators.reversePeekingIterator(entries);
+            ReverseIterators.reversePeekingIterator(ordered(entries));
       ReverseSeekingIterator<String, String> actual = new StringDbIterator(db.iterator());
 
       // take mixed forward and backward steps up the list then down the list (favoring forward to
-// reach the end, then backward)
+      // reach the end, then backward)
       int pos = 0;
       int randForward = 12, randBack = 4;// [-4, 7] inclusive, initially favor forward steps
       int steps = randForward + 1;
