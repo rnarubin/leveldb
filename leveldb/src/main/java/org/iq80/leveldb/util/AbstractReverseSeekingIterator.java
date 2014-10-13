@@ -54,8 +54,9 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> next()
    {
-      peekedElement = null;
       Entry<K, V> next = getNextElement();
+      assert peekedElement == null || peekedElement.equals(next);
+      peekedElement = null;
       if (next == null)
       {
          throw new NoSuchElementException();
@@ -67,8 +68,9 @@ public abstract class AbstractReverseSeekingIterator<K, V> implements ReverseSee
    @Override
    public final Entry<K, V> prev()
    {
-      rPeekedElement = null;
       Entry<K, V> prev = getPrevElement();
+      assert rPeekedElement == null || rPeekedElement.equals(prev);
+      rPeekedElement = null;
       if (prev == null)
       {
          throw new NoSuchElementException();

@@ -1,6 +1,6 @@
+
 package org.iq80.leveldb.util;
 
-import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.Options;
 
@@ -16,8 +16,11 @@ import java.util.Map.Entry;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
-
-import javax.annotation.concurrent.Immutable;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.impl.Iq80DBFactory;
@@ -26,7 +29,6 @@ import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
@@ -45,7 +47,7 @@ public class DBIteratorTest extends TestCase
       Random rand = new Random(0);
 
       ArrayList<Entry<String, String>> e = new ArrayList<Entry<String, String>>();
-      int items = 1000000;
+      int items = 300000;
       for (int i = 0; i < items; i++)
       {
          StringBuilder sb = new StringBuilder();
@@ -86,12 +88,14 @@ public class DBIteratorTest extends TestCase
       actual.seekToFirst();
       assertForwardSame(actual, ordered(entries));
    }
-   
-   private static List<Entry<String, String>> ordered(Collection<Entry<String, String>> c){
+
+   private static List<Entry<String, String>> ordered(Collection<Entry<String, String>> c)
+   {
       return Ordering.from(new StringDbIterator.EntryCompare()).sortedCopy(c);
    }
-   
-   private static Collection<Entry<String, String>> reverseOrdered(Collection<Entry<String, String>> c){
+
+   private static List<Entry<String, String>> reverseOrdered(Collection<Entry<String, String>> c)
+   {
       return Ordering.from(new StringDbIterator.ReverseEntryCompare()).sortedCopy(c);
    }
 
@@ -104,8 +108,61 @@ public class DBIteratorTest extends TestCase
       actual.next();
       assertBackwardSame(actual, reverseOrdered(entries));
    }
-   
-   private static void assertForwardSame(StringDbIterator actual, Iterable<Entry<String, String>> expected){
+
+   public void testSeeks() throws ExecutionException, InterruptedException
+   {
+      putAll(db, entries);
+
+      final List<Entry<String, String>> ordered = Collections.unmodifiableList(ordered(entries)),
+                                        rOrdered = Collections.unmodifiableList(reverseOrdered(entries));
+      final double seekRate = 0.001; // (approximate) portion of entries to seek to. too many slows
+      // the test down, too few limits the usefulness of the test
+      final double seekCheck = 0.01; // portion of the entries to confirm match
+      // (don't traverse whole list because it's slow)
+      final int size = entries.size();
+      final int seekCheckDist = (int)(size*seekCheck);
+      ExecutorService pool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+      List<Future<Void>> work = new ArrayList<Future<Void>>();
+      Random rand = new Random(0);
+
+      int i = 0;
+      for (final Entry<String, String> e : ordered)
+      {
+         if (rand.nextDouble() < seekRate)
+         {
+            final int seekIndex = i;
+            work.add(pool.submit(new Callable<Void>()
+            {
+               @Override
+               public Void call()
+               {
+                  StringDbIterator actual = new StringDbIterator(db.iterator());
+                  int loc = seekIndex;
+                  List<Entry<String, String>> forwardExpected =
+                        ordered.subList(loc, Math.min(size, loc+seekCheckDist));
+                  loc = rOrdered.size() - seekIndex;
+                  List<Entry<String, String>> reverseExpected = rOrdered.subList(loc, Math.min(size, loc+seekCheckDist));
+                  actual.seek(e.getKey());
+                  assertForwardSame(actual, forwardExpected);
+                  actual.seek(e.getKey());
+                  assertBackwardSame(actual, reverseExpected);
+                  return null;
+               }
+            }));
+         }
+         i++;
+      }
+
+      for(Future<Void> f:work)
+      {
+         f.get();
+      }
+   }
+
+   private static void assertForwardSame(
+         StringDbIterator actual,
+         Iterable<Entry<String, String>> expected)
+   {
       int i = 0;
       for (Entry<String, String> expectedEntry : expected)
       {
@@ -117,8 +174,11 @@ public class DBIteratorTest extends TestCase
          i++;
       }
    }
-   
-   private static void assertBackwardSame(StringDbIterator actual, Iterable<Entry<String, String>> expected){
+
+   private static void assertBackwardSame(
+         StringDbIterator actual,
+         Iterable<Entry<String, String>> expected)
+   {
       int i = 0;
       for (Entry<String, String> expectedEntry : expected)
       {
@@ -131,56 +191,61 @@ public class DBIteratorTest extends TestCase
       }
    }
 
-   public void testForwardIterationSnapshot(){
-      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size()/2);
-      List<Entry<String, String>> firstHalf = splitList.get(0),
-                                  secondHalf = splitList.get(1);
+   public void testForwardIterationSnapshot()
+   {
+      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size() / 2);
+      List<Entry<String, String>> firstHalf = splitList.get(0), secondHalf = splitList.get(1);
       putAll(db, firstHalf);
 
       StringDbIterator actual = new StringDbIterator(db.iterator());
-      
+
       int i = 0;
       Random rand = new Random(0);
-      for(Entry<String, String> entry:firstHalf){
-         if(rand.nextDouble() < 1.0/3.0){
-            //delete one-third of the entries in the db
+      for (Entry<String, String> entry : firstHalf)
+      {
+         if (rand.nextDouble() < 1.0 / 3.0)
+         {
+            // delete one-third of the entries in the db
             delete(db, entry.getKey());
          }
       }
-      //put in another set of data
+      // put in another set of data
       putAll(db, secondHalf);
 
-      //snapshot should retain the entries of the first insertion batch
+      // snapshot should retain the entries of the first insertion batch
       assertForwardSame(actual, ordered(firstHalf));
    }
 
-   public void testReverseIterationSnapshot(){
-      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size()/2);
-      List<Entry<String, String>> firstHalf = splitList.get(0),
-                                  secondHalf = splitList.get(1);
+   public void testReverseIterationSnapshot()
+   {
+      List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size() / 2);
+      List<Entry<String, String>> firstHalf = splitList.get(0), secondHalf = splitList.get(1);
 
       putAll(db, firstHalf);
 
       StringDbIterator actual = new StringDbIterator(db.iterator());
-      
+
       int i = 0;
       Random rand = new Random(0);
-      for(Entry<String, String> entry:firstHalf){
-         if(rand.nextDouble() < 1.0/3.0){
-            //delete one-third of the entries in the db
+      for (Entry<String, String> entry : firstHalf)
+      {
+         if (rand.nextDouble() < 1.0 / 3.0)
+         {
+            // delete one-third of the entries in the db
             delete(db, entry.getKey());
          }
       }
-      //put in another set of data
+      // put in another set of data
       putAll(db, secondHalf);
 
       actual.seekToLast();
       actual.next();
-      //snapshot should retain the entries of the first insertion batch
+      // snapshot should retain the entries of the first insertion batch
       assertBackwardSame(actual, reverseOrdered(firstHalf));
    }
 
-   public void testIterationSnapshot(){
+   public void testIterationSnapshot()
+   {
       put(db, "a", "0");
       put(db, "b", "0");
 
@@ -205,14 +270,15 @@ public class DBIteratorTest extends TestCase
       put(db, "e", "2");
       put(db, "f", "2");
 
-      String[] _expected = {"a1","b0","e1","g1"};
+      String[] _expected = {"a1", "b0", "e1", "g1"};
       List<Entry<String, String>> expected = new ArrayList<>();
-      for(String s:_expected){
-         expected.add(Maps.immutableEntry(""+s.charAt(0), ""+s.charAt(1)));
+      for (String s : _expected)
+      {
+         expected.add(Maps.immutableEntry("" + s.charAt(0), "" + s.charAt(1)));
       }
-      
+
       actual.seekToFirst();
-      assertForwardSame(actual,expected);
+      assertForwardSame(actual, expected);
 
       actual.seekToLast();
       actual.next();
@@ -264,43 +330,51 @@ public class DBIteratorTest extends TestCase
             randBack = 12;
             // [-7, 4] inclusive
          }
-         steps = rand.nextInt(randForward) - randBack;
+         while ((steps = rand.nextInt(randForward) - randBack) == 0);
       } while (pos > 0);
    }
-   
-   public void testSeekPastContentsWithDeletesAndReverse(){
-      String keys[] = {"a","b","c","d","e","f"};
+
+   public void testSeekPastContentsWithDeletesAndReverse()
+   {
+      String keys[] = {"a", "b", "c", "d", "e", "f"};
       int deleteIndex[] = {2, 3, 5};
 
       List<Entry<String, String>> keyvals = new ArrayList<Entry<String, String>>();
-      for(String key:keys){
-         keyvals.add(Maps.immutableEntry(key, "v"+key));
+      for (String key : keys)
+      {
+         keyvals.add(Maps.immutableEntry(key, "v" + key));
       }
-      
-      for(int i = 0, d = 0; i < keyvals.size(); i++){
+
+      for (int i = 0, d = 0; i < keyvals.size(); i++)
+      {
          Entry<String, String> e = keyvals.get(i);
          db.put(e.getKey().getBytes(UTF_8), e.getValue().getBytes(UTF_8));
-         if(d < deleteIndex.length && i == deleteIndex[d]){
+         if (d < deleteIndex.length && i == deleteIndex[d])
+         {
             delete(db, e.getKey());
             d++;
          }
       }
-      
-      Set<Entry<String, String>> expectedSet = new TreeSet<Entry<String, String>>(new Comparator<Entry<String, String>>(){
-         public int compare(Entry<String, String> o1, Entry<String, String> o2)
-         {
-            return o1.getKey().compareTo(o2.getKey());
-         }
-      });
-      for(int i = deleteIndex.length-1; i >= 0; i--){
+
+      Set<Entry<String, String>> expectedSet =
+            new TreeSet<Entry<String, String>>(new Comparator<Entry<String, String>>()
+            {
+               public int compare(Entry<String, String> o1, Entry<String, String> o2)
+               {
+                  return o1.getKey().compareTo(o2.getKey());
+               }
+            });
+      for (int i = deleteIndex.length - 1; i >= 0; i--)
+      {
          keyvals.remove(deleteIndex[i]);
       }
       expectedSet.addAll(keyvals);
       List<Entry<String, String>> expected = new ArrayList<Entry<String, String>>(expectedSet);
-      
+
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seek("f");
-      for(int i = expected.size()-1; i >= 0; i--){
+      for (int i = expected.size() - 1; i >= 0; i--)
+      {
          assertTrue(actual.hasPrev());
          assertEquals(expected.get(i), actual.peekPrev());
          assertEquals(expected.get(i), actual.prev());
@@ -309,45 +383,51 @@ public class DBIteratorTest extends TestCase
 
       actual.seek("g");
       assertFalse(actual.hasNext());
-      for(int i = expected.size()-1; i >= 0; i--){
+      for (int i = expected.size() - 1; i >= 0; i--)
+      {
          assertTrue(actual.hasPrev());
          assertEquals(expected.get(i), actual.peekPrev());
          assertEquals(expected.get(i), actual.prev());
       }
       assertFalse(actual.hasPrev());
-      
-      //recreating a strange set of circumstances encountered in the field
+
+      // recreating a strange set of circumstances encountered in the field
       actual.seek("g");
       assertFalse(actual.hasNext());
       actual.seekToLast();
       List<Entry<String, String>> items = new ArrayList<Entry<String, String>>();
       Entry<String, String> peek = actual.peek();
       items.add(peek);
-      assertEquals(expected.get(expected.size()-1), peek);
+      assertEquals(expected.get(expected.size() - 1), peek);
       assertTrue(actual.hasPrev());
       Entry<String, String> prev = actual.prev();
       items.add(prev);
-      assertEquals(expected.get(expected.size()-2), prev);
-      
-      while(actual.hasPrev()){
+      assertEquals(expected.get(expected.size() - 2), prev);
+
+      while (actual.hasPrev())
+      {
          items.add(actual.prev());
       }
-      
+
       Collections.reverse(items);
       assertEquals(expected, items);
    }
 
-   private void putAll(DB db, Iterable<Entry<String, String>> entries){
-      for(Entry<String, String> e:entries){
+   private void putAll(DB db, Iterable<Entry<String, String>> entries)
+   {
+      for (Entry<String, String> e : entries)
+      {
          put(db, e.getKey(), e.getValue());
       }
    }
 
-   private void put(DB db, String key, String val){
+   private void put(DB db, String key, String val)
+   {
       db.put(key.getBytes(UTF_8), val.getBytes(UTF_8));
    }
-   
-   private void delete(DB db, String key){
+
+   private void delete(DB db, String key)
+   {
       db.delete(key.getBytes(UTF_8));
    }
 
@@ -440,9 +520,10 @@ public class DBIteratorTest extends TestCase
       {
          iterator.seekToLast();
       }
-      
+
       @Override
-      public void seekToEnd(){
+      public void seekToEnd()
+      {
          // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
          // testing as of yet
          throw new UnsupportedOperationException();
