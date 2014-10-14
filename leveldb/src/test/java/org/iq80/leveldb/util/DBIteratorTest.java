@@ -1,6 +1,7 @@
 
 package org.iq80.leveldb.util;
 
+import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
@@ -72,6 +73,7 @@ public class DBIteratorTest extends TestCase
    {
       tempDir = FileUtils.createTempDir("java-leveldb-testing-temp");
       db = Iq80DBFactory.factory.open(tempDir, options);
+      //db = JniDBFactory.factory.open(tempDir, options);
    }
 
    @Override
@@ -115,7 +117,7 @@ public class DBIteratorTest extends TestCase
    {
       putAll(db, entries);
 
-      doSeeks(db, ordered, rOrdered, 0.0005, 0.005);
+      doSeeks(db, ordered, rOrdered, 0.01, 0.001);
    }
 
    private void doSeeks(
@@ -260,7 +262,8 @@ public class DBIteratorTest extends TestCase
    {
       List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size() / 2);
       List<Entry<String, String>> firstHalf = splitList.get(0), secondHalf = splitList.get(1);
-      Snapshot snapshot = putAllSnapshot(db, firstHalf);
+      putAll(db, firstHalf);
+      Snapshot snapshot = db.getSnapshot();
 
       Random rand = new Random(0);
       for (Entry<String, String> entry : firstHalf)
@@ -268,7 +271,7 @@ public class DBIteratorTest extends TestCase
          if (rand.nextDouble() < 1.0 / 3.0)
          {
             // delete one-third of the entries in the db
-            delete(db, entry.getKey());
+            //delete(db, entry.getKey());
          }
       }
       // put in another set of data
@@ -280,6 +283,7 @@ public class DBIteratorTest extends TestCase
       ReadOptions snapshotRead = new ReadOptions().snapshot(snapshot);
       // snapshot should retain the entries of the first insertion batch
       StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
+      //*
       actual.seekToFirst();
       assertForwardSame(actual, forward);
       assertBackwardSame(actual, backward);
@@ -287,8 +291,8 @@ public class DBIteratorTest extends TestCase
       actual.seekToEnd();
       assertBackwardSame(actual, backward);
       assertForwardSame(actual, forward);
-      
-      doSeeks(db, forward, backward, 0.001, 0.01, snapshotRead);
+      //*/
+      doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead);
    }
 
    public void testSmallIterationSnapshot()
@@ -478,14 +482,14 @@ public class DBIteratorTest extends TestCase
    }
 
    private final static WriteOptions writeOptions = new WriteOptions().snapshot(true);
-   private Snapshot put(DB db, String key, String val)
+   private void put(DB db, String key, String val)
    {
-      return db.put(key.getBytes(UTF_8), val.getBytes(UTF_8), writeOptions);
+      db.put(key.getBytes(UTF_8), val.getBytes(UTF_8));
    }
 
-   private Snapshot delete(DB db, String key)
+   private void delete(DB db, String key)
    {
-      return db.delete(key.getBytes(UTF_8), writeOptions);
+      db.delete(key.getBytes(UTF_8));
    }
 
    private boolean hasFollowing(int direction, ReverseIterator<?> iter)
