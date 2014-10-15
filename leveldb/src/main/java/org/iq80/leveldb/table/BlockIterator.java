@@ -160,8 +160,7 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
             nextEntry = readEntry(data, prevEntry);
             prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
          }
-         prevCache.pop(); // we don't want to cache the last entry because that's returned with this
-// call
+         prevCache.pop(); // we don't want to cache the last entry because that's returned with this call
       }
 
       return nextEntry;
@@ -359,6 +358,10 @@ public class BlockIterator implements ReverseSeekingIterator<Slice, Slice>
          this.entry = entry;
          this.prevPosition = prevPosition;
          this.dataPosition = dataPosition;
+      }
+      
+      public String toString(){
+         return "CacheEntry{prev:"+this.prevPosition+", pos:"+this.dataPosition+", entry:"+this.entry+"}";
       }
    }
 }
