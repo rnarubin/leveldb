@@ -123,8 +123,8 @@ public class BlockIterator
         else {
             // read entry at current data position
             nextEntry = readEntry(data, prevEntry);
-            resetCache();
         }
+        resetCache();
         return prevEntry;
     }
 
@@ -153,13 +153,43 @@ public class BlockIterator
             while (data.position() < original && data.isReadable()) {
                 prevEntry = nextEntry;
                 nextEntry = readEntry(data, prevEntry);
-                prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+                resetCache();
             }
-            prevCache.pop(); // we don't want to cache the last entry because that's returned with this call
+            return prevEntry;
         }
 
-        return nextEntry;
-    }
+        @Override
+        public BlockEntry prev ()
+        {
+            int original = currentPosition();
+            if (original == 0) {
+                throw new NoSuchElementException();
+            }
+
+            int previousRestart = getPreviousRestart(restartIndex, original);
+            if (previousRestart == prevCacheRestartIndex && prevCache.size() > 0) {
+                CacheEntry prevState = prevCache.pop();
+                nextEntry = prevState.entry;
+                prevPosition = prevState.prevPosition;
+                data.setPosition(prevState.dataPosition);
+
+                CacheEntry peek = prevCache.peek();
+                prevEntry = peek == null ? null : peek.entry;
+            }
+            else {
+                seekToRestartPosition(previousRestart);
+                prevCacheRestartIndex = previousRestart;
+                prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+                while (data.position() < original && data.isReadable()) {
+                    prevEntry = nextEntry;
+                    nextEntry = readEntry(data, prevEntry);
+                    prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+                }
+                prevCache.pop(); // we don't want to cache the last entry because that's returned with this call
+            }
+
+            return nextEntry;
+        }
 
     private int getPreviousRestart(int startIndex, int position)
     {
