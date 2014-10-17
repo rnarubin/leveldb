@@ -15,7 +15,9 @@
  */
 package org.iq80.leveldb.util;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
+import com.google.common.primitives.Bytes;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -704,8 +706,17 @@ public final class Slice implements Comparable<Slice>
 
     public String toString()
     {
-        return getClass().getSimpleName() + '(' +
-                "length=" + length() +
-                ')';
+       StringBuilder sb = new StringBuilder(getClass().getSimpleName());
+       sb.append("(length=").append(length()).append(", startsWith [");
+       int max = Math.min(32, length());
+       for(int i = 0; i < max; i++){
+          sb.append(data[offset+i]).append(',');
+       }
+       sb.deleteCharAt(sb.length()-1);
+       if(max < length()){
+          sb.append("...");
+       }
+       sb.append("])");
+       return sb.toString();
     }
 }
