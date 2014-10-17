@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
@@ -106,14 +108,26 @@ public class DBIteratorTest extends TestCase
    {
       putAll(db, entries);
 
+      straightIteration(db, ordered, rOrdered);
+   }
+   
+   public void testStraightIterationWithDeletes(){
+      putAll(db, entries);
+      
+      List<Entry<String, String>> preserved = deletePortion(db, ordered, 0.5);
+      straightIteration(db, preserved, reverseOrdered(preserved));
+   }
+   
+   private static void straightIteration(DB db, Iterable<Entry<String, String>> forward, Iterable<Entry<String, String>> backward)
+   {
       StringDbIterator actual = new StringDbIterator(db.iterator());
       actual.seekToFirst();
-      assertForwardSame(actual, ordered);
-      assertBackwardSame(actual, rOrdered);
+      assertForwardSame(actual, forward);
+      assertBackwardSame(actual, backward);
 
       actual.seekToEnd();
-      assertBackwardSame(actual, rOrdered);
-      assertForwardSame(actual, ordered);
+      assertBackwardSame(actual, backward);
+      assertForwardSame(actual, forward);
    }
 
    public void testSeeks() throws ExecutionException, InterruptedException
@@ -271,15 +285,9 @@ public class DBIteratorTest extends TestCase
       //Snapshot snapshot = db.getSnapshot();
       StringDbIterator actual = new StringDbIterator(db.iterator());
 
-      Random rand = new Random(0);
-      for (Entry<String, String> entry : firstHalf)
-      {
-         if (rand.nextDouble() < 1.0 / 3.0)
-         {
-            // delete one-third of the entries in the db
-            delete(db, entry.getKey());
-         }
-      }
+      // delete one-third of the entries in the db
+      deletePortion(db, firstHalf, 1.0/3.0);
+
       // put in another set of data
       putAll(db, secondHalf);
 
@@ -295,12 +303,28 @@ public class DBIteratorTest extends TestCase
       assertBackwardSame(actual, backward);
 
       actual.seekToEnd();
-      assertBackwardSame(actual, backward.subList(1, backward.size()));
+      assertBackwardSame(actual, backward);
       assertForwardSame(actual, forward);
 
       // TODO seeks after deletes require snapshots
       //System.out.println("Testing snapshot seeks (this may take a while)");
       //doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead);
+   }
+   
+   private static List<Entry<String, String>> deletePortion(DB db, Collection<Entry<String, String>> items, double portion){
+      LinkedList<Entry<String, String>> remaining = new LinkedList<Entry<String, String>>(items);
+      Iterator<Entry<String, String>> iter = remaining.iterator();
+      Random rand = new Random(0);
+      while(iter.hasNext())
+      {
+         Entry<String, String> entry = iter.next();
+         if (rand.nextDouble() < portion)
+         {
+            delete(db, entry.getKey());
+            iter.remove();
+         }
+      }
+      return remaining;
    }
 
    public void testSmallIterationSnapshot()
@@ -350,7 +374,6 @@ public class DBIteratorTest extends TestCase
 
    public void testMixedIteration()
    {
-      Random rand = new Random(0);
 
       putAll(db, entries);
 
@@ -358,6 +381,20 @@ public class DBIteratorTest extends TestCase
             ReverseIterators.reversePeekingIterator(ordered);
       ReverseSeekingIterator<String, String> actual = new StringDbIterator(db.iterator());
 
+      mixedIteration(entries.size(), actual, expected);
+   }
+   
+   public void testMixedIterationWithDeletes()
+   {
+      putAll(db, entries);
+      
+      List<Entry<String, String>> preserved = deletePortion(db, ordered, 0.75);
+      
+      mixedIteration(preserved.size(), new StringDbIterator(db.iterator()), ReverseIterators.reversePeekingIterator(preserved));
+   }
+   
+   private static void mixedIteration(int size, ReverseSeekingIterator<String, String> actual, ReversePeekingIterator<Entry<String, String>> expected){
+      Random rand = new Random(0);
       // take mixed forward and backward steps up the list then down the list (favoring forward to
       // reach the end, then backward)
       int pos = 0;
@@ -386,7 +423,7 @@ public class DBIteratorTest extends TestCase
             else
                break;
          }
-         if (pos >= entries.size())
+         if (pos >= size)
          {
             // switch to favor backward steps
             randForward = 4;
@@ -476,14 +513,14 @@ public class DBIteratorTest extends TestCase
       assertEquals(expected, items);
    }
    
-   private void putAll(DB db, Iterable<Entry<String, String>> entries){
+   private static void putAll(DB db, Iterable<Entry<String, String>> entries){
       for (Entry<String, String> e : entries)
       {
          put(db, e.getKey(), e.getValue());
       }
    }
 
-   private Snapshot putAllSnapshot(DB db, Iterable<Entry<String, String>> entries)
+   private static Snapshot putAllSnapshot(DB db, Iterable<Entry<String, String>> entries)
    {
       WriteBatch batch = db.createWriteBatch();
       for (Entry<String, String> e : entries)
@@ -494,27 +531,27 @@ public class DBIteratorTest extends TestCase
    }
 
    private final static WriteOptions writeOptions = new WriteOptions().snapshot(true);
-   private void put(DB db, String key, String val)
+   private static void put(DB db, String key, String val)
    {
       db.put(key.getBytes(UTF_8), val.getBytes(UTF_8));
    }
 
-   private void delete(DB db, String key)
+   private static void delete(DB db, String key)
    {
       db.delete(key.getBytes(UTF_8));
    }
 
-   private boolean hasFollowing(int direction, ReverseIterator<?> iter)
+   private static boolean hasFollowing(int direction, ReverseIterator<?> iter)
    {
       return direction < 0 ? iter.hasPrev() : iter.hasNext();
    }
 
-   private <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter)
+   private static <T> T peekFollowing(int direction, ReversePeekingIterator<T> iter)
    {
       return direction < 0 ? iter.peekPrev() : iter.peek();
    }
 
-   private <T> T getFollowing(int direction, ReverseIterator<T> iter)
+   private static <T> T getFollowing(int direction, ReverseIterator<T> iter)
    {
       return direction < 0 ? iter.prev() : iter.next();
    }
