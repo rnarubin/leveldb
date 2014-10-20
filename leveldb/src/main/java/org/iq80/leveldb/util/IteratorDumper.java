@@ -13,6 +13,7 @@ import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.FileMetaData;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.SeekingIteratorAdapter;
 import org.iq80.leveldb.impl.TableCache;
@@ -23,8 +24,8 @@ public class IteratorDumper
       DB db = Iq80DBFactory.factory.open(FileUtils.createTempDir("leveldb"), new Options().useMMap(false));
       DBIterator iter = db.iterator();
       
-      System.out.println(dump(db, iter));
-      //System.out.println(prettyFormat("[a=123,b=[c=456,d=789],q=qwer,p=[],z={}]"));
+      //System.out.println(dump(db, iter));
+      System.out.println(prettyFormat("[a=123,b=[c=456,d=789],q=qwer,p=[],z={},d=[1,2,3,4],e={1,23,43,53}]"));
    }
    public static String dump(DB db, DBIterator DBiter){
       StringBuilder sb = new StringBuilder("DBIterator dump:\n");
@@ -68,7 +69,7 @@ public class IteratorDumper
          this.setContentStart("{");
          this.setContentEnd("}");
       }
-      HashSet<Class<?>> skipClasses = new HashSet<Class<?>>(Arrays.asList(Slice.class, TableCache.class, FileMetaData.class));
+      HashSet<Class<?>> skipClasses = new HashSet<Class<?>>(Arrays.asList(Slice.class, TableCache.class, FileMetaData.class, InternalKey.class));
       protected boolean accept(Class<?> clazz) {
          return !skipClasses.contains(clazz);
       };
@@ -106,7 +107,20 @@ public class IteratorDumper
                  .append(c);
                break;
             case ',':
-               sb.append(c).append('\n').append(tabs);
+               boolean wasNumber = true;
+               for(int j = i-1; j >= 0; j--){
+                  char bc = s.charAt(j);
+                  if(bc == ',' || bc == '[' || bc == '{') break;
+                  if(!(partOfNumber(bc) || Character.isWhitespace(bc))){
+                     wasNumber = false;
+                     break;
+                  }
+               }
+               if(!wasNumber){
+                  sb.append(c).append('\n').append(tabs);
+               }
+               else
+                  sb.append(c);
                break;
             default:
                sb.append(c);
@@ -123,5 +137,25 @@ public class IteratorDumper
          case '}': return '{';
       }
       return '\0';
+   }
+   
+   private static boolean partOfNumber(char c){
+      switch(c){
+         case '0':
+         case '1':
+         case '2':
+         case '3':
+         case '4':
+         case '5':
+         case '6':
+         case '7':
+         case '8':
+         case '9':
+         case '-':
+         case '+':
+         case '.':
+            return true;
+      }
+      return false;
    }
 }

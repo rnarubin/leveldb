@@ -712,9 +712,11 @@ public final class Slice implements Comparable<Slice>
        for(int i = 0; i < max; i++){
           sb.append(data[offset+i]).append(',');
        }
-       sb.deleteCharAt(sb.length()-1);
-       if(max < length()){
-          sb.append("...");
+       if(max > 0){
+          sb.deleteCharAt(sb.length()-1);
+          if(max < length()){
+             sb.append("...");
+          }
        }
        sb.append("])");
        return sb.toString();
