@@ -63,7 +63,7 @@ public class DbBenchmark
     private double compressionRatio;
     private long startTime;
 
-    enum Order
+    protected enum Order
     {
         SEQUENTIAL,
         RANDOM
@@ -89,6 +89,8 @@ public class DbBenchmark
     //    private Histogram hist_;
     private RandomGenerator gen_;
     private final Random rand_;
+    
+    protected int keySize = 16;
 
     // State kept for progress messages
     int done_;
@@ -128,7 +130,7 @@ public class DbBenchmark
         gen_ = new RandomGenerator(compressionRatio);
     }
 
-    private void run()
+    protected void run()
             throws IOException
     {
         printHeader();
@@ -224,17 +226,16 @@ public class DbBenchmark
     private void printHeader()
             throws IOException
     {
-        int kKeySize = 16;
         printEnvironment();
-        System.out.printf("Keys:       %d bytes each\n", kKeySize);
+        System.out.printf("Keys:       %d bytes each\n", keySize);
         System.out.printf("Values:     %d bytes each (%d bytes after compression)\n",
                 valueSize,
                 (int) (valueSize * compressionRatio + 0.5));
         System.out.printf("Entries:    %d\n", num_);
         System.out.printf("RawSize:    %.1f MB (estimated)\n",
-                ((kKeySize + valueSize) * num_) / 1048576.0);
+                ((keySize + valueSize) * num_) / 1048576.0);
         System.out.printf("FileSize:   %.1f MB (estimated)\n",
-                (((kKeySize + valueSize * compressionRatio) * num_)
+                (((keySize + valueSize * compressionRatio) * num_)
                         / 1048576.0));
         printWarnings();
         System.out.printf("------------------------------------------------\n");
@@ -296,11 +297,15 @@ public class DbBenchmark
             System.out.printf("CPUCache:   %s\n", cacheSize);
         }
     }
+    
+    protected Options defaultOptions(){
+       return new Options();
+    }
 
     private void open()
             throws IOException
     {
-        Options options = new Options();
+        Options options = defaultOptions();
         options.createIfMissing(!useExisting);
         // todo block cache
         if (writeBufferSize != null) {
@@ -359,6 +364,11 @@ public class DbBenchmark
         }
 
     }
+    
+    protected byte[] keygen(Order order, int val){
+       int k = (order == SEQUENTIAL) ? val : rand_.nextInt(num_);
+       return formatNumber(k);
+    }
 
     private void write(WriteOptions writeOptions, Order order, DBState state, int numEntries, int valueSize, int entries_per_batch)
             throws IOException
@@ -382,8 +392,7 @@ public class DbBenchmark
         for (int i = 0; i < numEntries; i += entries_per_batch) {
             WriteBatch batch = db_.createWriteBatch();
             for (int j = 0; j < entries_per_batch; j++) {
-                int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                byte[] key = formatNumber(k);
+                byte[] key = keygen(order, i+j);
                 batch.put(key, gen_.generate(valueSize));
                 bytes_ += valueSize + key.length;
                 finishedSingleOp();
@@ -470,11 +479,15 @@ public class DbBenchmark
             Closeables.closeQuietly(iterator);
         }
     }
+    
+    protected byte[] readRandomKeygen(){
+      return formatNumber(rand_.nextInt(num_));
+    }
 
     private void readRandom()
     {
         for (int i = 0; i < reads_; i++) {
-            byte[] key = formatNumber(rand_.nextInt(num_));
+            byte[] key = readRandomKeygen();
             byte[] value = db_.get(key);
             Preconditions.checkNotNull(value, "db.get(%s) is null", new String(key, UTF_8));
             bytes_ += key.length + value.length;
@@ -536,7 +549,7 @@ public class DbBenchmark
 
     private void snappyCompress()
     {
-        byte[] raw = gen_.generate(new Options().blockSize());
+        byte[] raw = gen_.generate(defaultOptions().blockSize());
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(raw.length)];
 
         long produced = 0;
@@ -560,7 +573,7 @@ public class DbBenchmark
 
     private void snappyUncompressArray()
     {
-        int inputSize = new Options().blockSize();
+        int inputSize = defaultOptions().blockSize();
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
         byte raw[] = gen_.generate(inputSize);
         int compressedLength;
@@ -586,7 +599,7 @@ public class DbBenchmark
 
     private void snappyUncompressDirectBuffer()
     {
-        int inputSize = new Options().blockSize();
+        int inputSize = defaultOptions().blockSize();
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
         byte raw[] = gen_.generate(inputSize);
         int compressedLength;
@@ -669,7 +682,7 @@ public class DbBenchmark
     }
 
 
-    private enum Flag
+    protected enum Flag
     {
         // Comma-separated list of operations to run in the specified order
         //   Actual benchmarks:
@@ -699,11 +712,11 @@ public class DbBenchmark
                 "readrandom",
                 "readrandom",  // Extra run to allow previous compactions to quiesce
                 "readseq",
-                // "readreverse",
+                "readreverse",
                 "compact",
                 "readrandom",
                 "readseq",
-                // "readreverse",
+                "readreverse",
                 "fill100K",
                 // "crc32c",
                 "snappycomp",
@@ -831,7 +844,7 @@ public class DbBenchmark
             this.defaultValue = defaultValue;
         }
 
-        protected abstract Object parseValue(String value);
+        public abstract Object parseValue(String value);
 
         public Object getDefaultValue()
         {
