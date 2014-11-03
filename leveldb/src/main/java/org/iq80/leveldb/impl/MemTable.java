@@ -22,6 +22,7 @@ import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Slice;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -133,8 +134,13 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
          }
          // then initialize the iterator at that key's location within the entryset
          // (find the index with binary search)
-         List<InternalKey> keyList = Lists.newArrayList(table.keySet());
-         makeIteratorAtIndex(Collections.binarySearch(keyList, ceiling.getKey(), table.comparator()));
+         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
+         makeIteratorAtIndex(entryList, Collections.binarySearch(entryList, ceiling, new Comparator<Entry<InternalKey, Slice>>(){
+            public int compare(Entry<InternalKey, Slice> o1, Entry<InternalKey, Slice> o2)
+            {
+               return table.comparator().compare(o1.getKey(), o2.getKey());
+            }
+         }));
       }
 
       @Override
@@ -172,10 +178,14 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
          makeIteratorAtIndex(table.size());
       }
 
+      private void makeIteratorAtIndex(List<Entry<InternalKey, Slice>> entryList, int index)
+      {
+         iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
+      }
+
       private void makeIteratorAtIndex(int index)
       {
-         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
-         iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
+         makeIteratorAtIndex(Lists.newArrayList(table.entrySet()), index);
       }
 
       @Override
