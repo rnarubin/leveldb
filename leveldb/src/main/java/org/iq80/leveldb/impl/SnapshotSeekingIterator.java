@@ -188,10 +188,10 @@ public final class SnapshotSeekingIterator
                         }
                         break;
                 }
-                iterator.next();
             }
-            savedEntry = null;
+            iterator.next();
         }
+        savedEntry = null;
     }
 
     private void findPrevUserEntry()
@@ -222,12 +222,21 @@ public final class SnapshotSeekingIterator
             iterator.prev();
         }
 
-        if (valueType == ValueType.DELETION)
-
-        {
+        if (valueType == ValueType.DELETION) {
             savedEntry = null;
             direction = FORWARD;
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        final StringBuilder sb = new StringBuilder();
+        sb.append("SnapshotSeekingIterator");
+        sb.append("{snapshot=").append(snapshot);
+        sb.append(", iterator=").append(iterator);
+        sb.append('}');
+        return sb.toString();
     }
 
     @Override

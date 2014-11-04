@@ -26,21 +26,24 @@ import java.util.Map;
 public interface DB
         extends Iterable<Map.Entry<byte[], byte[]>>, Closeable
 {
-    byte[] get(byte[] key)
+
+    public byte[] get(byte[] key)
             throws DBException;
 
-    byte[] get(byte[] key, ReadOptions options)
+    public byte[] get(byte[] key, ReadOptions options)
             throws DBException;
 
-    @Override
-    DBIterator iterator();
+    public DBIterator iterator();
 
-    DBIterator iterator(ReadOptions options);
+    public DBIterator iterator(ReadOptions options);
 
-    void put(byte[] key, byte[] value)
+    public void put(byte[] key, byte[] value)
             throws DBException;
 
-    void delete(byte[] key)
+    public void delete(byte[] key)
+            throws DBException;
+
+    public void write(WriteBatch updates)
             throws DBException;
 
     void write(WriteBatch updates)
@@ -52,34 +55,34 @@ public interface DB
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
      * of the DB after this operation.
      */
-    Snapshot put(byte[] key, byte[] value, WriteOptions options)
+    public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException;
 
     /**
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
      * of the DB after this operation.
      */
-    Snapshot delete(byte[] key, WriteOptions options)
+    public Snapshot delete(byte[] key, WriteOptions options)
             throws DBException;
 
     /**
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
      * of the DB after this operation.
      */
-    Snapshot write(WriteBatch updates, WriteOptions options)
+    public Snapshot write(WriteBatch updates, WriteOptions options)
             throws DBException;
-
-    Snapshot getSnapshot();
 
     long[] getApproximateSizes(Range... ranges);
 
-    String getProperty(String name);
+    public long[] getApproximateSizes(Range... ranges);
+
+    public String getProperty(String name);
 
     /**
      * Suspends any background compaction threads.  This methods
      * returns once the background compactions are suspended.
      */
-    void suspendCompactions()
+    public void suspendCompactions()
             throws InterruptedException;
 
     /**
@@ -93,6 +96,6 @@ public interface DB
      * @param begin if null then compaction start from the first key
      * @param end if null then compaction ends at the last key
      */
-    void compactRange(byte[] begin, byte[] end)
+    public void compactRange(byte[] begin, byte[] end)
             throws DBException;
 }

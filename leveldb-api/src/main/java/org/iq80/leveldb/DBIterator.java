@@ -27,6 +27,7 @@ import java.util.Map;
 public interface DBIterator
         extends Iterator<Map.Entry<byte[], byte[]>>, Closeable
 {
+
     /**
      * Repositions the iterator so the key of the next BlockElement
      * returned greater than or equal to the specified targetKey.
@@ -61,5 +62,5 @@ public interface DBIterator
     /**
      * Repositions the iterator so it is at the end of of the Database.
      */
-    void seekToLast();
+    public void seekToLast();
 }

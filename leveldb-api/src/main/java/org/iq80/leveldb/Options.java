@@ -19,6 +19,7 @@ package org.iq80.leveldb;
 
 public class Options
 {
+
     private boolean createIfMissing = true;
     private boolean errorIfExists;
     private int writeBufferSize = 4 << 20;

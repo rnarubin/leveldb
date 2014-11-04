@@ -25,12 +25,13 @@ import java.io.IOException;
  */
 public interface DBFactory
 {
-    DB open(File path, Options options)
+
+    public DB open(File path, Options options)
             throws IOException;
 
-    void destroy(File path, Options options)
+    public void destroy(File path, Options options)
             throws IOException;
 
-    void repair(File path, Options options)
+    public void repair(File path, Options options)
             throws IOException;
 }

@@ -35,6 +35,7 @@ import java.io.UnsupportedEncodingException;
 public class Iq80DBFactory
         implements DBFactory
 {
+
     public static final int CPU_DATA_MODEL = Integer.getInteger("sun.arch.data.model");
 
     // We only use MMAP on 64 bit systems since it's really easy to run out of

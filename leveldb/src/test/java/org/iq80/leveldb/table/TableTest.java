@@ -116,10 +116,10 @@ public abstract class TableTest
     private void tableTest(int blockSize, int blockRestartInterval, List<BlockEntry> entries)
             throws IOException
     {
-       List<BlockEntry> reverseEntries = Arrays.asList(new BlockEntry[entries.size()]); 
-       Collections.copy(reverseEntries, entries);
-       Collections.reverse(reverseEntries);
-       
+        List<BlockEntry> reverseEntries = Arrays.asList(new BlockEntry[entries.size()]);
+        Collections.copy(reverseEntries, entries);
+        Collections.reverse(reverseEntries);
+
         reopenFile();
         Options options = new Options().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
         TableBuilder builder = new TableBuilder(options, fileChannel, new BytewiseComparator());
@@ -142,10 +142,10 @@ public abstract class TableTest
         BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToLast();
-        if(reverseEntries.size() > 0){
-           BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
-           seekingIterator.seekToLast();
-           BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+        if (reverseEntries.size() > 0) {
+            BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
+            seekingIterator.seekToLast();
+            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
         }
         BlockHelper.assertSequence(seekingIterator, entries);
 
@@ -173,7 +173,6 @@ public abstract class TableTest
 
         long approximateOffset = table.getApproximateOffsetOf(endKey);
         assertTrue(approximateOffset >= lastApproximateOffset);
-
     }
 
     @BeforeMethod

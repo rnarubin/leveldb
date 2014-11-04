@@ -22,8 +22,9 @@ package org.iq80.leveldb;
  */
 public class Range
 {
-    private final byte[] start;
-    private final byte[] limit;
+
+    final private byte[] start;
+    final private byte[] limit;
 
     public byte[] limit()
     {

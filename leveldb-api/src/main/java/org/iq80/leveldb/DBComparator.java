@@ -25,7 +25,8 @@ import java.util.Comparator;
 public interface DBComparator
         extends Comparator<byte[]>
 {
-    String name();
+
+    public String name();
 
     /**
      * If <code>start < limit</code>, returns a short key in [start,limit).

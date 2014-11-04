@@ -22,5 +22,6 @@ package org.iq80.leveldb;
  */
 public interface Logger
 {
-    void log(String message);
+
+    public void log(String message);
 }

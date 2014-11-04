@@ -1234,7 +1234,7 @@ public class DbImplTest
     }
 
     private static class StringDbIterator
-            implements SeekingIterator<String, String>
+            implements ReverseSeekingIterator<String, String>
     {
         private final DBIterator iterator;
 
@@ -1281,7 +1281,7 @@ public class DbImplTest
 
         private Entry<String, String> adapt(Entry<byte[], byte[]> next)
         {
-            return immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
+            return Maps.immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
         }
 
         @Override

@@ -25,7 +25,8 @@ import java.io.Closeable;
 public interface WriteBatch
         extends Closeable
 {
-    WriteBatch put(byte[] key, byte[] value);
 
-    WriteBatch delete(byte[] key);
+    public WriteBatch put(byte[] key, byte[] value);
+
+    public WriteBatch delete(byte[] key);
 }
