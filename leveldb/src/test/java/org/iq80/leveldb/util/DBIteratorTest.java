@@ -38,6 +38,7 @@ import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.table.BlockHelper;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -48,7 +49,7 @@ import static com.google.common.base.Charsets.UTF_8;
 public class DBIteratorTest extends TestCase
 {
    private static final List<Entry<String, String>> entries, ordered, rOrdered;
-   private final Options options = new Options().createIfMissing(true).useMMap(false);
+   private final Options options = new Options().createIfMissing(true);
    private DB db;
    private File tempDir;
 
@@ -236,11 +237,19 @@ public class DBIteratorTest extends TestCase
       }
 
       Random rand = new Random(0);
-      int max = (int)(entries.size()*0.001f);
+      int max = (int)(entries.size()*0.005f);
       int dist = 1000;
       for(int i = 0; i < max; i++){
          int index = rand.nextInt(ordered.size()-1);
          String target = ordered.get(index).getKey();
+         double r = rand.nextDouble();
+         if(r < 1.0/3){
+            target = BlockHelper.beforeString(Maps.immutableEntry(target, null));
+         }
+         else if(r > 2.0/3){
+            index++;
+            target = BlockHelper.afterString(Maps.immutableEntry(target, null));
+         }
          actual.seek(target);
          assertForwardSame(actual, ordered.subList(index, Math.min(ordered.size(), index+dist)), false);
          actual.seek(target);
