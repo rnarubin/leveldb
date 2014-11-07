@@ -135,7 +135,7 @@ public class LogTest
             throws IOException
     {
         for (Slice entry : records) {
-            writer.addRecord(entry, false);
+            writer.addRecord(entry, true);
         }
 
         if (closeWriter) {

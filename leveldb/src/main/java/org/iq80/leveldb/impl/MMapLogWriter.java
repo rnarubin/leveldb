@@ -18,219 +18,128 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+
 import org.iq80.leveldb.util.ByteBufferSupport;
-import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
-import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
-import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
-import static org.iq80.leveldb.impl.Logs.getChunkChecksum;
-
-public class MMapLogWriter implements LogWriter
+public class MMapLogWriter
+        extends LogWriter
 {
-    private static final int PAGE_SIZE  = 1024 * 1024;
+    private static final int PAGE_SIZE = 1024 * 1024;
 
-    private final File file;
-    private final long fileNumber;
-    private final FileChannel fileChannel;
-    private final AtomicBoolean closed = new AtomicBoolean();
-    private MappedByteBuffer mappedByteBuffer;
-    private long fileOffset;
-    /**
-     * Current offset in the current block
-     */
-    private int blockOffset;
+    private final AsyncMMapWriter mmapWriter;
 
     public MMapLogWriter(File file, long fileNumber)
             throws IOException
     {
-        Preconditions.checkNotNull(file, "file is null");
-        Preconditions.checkArgument(fileNumber >= 0, "fileNumber is negative");
-        this.file = file;
-        this.fileNumber = fileNumber;
-        this.fileChannel = new RandomAccessFile(file, "rw").getChannel();
-        mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, 0, PAGE_SIZE);
-    }
-
-    public boolean isClosed()
-    {
-        return closed.get();
-    }
-
-    public synchronized void close()
-            throws IOException
-    {
-        closed.set(true);
-
-        destroyMappedByteBuffer();
-
-        if (fileChannel.isOpen()) {
-            fileChannel.truncate(fileOffset);
-        }
-
-        // close the channel
-        Closeables.closeQuietly(fileChannel);
-    }
-
-    public synchronized void delete()
-            throws IOException
-    {
-        close();
-
-        // try to delete the file
-        file.delete();
-    }
-
-    private void destroyMappedByteBuffer()
-    {
-        if (mappedByteBuffer != null) {
-            fileOffset += mappedByteBuffer.position();
-            unmap();
-        }
-        mappedByteBuffer = null;
-    }
-
-    public File getFile()
-    {
-        return file;
-    }
-
-    public long getFileNumber()
-    {
-        return fileNumber;
+        super(file, fileNumber, new AsyncMMapWriter(new RandomAccessFile(file, "rw").getChannel()));
+        this.mmapWriter = (AsyncMMapWriter) super.asyncWriter;
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
-    public synchronized void addRecord(Slice record, boolean force)
+    public void addRecord(Slice record, boolean synchronous)
             throws IOException
     {
-        Preconditions.checkState(!closed.get(), "Log has been closed");
+        Preconditions.checkState(!isClosed(), "Log has been closed");
 
-        SliceInput sliceInput = record.input();
+        Future<Long> write = mmapWriter.submit(buildRecord(record.input()));
+        if (synchronous) {
+            try {
+                write.get();
+            }
+            catch (InterruptedException ignored) {
+            }
+            catch (ExecutionException e) {
+                throw new IOException("Failed to write to log", e);
+            }
+            mmapWriter.getMappedByteBuffer().force();
+        }
+    }
 
-        // used to track first, middle and last blocks
-        boolean begin = true;
+    private static class AsyncMMapWriter
+            extends AsyncWriter
+    {
+        private final FileChannel fileChannel;
+        private MappedByteBuffer mappedByteBuffer;
+        private long fileOffset;
 
-        // Fragment the record int chunks as necessary and write it.  Note that if record
-        // is empty, we still want to iterate once to write a single
-        // zero-length chunk.
-        do {
-            int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
-            Preconditions.checkState(bytesRemainingInBlock >= 0);
+        public AsyncMMapWriter(FileChannel channel)
+                throws IOException
+        {
+            this.fileChannel = channel;
+            this.mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, 0, PAGE_SIZE);
+        }
 
-            // Switch to a new block if necessary
-            if (bytesRemainingInBlock < HEADER_SIZE) {
-                if (bytesRemainingInBlock > 0) {
-                    // Fill the rest of the block with zeros
-                    // todo lame... need a better way to write zeros
-                    ensureCapacity(bytesRemainingInBlock);
-                    mappedByteBuffer.put(new byte[bytesRemainingInBlock]);
+        public MappedByteBuffer getMappedByteBuffer()
+        {
+            return mappedByteBuffer;
+        }
+
+        @Override
+        protected long write(ByteBuffer[] buffers)
+                throws IOException
+        {
+            int totalLength = 0;
+            for (ByteBuffer b : buffers) {
+                totalLength += b.remaining();
+            }
+            ensureCapacity(totalLength);
+            for (ByteBuffer b : buffers) {
+                mappedByteBuffer.put(b);
+            }
+
+            return totalLength;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            try {
+                super.close();
+            }
+            finally {
+                destroyMappedByteBuffer();
+                if (fileChannel.isOpen()) {
+                    fileChannel.truncate(fileOffset);
                 }
-                blockOffset = 0;
-                bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
             }
-
-            // Invariant: we never leave less than HEADER_SIZE bytes available in a block
-            int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE;
-            Preconditions.checkState(bytesAvailableInBlock >= 0);
-
-            // if there are more bytes in the record then there are available in the block,
-            // fragment the record; otherwise write to the end of the record
-            boolean end;
-            int fragmentLength;
-            if (sliceInput.available() > bytesAvailableInBlock) {
-                end = false;
-                fragmentLength = bytesAvailableInBlock;
-            }
-            else {
-                end = true;
-                fragmentLength = sliceInput.available();
-            }
-
-            // determine block type
-            LogChunkType type;
-            if (begin && end) {
-                type = LogChunkType.FULL;
-            }
-            else if (begin) {
-                type = LogChunkType.FIRST;
-            }
-            else if (end) {
-                type = LogChunkType.LAST;
-            }
-            else {
-                type = LogChunkType.MIDDLE;
-            }
-
-            // write the chunk
-            writeChunk(type, sliceInput.readBytes(fragmentLength));
-
-            // we are no longer on the first chunk
-            begin = false;
-        } while (sliceInput.isReadable());
-
-        if (force) {
-            mappedByteBuffer.force();
         }
-    }
 
-    private void writeChunk(LogChunkType type, Slice slice)
-            throws IOException
-    {
-        Preconditions.checkArgument(slice.length() <= 0xffff, "length %s is larger than two bytes", slice.length());
-        Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
+        private void ensureCapacity(int bytes)
+                throws IOException
+        {
+            if (mappedByteBuffer.remaining() < bytes) {
+                // remap
+                fileOffset += mappedByteBuffer.position();
+                unmap();
 
-        // create header
-        Slice header = newLogRecordHeader(type, slice);
-
-        // write the header and the payload
-        ensureCapacity(header.length() + slice.length());
-        header.getBytes(0, mappedByteBuffer);
-        slice.getBytes(0, mappedByteBuffer);
-
-        blockOffset += HEADER_SIZE + slice.length();
-    }
-
-    private void ensureCapacity(int bytes)
-            throws IOException
-    {
-        if (mappedByteBuffer.remaining() < bytes) {
-            // remap
-            fileOffset += mappedByteBuffer.position();
-            unmap();
-
-            mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, fileOffset, PAGE_SIZE);
+                mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, fileOffset, PAGE_SIZE);
+            }
         }
-    }
 
-    private void unmap()
-    {
-        ByteBufferSupport.unmap(mappedByteBuffer);
-    }
+        private void unmap()
+        {
+            ByteBufferSupport.unmap(mappedByteBuffer);
+        }
 
-    private Slice newLogRecordHeader(LogChunkType type, Slice slice)
-    {
-        int crc = getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), slice.length());
-
-        // Format the header
-        Slice header = Slices.allocate(HEADER_SIZE);
-        SliceOutput sliceOutput = header.output();
-        sliceOutput.writeInt(crc);
-        sliceOutput.writeByte((byte) (slice.length() & 0xff));
-        sliceOutput.writeByte((byte) (slice.length() >>> 8));
-        sliceOutput.writeByte((byte) (type.getPersistentId()));
-
-        return header;
+        private void destroyMappedByteBuffer()
+        {
+            if (mappedByteBuffer != null) {
+                fileOffset += mappedByteBuffer.position();
+                unmap();
+            }
+            mappedByteBuffer = null;
+        }
     }
 }

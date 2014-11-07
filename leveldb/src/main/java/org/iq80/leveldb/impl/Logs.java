@@ -19,9 +19,15 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.PureJavaCrc32C;
+import org.iq80.leveldb.util.SliceInput;
+
+import com.google.common.base.Preconditions;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class Logs
 {
@@ -52,4 +58,5 @@ public final class Logs
         crc32C.update(buffer, offset, length);
         return crc32C.getMaskedValue();
     }
+    
 }

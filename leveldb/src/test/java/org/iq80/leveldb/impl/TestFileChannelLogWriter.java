@@ -23,7 +23,7 @@ public class TestFileChannelLogWriter
             Slice record = new Slice(recordSize);
 
             LogWriter writer = new FileChannelLogWriter(file, 10);
-            writer.addRecord(record, false);
+            writer.addRecord(record, true);
             writer.close();
 
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
