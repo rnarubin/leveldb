@@ -26,9 +26,13 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+
+import org.iq80.leveldb.ThrottlePolicies;
+import org.iq80.leveldb.ThrottlePolicy;
+import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -41,39 +45,63 @@ public abstract class AsyncWriter
      */
     private final ExecutorService workerPool;
     private final AtomicBoolean isClosed;
-    private final AtomicInteger submittedTasks;
+    private final BackgroundExceptionHandler bgExceptionHandler;
+    private final ThrottlePolicy throttlePolicy;
+    private static final int MAX_PERMITS = Integer.MAX_VALUE;
+    private final Semaphore submissions;
 
-    public AsyncWriter()
+    public AsyncWriter(BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
     {
         this.workerPool = Executors.newSingleThreadExecutor(new ThreadFactoryBuilder().setNameFormat("leveldb-async-writer-%s").build());
         this.isClosed = new AtomicBoolean(false);
-        this.submittedTasks = new AtomicInteger(0);
+        this.bgExceptionHandler = bgExceptionHandler;
+        this.throttlePolicy = throttlePolicy != null ? throttlePolicy : ThrottlePolicies.noThrottle();
+
+        // submitted tasks will acquire one from the lock;
+        // closing may only occur when all permits are available (all submissions completed)
+        this.submissions = new Semaphore(MAX_PERMITS);
     }
 
     public Future<Long> submit(final List<ByteBuffer[]> listOfBuffers)
     {
-        Preconditions.checkState(!isClosed.get(), "Cannot submit to closed writer");
+        Preconditions.checkState(!isClosed.get() && submissions.tryAcquire(), "Cannot submit to closed writer");
 
-        //if submissions outpace writing, throttling the submitters is necessary
-        //to allow the writer to catch up
-        throttleIfNecessary(submittedTasks.incrementAndGet());
+        //if submissions outpace flushing, throttling the submitters is necessary
+        //to allow the flusher to catch up
+        try{
+           throttlePolicy.throttleIfNecessary(MAX_PERMITS - submissions.availablePermits());
+        }
+        catch(Throwable t){
+           submissions.release();
+           throw t;
+        }
 
-        Future<Long> future = workerPool.submit(new Callable<Long>()
+        return workerPool.submit(new Callable<Long>()
         {
             @Override
             public Long call()
                     throws IOException
             {
                 long written = 0;
-                for (ByteBuffer[] b : listOfBuffers) {
-                    written += write(b);
+                try{
+                   for (ByteBuffer[] b : listOfBuffers) {
+                       written += write(b);
+                   }
                 }
-                submittedTasks.decrementAndGet();
+                catch(Throwable t){
+                   if(bgExceptionHandler == null){
+                      //if no handler is provided, rethrow to be caught in callable's get()
+                      throw t;
+                   }
+                   bgExceptionHandler.handle(t);
+                }
+                finally{
+                   submissions.release();
+                   throttlePolicy.notifyCompletion();
+                }
                 return written;
             }
         });
-
-        return future;
     }
 
     protected abstract long write(ByteBuffer[] buffers)
@@ -86,19 +114,17 @@ public abstract class AsyncWriter
         if (isClosed.getAndSet(true)) {
             return;
         }
-        workerPool.shutdown();
         try {
-            workerPool.awaitTermination(1, TimeUnit.HOURS);
+            //new tasks can no longer be submitted
+            //we must wait for pending tasks to complete (both those already
+            //in the thread pool, and those currently throttled) before closing
+            submissions.acquire(MAX_PERMITS);
+
+            workerPool.shutdown();
+            workerPool.awaitTermination(10, TimeUnit.SECONDS);
         }
         catch (InterruptedException e) {
-            throw new IOException("Interrupted while closing async writer", e);
+            Thread.currentThread().interrupt();
         }
     }
-
-    protected void throttleIfNecessary(int workPending)
-    {
-
-    }
 }
-
-

@@ -28,6 +28,7 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
@@ -78,18 +79,18 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
     private final File databaseDir;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
-    private final boolean useMMap;
+    private final Options options;
 
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, boolean useMMap)
+    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, Options options)
             throws IOException
     {
         this.databaseDir = databaseDir;
         this.tableCache = tableCache;
         this.internalKeyComparator = internalKeyComparator;
-        this.useMMap = useMMap;
+        this.options = options;
         appendVersion(new Version(this));
 
         initializeIfNeeded();
@@ -107,10 +108,10 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             edit.setNextFileNumber(nextFileNumber.get());
             edit.setLastSequenceNumber(lastSequence);
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, useMMap);
+            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options, null);
             try {
                 writeSnapshot(log);
-                log.addRecord(edit.encode(), false);
+                log.addRecord(edit.encode(), true);
             } finally {
                 log.close();
             }
@@ -278,7 +279,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, useMMap);
+                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options, null);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
@@ -297,8 +298,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             // New manifest file was not installed, so clean up state and delete the file
             if (createdNewManifest) {
                 descriptorLog.close();
-                // todo add delete method to LogWriter
-                new File(databaseDir, Filename.logFileName(descriptorLog.getFileNumber())).delete();
+                descriptorLog.delete();
                 descriptorLog = null;
             }
             throw e;
@@ -324,7 +324,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         edit.addFiles(current.getFiles());
 
         Slice record = edit.encode();
-        log.addRecord(record, false);
+        log.addRecord(record, true);
     }
 
     public void recover()

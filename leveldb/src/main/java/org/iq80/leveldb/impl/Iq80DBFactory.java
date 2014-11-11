@@ -29,6 +29,9 @@ import java.io.*;
  */
 public class Iq80DBFactory implements DBFactory {
 
+    /**
+     * @deprecated use {@link Options#useMMap(boolean) Options.useMMap(boolean)} instead
+     */
     public static final boolean USE_MMAP = Options.USE_MMAP_DEFAULT;
 
     public static final String VERSION;

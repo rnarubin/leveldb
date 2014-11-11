@@ -19,6 +19,10 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 
+import org.iq80.leveldb.ThrottlePolicies;
+import org.iq80.leveldb.ThrottlePolicy;
+import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 import org.iq80.leveldb.util.ByteBufferSupport;
 import org.iq80.leveldb.util.Slice;
 
@@ -39,21 +43,27 @@ public class MMapLogWriter
 
     private final AsyncMMapWriter mmapWriter;
 
-    public MMapLogWriter(File file, long fileNumber)
+    /**
+     * @param file
+     * @param fileNumber
+     * @param bgExceptionHandler - if null, will throw exceptions in async writer thread; these will only propagate if {@link WriteOptions#sync(boolean) sync()} is set to true
+     * @param throttlePolicy - if null, will use {@link ThrottlePolicies#noThrottle() ThrottlePolicies.noThrottle()}
+     */
+    public MMapLogWriter(File file, long fileNumber, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
             throws IOException
     {
-        super(file, fileNumber, new AsyncMMapWriter(new RandomAccessFile(file, "rw").getChannel()));
+        super(file, fileNumber, new AsyncMMapWriter(new RandomAccessFile(file, "rw").getChannel(), bgExceptionHandler, throttlePolicy));
         this.mmapWriter = (AsyncMMapWriter) super.asyncWriter;
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
-    public void addRecord(Slice record, boolean synchronous)
+    public void addRecord(Slice record, boolean sync)
             throws IOException
     {
         Preconditions.checkState(!isClosed(), "Log has been closed");
 
         Future<Long> write = mmapWriter.submit(buildRecord(record.input()));
-        if (synchronous) {
+        if (sync) {
             try {
                 write.get();
             }
@@ -73,9 +83,10 @@ public class MMapLogWriter
         private MappedByteBuffer mappedByteBuffer;
         private long fileOffset;
 
-        public AsyncMMapWriter(FileChannel channel)
+        public AsyncMMapWriter(FileChannel channel, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
                 throws IOException
         {
+            super(bgExceptionHandler, throttlePolicy);
             this.fileChannel = channel;
             this.mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, 0, PAGE_SIZE);
         }

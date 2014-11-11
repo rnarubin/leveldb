@@ -19,6 +19,9 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 
+import org.iq80.leveldb.ThrottlePolicy;
+import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
@@ -35,10 +38,16 @@ public class FileChannelLogWriter
 {
     private final AsyncFileWriter fileWriter;
 
-    public FileChannelLogWriter(File file, long fileNumber)
+    /**
+     * @param file
+     * @param fileNumber
+     * @param bgExceptionHandler - if null, will throw exceptions in async writer thread; these will only propagate if {@link WriteOptions#sync(boolean) sync()} is set to true
+     * @param throttlePolicy - if null, will use {@link ThrottlePolicies#noThrottle() ThrottlePolicies.noThrottle()}
+     */
+    public FileChannelLogWriter(File file, long fileNumber, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
             throws FileNotFoundException
     {
-        super(file, fileNumber, new AsyncFileWriter(new FileOutputStream(file).getChannel()));
+        super(file, fileNumber, new AsyncFileWriter(new FileOutputStream(file).getChannel(), bgExceptionHandler, throttlePolicy));
         //a minor inconvenience, but i can't pass to super a variable that i
         // initialize here, so this ends up being a bit ugly
         this.fileWriter = (AsyncFileWriter) super.asyncWriter;
@@ -46,13 +55,13 @@ public class FileChannelLogWriter
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
     @Override
-    public void addRecord(Slice record, boolean synchronous)
+    public void addRecord(Slice record, boolean sync)
             throws IOException
     {
         Preconditions.checkState(!isClosed(), "Log has been closed");
 
         Future<Long> write = fileWriter.submit(buildRecord(record.input()));
-        if (synchronous) {
+        if (sync) {
             try {
                 write.get();
             }
@@ -70,8 +79,9 @@ public class FileChannelLogWriter
     {
         private final FileChannel channel;
 
-        public AsyncFileWriter(FileChannel channel)
+        public AsyncFileWriter(FileChannel channel, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
         {
+            super(bgExceptionHandler, throttlePolicy);
             this.channel = channel;
         }
 

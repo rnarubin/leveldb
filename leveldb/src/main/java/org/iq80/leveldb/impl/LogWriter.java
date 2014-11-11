@@ -17,6 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -188,6 +189,6 @@ public abstract class LogWriter
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
-    abstract void addRecord(Slice record, boolean synchronous)
+    abstract void addRecord(Slice record, boolean sync)
             throws IOException;
 }

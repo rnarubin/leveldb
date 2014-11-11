@@ -21,6 +21,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
@@ -102,6 +103,15 @@ public class DbImpl implements DB
     private final InternalKeyComparator internalKeyComparator;
 
     private volatile Throwable backgroundException;
+    private final BackgroundExceptionHandler bgExceptionHandler = new BackgroundExceptionHandler()
+    {
+       @Override
+       public void handle(Throwable t)
+       {
+           backgroundException = t;
+       }
+    };
+
     private ExecutorService compactionExecutor;
     private Future<?> backgroundCompaction;
 
@@ -175,7 +185,7 @@ public class DbImpl implements DB
                 Preconditions.checkArgument(!options.errorIfExists(), "Database '%s' exists and the error if exists option is enabled", databaseDir);
             }
 
-            versions = new VersionSet(databaseDir, tableCache, internalKeyComparator, options.useMMap());
+            versions = new VersionSet(databaseDir, tableCache, internalKeyComparator, options);
 
             // load  (and recover) current version
             versions.recover();
@@ -214,7 +224,7 @@ public class DbImpl implements DB
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options.useMMap());
+            this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options, bgExceptionHandler);
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -405,9 +415,18 @@ public class DbImpl implements DB
         }
     }
     
+    /**
+     * A handler for exceptions thrown by asynchronous operations
+     */
+    interface BackgroundExceptionHandler
+    {
+        void handle(Throwable t);
+    }
+    
     public void checkBackgroundException() {
         Throwable e = backgroundException;
         if(e!=null) {
+            backgroundException = null; //clear the exception now that we throw it
             throw new BackgroundProcessingException(e);
         }
     }
@@ -857,7 +876,7 @@ public class DbImpl implements DB
                 // open a new log
                 long logNumber = versions.getNextFileNumber();
                 try {
-                    this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options.useMMap());
+                    this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options, bgExceptionHandler);
                 }
                 catch (IOException e) {
                     throw new RuntimeException("Unable to open new log file " +

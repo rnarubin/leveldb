@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.ImmutableList;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceOutput;
@@ -32,6 +33,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -111,7 +113,7 @@ public class LogTest
 
         testLog(records);
     }
-
+    
     @Test
     public void testReadWithoutProperClose()
             throws Exception
@@ -161,7 +163,7 @@ public class LogTest
     public void setUp()
             throws Exception
     {
-        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, Options.USE_MMAP_DEFAULT);
+        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, new Options(), null);
     }
 
     @AfterMethod
