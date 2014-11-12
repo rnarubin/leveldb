@@ -23,6 +23,7 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
+
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.DBIterator;
@@ -41,18 +42,27 @@ import org.iq80.leveldb.util.Snappy;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static org.iq80.leveldb.benchmark.DbBenchmark.DBState.EXISTING;
 import static org.iq80.leveldb.benchmark.DbBenchmark.DBState.FRESH;
 import static org.iq80.leveldb.benchmark.DbBenchmark.Order.RANDOM;
 import static org.iq80.leveldb.benchmark.DbBenchmark.Order.SEQUENTIAL;
+import static org.iq80.leveldb.benchmark.DbBenchmark.Concurrency.SERIAL;
+import static org.iq80.leveldb.benchmark.DbBenchmark.Concurrency.CONCURRENT;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 
 public class DbBenchmark
@@ -74,6 +84,12 @@ public class DbBenchmark
         FRESH,
         EXISTING
     }
+    
+    enum Concurrency
+    {
+       SERIAL,
+       CONCURRENT
+    }
 
     //    Cache cache_;
     private List<String> benchmarks;
@@ -89,10 +105,11 @@ public class DbBenchmark
     //    private Histogram hist_;
     private RandomGenerator gen_;
     private final Random rand_;
+    private final int thread_count;
 
     // State kept for progress messages
-    int done_;
-    int next_report_;     // When to report next
+    AtomicInteger done_;
+    AtomicInteger next_report_;     // When to report next
 
     final DBFactory factory;
 
@@ -107,6 +124,7 @@ public class DbBenchmark
         writeBufferSize = (Integer) flags.get(Flag.write_buffer_size);
         compressionRatio = (Double) flags.get(Flag.compression_ratio);
         useExisting = (Boolean) flags.get(Flag.use_existing_db);
+        thread_count = (Integer) flags.get(Flag.thread_count);
         heap_counter_ = 0;
         bytes_ = 0;
         rand_ = new Random(301);
@@ -147,6 +165,9 @@ public class DbBenchmark
             }
             else if (benchmark.equals("fillrandom")) {
                 write(new WriteOptions(), RANDOM, FRESH, num_, valueSize, 1);
+            }
+            else if (benchmark.equals("fillrandomconcurrent")) {
+                write(new WriteOptions(), RANDOM, FRESH, CONCURRENT, num_, valueSize, 1);
             }
             else if (benchmark.equals("overwrite")) {
                 write(new WriteOptions(), RANDOM, EXISTING, num_, valueSize, 1);
@@ -316,8 +337,8 @@ public class DbBenchmark
         message_ = null;
         last_op_finish_ = startTime;
         // hist.clear();
-        done_ = 0;
-        next_report_ = 100;
+        done_ = new AtomicInteger(0);
+        next_report_ = new AtomicInteger(100);
     }
 
     private void stop(String benchmark)
@@ -327,8 +348,8 @@ public class DbBenchmark
 
         // Pretend at least one op was done in case we are running a benchmark
         // that does nto call FinishedSingleOp().
-        if (done_ < 1) {
-            done_ = 1;
+        if (done_.get() < 1) {
+            done_.set(1);
         }
 
         if (bytes_ > 0) {
@@ -346,7 +367,7 @@ public class DbBenchmark
 
         System.out.printf("%-12s : %11.5f micros/op;%s%s\n",
                 benchmark,
-                elapsedSeconds * 1e6 / done_,
+                elapsedSeconds * 1e6 / done_.get(),
                 (message_ == null ? "" : " "),
                 message_);
 //        if (FLAGS_histogram) {
@@ -360,7 +381,11 @@ public class DbBenchmark
 
     }
 
-    private void write(WriteOptions writeOptions, Order order, DBState state, int numEntries, int valueSize, int entries_per_batch)
+    private void write(WriteOptions writeOptions, Order order, DBState state, int numEntries, int valueSize, int entries_per_batch) throws IOException
+    {
+       write(writeOptions, order, state, SERIAL, numEntries, valueSize, entries_per_batch);
+    }
+    private void write(final WriteOptions writeOptions, final Order order, final DBState state, final Concurrency concurrent, final int numEntries, final int valueSize, final int entries_per_batch)
             throws IOException
     {
         if (state == FRESH) {
@@ -378,18 +403,62 @@ public class DbBenchmark
         if (numEntries != num_) {
             message_ = String.format("(%d ops)", numEntries);
         }
-
-        for (int i = 0; i < numEntries; i += entries_per_batch) {
-            WriteBatch batch = db_.createWriteBatch();
-            for (int j = 0; j < entries_per_batch; j++) {
-                int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                byte[] key = formatNumber(k);
-                batch.put(key, gen_.generate(valueSize));
-                bytes_ += valueSize + key.length;
-                finishedSingleOp();
-            }
-            db_.write(batch, writeOptions);
-            batch.close();
+        
+        if(concurrent == SERIAL){
+           for (int i = 0; i < numEntries; i += entries_per_batch) {
+               WriteBatch batch = db_.createWriteBatch();
+               for (int j = 0; j < entries_per_batch; j++) {
+                   int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
+                   byte[] key = formatNumber(k);
+                   batch.put(key, gen_.generate(valueSize));
+                   bytes_ += valueSize + key.length;
+                   finishedSingleOp();
+               }
+               db_.write(batch, writeOptions);
+               batch.close();
+           }
+        }
+        else{
+           ExecutorService pool = Executors.newFixedThreadPool(thread_count);
+           List<Future<Void>> work = new ArrayList<>();
+           final int chunkSize = numEntries/thread_count;
+           for(int t = 0, s = 0; t < thread_count; t++, s+=chunkSize){
+              final int start = s, end = s+chunkSize;
+              work.add(pool.submit(new Callable<Void>(){
+                 public Void call() throws IOException
+                 {
+                     for (int i = start; i < end; i += entries_per_batch) {
+                        WriteBatch batch = db_.createWriteBatch();
+                        for (int j = 0; j < entries_per_batch; j++) {
+                        int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
+                        byte[] key = formatNumber(k);
+                        batch.put(key, gen_.generate(valueSize));
+                        bytes_ += valueSize + key.length;
+                        finishedSingleOp();
+                        }
+                        db_.write(batch, writeOptions);
+                        batch.close();
+                     }
+                     return null; 
+                 }
+              }));
+           }
+           
+           try{
+              for(Future<Void> job:work){
+                 try
+                 {
+                    job.get();
+                 }
+                 catch (InterruptedException | ExecutionException e)
+                 {
+                    throw new IOException(e);
+                 }
+              }
+           }
+           finally {
+              pool.shutdown();
+           }
         }
     }
 
@@ -415,28 +484,28 @@ public class DbBenchmark
 //        if (histogram) {
 //            todo
 //        }
-        done_++;
-        if (done_ >= next_report_) {
-            if (next_report_ < 1000) {
-                next_report_ += 100;
+        if (done_.incrementAndGet() >= next_report_.get()) {
+
+            if (next_report_.get() < 1000) {
+                next_report_.addAndGet(100);
             }
-            else if (next_report_ < 5000) {
-                next_report_ += 500;
+            else if (next_report_.get() < 5000) {
+                next_report_.addAndGet(500);
             }
-            else if (next_report_ < 10000) {
-                next_report_ += 1000;
+            else if (next_report_.get() < 10000) {
+                next_report_.addAndGet(1000);
             }
-            else if (next_report_ < 50000) {
-                next_report_ += 5000;
+            else if (next_report_.get() < 50000) {
+                next_report_.addAndGet(5000);
             }
-            else if (next_report_ < 100000) {
-                next_report_ += 10000;
+            else if (next_report_.get() < 100000) {
+                next_report_.addAndGet(10000);
             }
-            else if (next_report_ < 500000) {
-                next_report_ += 50000;
+            else if (next_report_.get() < 500000) {
+                next_report_.addAndGet(50000);
             }
             else {
-                next_report_ += 100000;
+                next_report_.addAndGet(100000);
             }
             System.out.printf("... finished %d ops%30s\r", done_, "");
 
@@ -822,7 +891,16 @@ public class DbBenchmark
                     {
                         return value;
                     }
-                },;
+                },
+        // If running concurrently, how many parallel threads
+        thread_count(20)
+                {
+                   @Override
+                   public Object parseValue(String value)
+                   {
+                      return Integer.parseInt(value);
+                   }
+                };
 
         private final Object defaultValue;
 
