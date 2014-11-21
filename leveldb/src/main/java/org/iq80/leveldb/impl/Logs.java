@@ -18,18 +18,11 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.PureJavaCrc32C;
-import org.iq80.leveldb.util.SliceInput;
-
-import com.google.common.base.Preconditions;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
 public final class Logs
 {
@@ -37,13 +30,13 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(File file, long fileNumber, Options options, BackgroundExceptionHandler bgExceptionHandler)
+    public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
         if(options.useMMap()) {
-            return new MMapLogWriter(file, fileNumber, bgExceptionHandler, options.throttlePolicy());
+            return new MMapLogWriter(file, fileNumber);
         } else {
-            return new FileChannelLogWriter(file, fileNumber, bgExceptionHandler, options.throttlePolicy());
+            return new FileChannelLogWriter(file, fileNumber);
         }
     }
 

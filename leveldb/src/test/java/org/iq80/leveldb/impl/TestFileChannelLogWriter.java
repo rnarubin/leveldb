@@ -1,7 +1,5 @@
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.ThrottlePolicies;
-import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.Slice;
 import org.testng.annotations.Test;
 
@@ -24,7 +22,7 @@ public class TestFileChannelLogWriter
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             Slice record = new Slice(recordSize);
 
-            LogWriter writer = new FileChannelLogWriter(file, 10, null, null);
+            LogWriter writer = new FileChannelLogWriter(file, 10);
             writer.addRecord(record, true);
             writer.close();
 

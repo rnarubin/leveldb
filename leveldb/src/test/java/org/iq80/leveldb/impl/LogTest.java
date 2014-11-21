@@ -163,7 +163,7 @@ public class LogTest
     public void setUp()
             throws Exception
     {
-        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, new Options(), null);
+        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, new Options());
     }
 
     @AfterMethod

@@ -17,40 +17,31 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
-
-import org.iq80.leveldb.ThrottlePolicy;
-import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 import org.iq80.leveldb.util.Slice;
 
+import com.google.common.base.Preconditions;
+
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class FileChannelLogWriter
         extends LogWriter
 {
-    private final AsyncFileWriter fileWriter;
+   
+    private final FileChannel fileChannel;
+    private final AtomicLong filePosition;
 
-    /**
-     * @param file
-     * @param fileNumber
-     * @param bgExceptionHandler - if null, will throw exceptions in async writer thread; these will only propagate if {@link WriteOptions#sync(boolean) sync()} is set to true
-     * @param throttlePolicy - if null, will use {@link ThrottlePolicies#noThrottle() ThrottlePolicies.noThrottle()}
-     */
-    public FileChannelLogWriter(File file, long fileNumber, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
-            throws FileNotFoundException
+    public FileChannelLogWriter(File file, long fileNumber)
+            throws IOException
     {
-        super(file, fileNumber, new AsyncFileWriter(new FileOutputStream(file).getChannel(), bgExceptionHandler, throttlePolicy));
-        //a minor inconvenience, but i can't pass to super a variable that i
-        // initialize here, so this ends up being a bit ugly
-        this.fileWriter = (AsyncFileWriter) super.asyncWriter;
+       super(file, fileNumber);
+       this.fileChannel = FileChannel.open(file.toPath(), StandardOpenOption.APPEND);
+       this.filePosition = new AtomicLong(fileChannel.position());
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
@@ -60,54 +51,24 @@ public class FileChannelLogWriter
     {
         Preconditions.checkState(!isClosed(), "Log has been closed");
 
-        Future<Long> write = fileWriter.submit(buildRecord(record.input()));
-        if (sync) {
-            try {
-                write.get();
-            }
-            catch (InterruptedException ignored) {
-            }
-            catch (ExecutionException e) {
-                throw new IOException("Failed to write to log file", e);
-            }
-            fileWriter.getChannel().force(false);
+        List<ByteBuffer> toWrite = buildRecord(record.input());
+        long length = 0;
+        for(ByteBuffer b:toWrite)
+        {
+           length += b.remaining();
         }
+        //advance the position atomically so that subsequent writes can proceed while this thread fills in its reserved space
+        long position = filePosition.getAndAdd(length);
+        for(ByteBuffer b:toWrite)
+        {
+           position += fileChannel.write(b, position);
+        }
+        
+        if(sync)
+        {
+           fileChannel.force(false);
+        }
+    
     }
 
-    private static class AsyncFileWriter
-            extends AsyncWriter
-    {
-        private final FileChannel channel;
-
-        public AsyncFileWriter(FileChannel channel, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
-        {
-            super(bgExceptionHandler, throttlePolicy);
-            this.channel = channel;
-        }
-
-        public FileChannel getChannel()
-        {
-            return channel;
-        }
-
-        @Override
-        protected long write(ByteBuffer[] buffers)
-                throws IOException
-        {
-            return channel.write(buffers);
-        }
-
-        @Override
-        public void close()
-                throws IOException
-        {
-            try {
-                super.close();
-            }
-            finally {
-                channel.force(true);
-                channel.close();
-            }
-        }
-    }
 }

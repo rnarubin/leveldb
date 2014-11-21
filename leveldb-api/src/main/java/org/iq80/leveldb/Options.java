@@ -33,7 +33,6 @@ public class Options {
     private DBComparator comparator;
     private Logger logger = null;
     private long cacheSize;
-    private ThrottlePolicy throttlePolicy = ThrottlePolicies.blockingLimitThrottle(1);
 
     public static final int CPU_DATA_MODEL = Integer.getInteger("sun.arch.data.model");
 
@@ -185,12 +184,4 @@ public class Options {
        return this;
     }
 
-    public ThrottlePolicy throttlePolicy() {
-       return this.throttlePolicy;
-    }
-
-    public Options throttlePolicy(ThrottlePolicy throttlePolicy) {
-       this.throttlePolicy = throttlePolicy;
-       return this;
-    }
 }

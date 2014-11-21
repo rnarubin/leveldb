@@ -23,7 +23,7 @@ public class TestMMapLogWriter
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             Slice record = new Slice(recordSize);
 
-            LogWriter writer = new MMapLogWriter(file, 10, null, null);
+            LogWriter writer = new MMapLogWriter(file, 10);
             writer.addRecord(record, true);
             writer.close();
 

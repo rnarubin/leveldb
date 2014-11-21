@@ -108,7 +108,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             edit.setNextFileNumber(nextFileNumber.get());
             edit.setLastSequenceNumber(lastSequence);
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options, null);
+            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
             try {
                 writeSnapshot(log);
                 log.addRecord(edit.encode(), true);
@@ -279,7 +279,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options, null);
+                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }

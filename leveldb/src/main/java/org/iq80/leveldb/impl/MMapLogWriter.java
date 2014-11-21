@@ -19,10 +19,7 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 
-import org.iq80.leveldb.ThrottlePolicies;
-import org.iq80.leveldb.ThrottlePolicy;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.impl.DbImpl.BackgroundExceptionHandler;
 import org.iq80.leveldb.util.ByteBufferSupport;
 import org.iq80.leveldb.util.Slice;
 
@@ -33,27 +30,16 @@ import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 
 public class MMapLogWriter
         extends LogWriter
 {
     private static final int PAGE_SIZE = 1024 * 1024;
 
-    private final AsyncMMapWriter mmapWriter;
-
-    /**
-     * @param file
-     * @param fileNumber
-     * @param bgExceptionHandler - if null, will throw exceptions in async writer thread; these will only propagate if {@link WriteOptions#sync(boolean) sync()} is set to true
-     * @param throttlePolicy - if null, will use {@link ThrottlePolicies#noThrottle() ThrottlePolicies.noThrottle()}
-     */
-    public MMapLogWriter(File file, long fileNumber, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
+    public MMapLogWriter(File file, long fileNumber)
             throws IOException
     {
-        super(file, fileNumber, new AsyncMMapWriter(new RandomAccessFile(file, "rw").getChannel(), bgExceptionHandler, throttlePolicy));
-        this.mmapWriter = (AsyncMMapWriter) super.asyncWriter;
+        super(file, fileNumber);
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
@@ -61,21 +47,10 @@ public class MMapLogWriter
             throws IOException
     {
         Preconditions.checkState(!isClosed(), "Log has been closed");
-
-        Future<Long> write = mmapWriter.submit(buildRecord(record.input()));
-        if (sync) {
-            try {
-                write.get();
-            }
-            catch (InterruptedException ignored) {
-            }
-            catch (ExecutionException e) {
-                throw new IOException("Failed to write to log", e);
-            }
-            mmapWriter.getMappedByteBuffer().force();
-        }
+        throw new UnsupportedOperationException("need to fix mmap");
     }
 
+    /*
     private static class AsyncMMapWriter
             extends AsyncWriter
     {
@@ -97,6 +72,7 @@ public class MMapLogWriter
         }
 
         @Override
+        protected long write(List<ByteBuffer[]> b){ throw new UnsupportedOperationException();}
         protected long write(ByteBuffer[] buffers)
                 throws IOException
         {
@@ -153,4 +129,5 @@ public class MMapLogWriter
             mappedByteBuffer = null;
         }
     }
+    */
 }
