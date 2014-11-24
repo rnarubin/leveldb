@@ -672,43 +672,35 @@ public class DbImpl implements DB
             throws DBException
     {
         checkBackgroundException();
-        mutex.lock();
-        try {
-            long sequenceEnd;
-            if (updates.size() != 0) {
-                makeRoomForWrite(false);
+         long sequenceEnd;
+         if (updates.size() != 0) {
+             makeRoomForWrite(false);
 
-                // Get sequence numbers for this change set
-                final long sequenceBegin = versions.getLastSequence() + 1;
-                sequenceEnd = sequenceBegin + updates.size() - 1;
+             // Get sequence numbers for this change set
+             final long sequenceDelta = updates.size();
+             final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta)+1;
+             sequenceEnd = sequenceBegin + sequenceDelta-1;
 
-                // Reserve this sequence in the version set
-                versions.setLastSequence(sequenceEnd);
+             // Log write
+             Slice record = writeWriteBatch(updates, sequenceBegin);
+             try {
+                 log.addRecord(record, options.sync());
+             }
+             catch (IOException e) {
+                 throw Throwables.propagate(e);
+             }
 
-                // Log write
-                Slice record = writeWriteBatch(updates, sequenceBegin);
-                try {
-                    log.addRecord(record, options.sync());
-                }
-                catch (IOException e) {
-                    throw Throwables.propagate(e);
-                }
+             // Update memtable
+             updates.forEach(new InsertIntoHandler(memTable, sequenceBegin));
+         } else {
+             sequenceEnd = versions.getLastSequence();
+         }
 
-                // Update memtable
-                updates.forEach(new InsertIntoHandler(memTable, sequenceBegin));
-            } else {
-                sequenceEnd = versions.getLastSequence();
-            }
-
-            if(options.snapshot()) {
-                return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
-            } else {
-                return null;
-            }
-        }
-        finally {
-            mutex.unlock();
-        }
+         if(options.snapshot()) {
+             return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
+         } else {
+             return null;
+         }
     }
 
     @Override
@@ -798,8 +790,6 @@ public class DbImpl implements DB
 
     private void makeRoomForWrite(boolean force)
     {
-        Preconditions.checkState(mutex.isHeldByCurrentThread());
-
         boolean allowDelay = !force;
 
         while (true) {
@@ -817,14 +807,11 @@ public class DbImpl implements DB
                 // this delay hands over some CPU to the compaction thread in
                 // case it is sharing the same core as the writer.
                 try {
-                    mutex.unlock();
                     Thread.sleep(1);
                 }
                 catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(e);
-                } finally {
-                    mutex.lock();
                 }
 
                 // Do not delay a single write more than once
@@ -834,47 +821,56 @@ public class DbImpl implements DB
                 // There is room in current memtable
                 break;
             }
-            else if (immutableMemTable != null) {
-                // We have filled up the current memtable, but the previous
-                // one is still being compacted, so we wait.
-                backgroundCondition.awaitUninterruptibly();
-            }
-            else if (versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
-                // There are too many level-0 files.
-//                Log(options_.info_log, "waiting...\n");
-                backgroundCondition.awaitUninterruptibly();
-            }
-            else {
-                // Attempt to switch to a new memtable and trigger compaction of old
-                Preconditions.checkState(versions.getPrevLogNumber() == 0);
+            else{
+               try{
+                  mutex.lock();
+                  if (immutableMemTable != null) {
+                      // We have filled up the current memtable, but the previous
+                      // one is still being compacted, so we wait.
+                      backgroundCondition.awaitUninterruptibly();
+                  }
+                  else if (versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
+                      // There are too many level-0 files.
+      //                Log(options_.info_log, "waiting...\n");
+                      backgroundCondition.awaitUninterruptibly();
+                  }
+                  else {
+                      // Attempt to switch to a new memtable and trigger compaction of old
+                      Preconditions.checkState(versions.getPrevLogNumber() == 0);
 
-                // close the existing log
-                try {
-                    log.close();
-                }
-                catch (IOException e) {
-                    throw new RuntimeException("Unable to close log file " + log.getFile(), e);
-                }
+                      // close the existing log
+                      try {
+                          log.close();
+                      }
+                      catch (IOException e) {
+                          throw new RuntimeException("Unable to close log file " + log.getFile(), e);
+                      }
 
 
-                // open a new log
-                long logNumber = versions.getNextFileNumber();
-                try {
-                    this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options);
-                }
-                catch (IOException e) {
-                    throw new RuntimeException("Unable to open new log file " +
-                            new File(databaseDir, Filename.logFileName(logNumber)).getAbsoluteFile(), e);
-                }
+                      // open a new log
+                      long logNumber = versions.getNextFileNumber();
+                      try {
+                          this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options);
+                      }
+                      catch (IOException e) {
+                          throw new RuntimeException("Unable to open new log file " +
+                                  new File(databaseDir, Filename.logFileName(logNumber)).getAbsoluteFile(), e);
+                      }
 
-                // create a new mem table
-                immutableMemTable = memTable;
-                memTable = new MemTable(internalKeyComparator);
+                      // create a new mem table
+                      immutableMemTable = memTable;
+                      memTable = new MemTable(internalKeyComparator);
 
-                // Do not force another compaction there is space available
-                force = false;
+                      // Do not force another compaction there is space available
+                      force = false;
 
-                maybeScheduleCompaction();
+                      maybeScheduleCompaction();
+                  }
+               }
+               finally {
+                  mutex.unlock();
+               }
+               
             }
         }
     }

@@ -22,10 +22,10 @@ import org.iq80.leveldb.util.Slice;
 import com.google.common.base.Preconditions;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,7 +40,7 @@ public class FileChannelLogWriter
             throws IOException
     {
        super(file, fileNumber);
-       this.fileChannel = FileChannel.open(file.toPath(), StandardOpenOption.APPEND);
+       this.fileChannel = new FileOutputStream(file, true).getChannel();
        this.filePosition = new AtomicLong(fileChannel.position());
     }
 

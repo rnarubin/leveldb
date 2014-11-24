@@ -71,7 +71,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
     private final AtomicLong nextFileNumber = new AtomicLong(2);
     private long manifestFileNumber = 1;
     private Version current;
-    private long lastSequence;
+    private AtomicLong lastSequence = new AtomicLong(0);
     private long logNumber;
     private long prevLogNumber;
 
@@ -106,7 +106,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
             edit.setNextFileNumber(nextFileNumber.get());
-            edit.setLastSequenceNumber(lastSequence);
+            edit.setLastSequenceNumber(lastSequence.get());
 
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
             try {
@@ -239,13 +239,18 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
 
     public long getLastSequence()
     {
-        return lastSequence;
+        return lastSequence.get();
+    }
+    
+    public long getAndAddLastSequence(long delta)
+    {
+       return lastSequence.getAndAdd(delta);
     }
 
     public void setLastSequence(long newLastSequence)
     {
-        Preconditions.checkArgument(newLastSequence >= lastSequence, "Expected newLastSequence to be greater than or equal to current lastSequence");
-        this.lastSequence = newLastSequence;
+        Preconditions.checkArgument(newLastSequence >= lastSequence.get(), "Expected newLastSequence to be greater than or equal to current lastSequence");
+        this.lastSequence.set(newLastSequence);
     }
 
     public void logAndApply(VersionEdit edit)
@@ -264,7 +269,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         }
 
         edit.setNextFileNumber(nextFileNumber.get());
-        edit.setLastSequenceNumber(lastSequence);
+        edit.setLastSequenceNumber(lastSequence.get());
 
         Version version = new Version(this);
         Builder builder = new Builder(this, current);
@@ -401,7 +406,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
 	        appendVersion(newVersion);
 	        manifestFileNumber = nextFileNumber;
 	        this.nextFileNumber.set(nextFileNumber + 1);
-	        this.lastSequence = lastSequence;
+	        this.lastSequence.set(lastSequence);
 	        this.logNumber = logNumber;
 	        this.prevLogNumber = prevLogNumber;
         } finally {
