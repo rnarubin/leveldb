@@ -507,7 +507,7 @@ public class DbBenchmark
             else {
                 next_report_.addAndGet(100000);
             }
-            System.out.printf("... finished %d ops%30s\r", done_, "");
+            System.out.printf("... finished %d ops%30s\r", done_.get(), "");
 
         }
     }
