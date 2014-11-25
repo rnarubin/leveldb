@@ -34,14 +34,12 @@ public class FileChannelLogWriter
 {
    
     private final FileChannel fileChannel;
-    private final AtomicLong filePosition;
 
     public FileChannelLogWriter(File file, long fileNumber)
             throws IOException
     {
        super(file, fileNumber);
        this.fileChannel = new FileOutputStream(file, true).getChannel();
-       this.filePosition = new AtomicLong(fileChannel.position());
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
@@ -51,17 +49,11 @@ public class FileChannelLogWriter
     {
         Preconditions.checkState(!isClosed(), "Log has been closed");
 
-        List<ByteBuffer> toWrite = buildRecord(record.input());
-        long length = 0;
-        for(ByteBuffer b:toWrite)
+        WriteRecord toWrite = buildRecord(record.input());
+        long position = toWrite.getStartPosition();
+        for(ByteBuffer buffer:toWrite.getData())
         {
-           length += b.remaining();
-        }
-        //advance the position atomically so that subsequent writes can proceed while this thread fills in its reserved space
-        long position = filePosition.getAndAdd(length);
-        for(ByteBuffer b:toWrite)
-        {
-           position += fileChannel.write(b, position);
+           position += fileChannel.write(buffer, position);
         }
         
         if(sync)
