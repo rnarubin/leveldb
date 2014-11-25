@@ -17,11 +17,13 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Slice;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -100,9 +102,11 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
    {
 
       private ReversePeekingIterator<Entry<InternalKey, Slice>> iterator;
+      private final List<Entry<InternalKey, Slice>> entryList;
 
       public MemTableIterator()
       {
+         entryList = Lists.newArrayList(table.entrySet());
          seekToFirst();
       }
 
@@ -121,20 +125,23 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seek(InternalKey targetKey)
       {
-         // find the smallest key greater than or equal to the targetKey in the table
-         Entry<InternalKey, Slice> ceiling = table.ceilingEntry(targetKey);
-         if (ceiling == null)
-         { // no keys >= targetKey
-            if (table.size() > 0)
+         int index = Collections.binarySearch(entryList, Maps.immutableEntry(targetKey, (Slice)null), new Comparator<Entry<InternalKey, Slice>>(){
+            public int compare(Entry<InternalKey, Slice> o1, Entry<InternalKey, Slice> o2)
             {
-               seekToEnd();
+               return table.comparator().compare(o1.getKey(), o2.getKey());
             }
-            return;
+         });
+         if(index < 0){
+            /*
+             * from Collections.binarySearch:
+             * index: the index of the search key, if it is contained in the list; otherwise, (-(insertion point) - 1).
+             * The insertion point is defined as the point at which the key would be inserted into the list:
+             * the index of the first element greater than the key, or list.size() if all elements in the list are
+             * less than the specified key
+             */
+            index = -(index+1);
          }
-         // then initialize the iterator at that key's location within the entryset
-         // (find the index with binary search)
-         List<InternalKey> keyList = Lists.newArrayList(table.keySet());
-         makeIteratorAtIndex(Collections.binarySearch(keyList, ceiling.getKey(), table.comparator()));
+         makeIteratorAtIndex(index);
       }
 
       @Override
@@ -158,24 +165,23 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
       @Override
       public void seekToLast()
       {
-         if (table.size() == 0)
+         if (entryList.size() == 0)
          {
             seekToFirst();
             return;
          }
-         makeIteratorAtIndex(table.size() - 1);
+         makeIteratorAtIndex(this.entryList.size() - 1);
       }
 
       @Override
       public void seekToEnd()
       {
-         makeIteratorAtIndex(table.size());
+         makeIteratorAtIndex(this.entryList.size());
       }
 
       private void makeIteratorAtIndex(int index)
       {
-         List<Entry<InternalKey, Slice>> entryList = Lists.newArrayList(table.entrySet());
-         iterator = ReverseIterators.reversePeekingIterator(entryList.listIterator(index));
+         iterator = ReverseIterators.reversePeekingIterator(this.entryList.listIterator(index));
       }
 
       @Override

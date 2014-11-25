@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
@@ -37,6 +38,7 @@ import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.table.BlockHelper;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -47,7 +49,7 @@ import static com.google.common.base.Charsets.UTF_8;
 public class DBIteratorTest extends TestCase
 {
    private static final List<Entry<String, String>> entries, ordered, rOrdered;
-   private final Options options = new Options().createIfMissing(true).useMMap(false);
+   private final Options options = new Options().createIfMissing(true);
    private DB db;
    private File tempDir;
 
@@ -144,7 +146,7 @@ public class DBIteratorTest extends TestCase
          final List<Entry<String, String>> expectedBackward,
          final double seekRate,
          final double seekCheck) throws ExecutionException, InterruptedException{
-      doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, new ReadOptions());
+      doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, new ReadOptions(), null);
    }
 
    /**
@@ -157,7 +159,8 @@ public class DBIteratorTest extends TestCase
          final List<Entry<String, String>> expectedBackward,
          final double seekRate,
          final double seekCheck,
-         final ReadOptions readOptions) throws ExecutionException, InterruptedException
+         final ReadOptions readOptions,
+         final StringDbIterator dbiter) throws ExecutionException, InterruptedException
    {
       final int size = expectedForward.size();
       final int seekCheckDist = (int) (size * seekCheck);
@@ -178,7 +181,7 @@ public class DBIteratorTest extends TestCase
                @Override
                public Void call()
                {
-                  StringDbIterator actual = new StringDbIterator(db.iterator(readOptions));
+                  StringDbIterator actual = dbiter != null? dbiter : new StringDbIterator(db.iterator(readOptions));
                   int loc = seekIndex;
                   List<Entry<String, String>> forwardExpected =
                         expectedForward.subList(loc, Math.min(size, loc + seekCheckDist));
@@ -199,6 +202,62 @@ public class DBIteratorTest extends TestCase
       for (Future<Void> f : work)
       {
          f.get();
+      }
+   }
+   
+   public void testSeeksWithConcurrentOps() throws ExecutionException, InterruptedException
+   {
+      putAll(db, entries);
+      StringDbIterator actual = new StringDbIterator(db.iterator());
+      
+      int concurrency = 10;
+      ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+      List<Future<Void>> work = new ArrayList<Future<Void>>();
+      for(int i = 0; i < concurrency; i++){
+         final int j = i;
+         work.add(pool.submit(new Callable<Void>(){
+            public Void call() throws Exception
+            {
+               Random rand = new Random(j);
+               while(!Thread.interrupted())
+               {
+                  int r = rand.nextInt(entries.size()-1);
+                  String target = entries.get(r).getKey();
+                  if(rand.nextDouble() < 0.5){
+                     put(db, target, "dummy val:"+r);
+                  }
+                  else
+                  {
+                     delete(db, target);
+                  }
+               }
+               return null;
+            }
+         }));
+      }
+
+      Random rand = new Random(0);
+      int max = (int)(entries.size()*0.005f);
+      int dist = 1000;
+      for(int i = 0; i < max; i++){
+         int index = rand.nextInt(ordered.size()-1);
+         String target = ordered.get(index).getKey();
+         double r = rand.nextDouble();
+         if(r < 1.0/3){
+            target = BlockHelper.beforeString(Maps.immutableEntry(target, null));
+         }
+         else if(r > 2.0/3){
+            index++;
+            target = BlockHelper.afterString(Maps.immutableEntry(target, null));
+         }
+         actual.seek(target);
+         assertForwardSame(actual, ordered.subList(index, Math.min(ordered.size(), index+dist)), false);
+         actual.seek(target);
+         assertBackwardSame(actual, rOrdered.subList(rOrdered.size() - index, Math.min(rOrdered.size(), rOrdered.size()-index+dist)), false);
+      }
+      
+      for(Future<Void> job:work){
+         job.cancel(true);
       }
    }
    
@@ -371,7 +430,7 @@ public class DBIteratorTest extends TestCase
       assertBackwardSame(actual, reverseExpected);
       assertForwardSame(actual, expected);
    }
-
+   
    public void testMixedIteration()
    {
 
