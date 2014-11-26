@@ -84,7 +84,7 @@ public class DbBenchmark
         FRESH,
         EXISTING
     }
-    
+
     enum Concurrency
     {
        SERIAL,
@@ -105,7 +105,7 @@ public class DbBenchmark
     //    private Histogram hist_;
     private RandomGenerator gen_;
     private final Random rand_;
-    
+
     protected int keySize = 16;
     private final int thread_count;
 
@@ -318,7 +318,7 @@ public class DbBenchmark
             System.out.printf("CPUCache:   %s\n", cacheSize);
         }
     }
-    
+
     protected Options defaultOptions(){
        return new Options();
     }
@@ -385,7 +385,7 @@ public class DbBenchmark
         }
 
     }
-    
+
     protected byte[] keygen(Order order, int val){
        int k = (order == SEQUENTIAL) ? val : rand_.nextInt(num_);
        return formatNumber(k);
@@ -413,13 +413,13 @@ public class DbBenchmark
         if (numEntries != num_) {
             message_ = String.format("(%d ops)", numEntries);
         }
-        
+
         if(concurrent == SERIAL){
            for (int i = 0; i < numEntries; i += entries_per_batch) {
                WriteBatch batch = db_.createWriteBatch();
                for (int j = 0; j < entries_per_batch; j++) {
                    int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                   byte[] key = formatNumber(k);
+                   byte[] key = keygen(order, k);
                    batch.put(key, gen_.generate(valueSize));
                    bytes_ += valueSize + key.length;
                    finishedSingleOp();
@@ -441,7 +441,7 @@ public class DbBenchmark
                         WriteBatch batch = db_.createWriteBatch();
                         for (int j = 0; j < entries_per_batch; j++) {
                         int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                        byte[] key = formatNumber(k);
+                        byte[] key = keygen(order, k);
                         batch.put(key, gen_.generate(valueSize));
                         bytes_ += valueSize + key.length;
                         finishedSingleOp();
@@ -449,11 +449,11 @@ public class DbBenchmark
                         db_.write(batch, writeOptions);
                         batch.close();
                      }
-                     return null; 
+                     return null;
                  }
               }));
            }
-           
+
            try{
               for(Future<Void> job:work){
                  try
@@ -549,7 +549,7 @@ public class DbBenchmark
             Closeables.closeQuietly(iterator);
         }
     }
-    
+
     protected byte[] readRandomKeygen(){
       return formatNumber(rand_.nextInt(num_));
     }
