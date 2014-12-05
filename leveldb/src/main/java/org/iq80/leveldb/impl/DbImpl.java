@@ -42,12 +42,14 @@ import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.SimpleReadWriteLock;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.Snappy;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -66,6 +68,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static com.google.common.collect.Lists.newArrayList;
@@ -95,11 +98,8 @@ public class DbImpl implements DB
 
     private final List<Long> pendingOutputs = newArrayList(); // todo
 
-    private LogWriter log;
-
-    private MemTable memTable;
-    private MemTable immutableMemTable;
-
+    private volatile MemTableAndLog mutable;
+    private volatile MemTableAndLog immutable;
     private final InternalKeyComparator internalKeyComparator;
 
     private volatile Throwable backgroundException;
@@ -132,10 +132,6 @@ public class DbImpl implements DB
             userComparator = new BytewiseComparator();
         }
         internalKeyComparator = new InternalKeyComparator(userComparator);
-        memTable = new MemTable(internalKeyComparator);
-        immutableMemTable = null;
-
-
 
         ThreadFactory compactionThreadFactory = new ThreadFactoryBuilder()
                 .setNameFormat("leveldb-compaction-%s")
@@ -216,7 +212,9 @@ public class DbImpl implements DB
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            this.log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options);
+            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options);
+            this.mutable = new MemTableAndLog(new MemTable(internalKeyComparator), log);
+            this.immutable = new MemTableAndLog(null, null);
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -260,7 +258,7 @@ public class DbImpl implements DB
         catch (IOException ignored) {
         }
         try {
-            log.close();
+            mutable.log.close();
         }
         catch (IOException ignored) {
         }
@@ -333,10 +331,10 @@ public class DbImpl implements DB
         mutex.lock();
         try {
             // force compaction
-            makeRoomForWrite(true);
+            makeRoomForWrite(options.writeBufferSize()).release();
 
             // todo bg_error code
-            while(immutableMemTable != null) {
+            while(immutable.memTable != null) {
                 backgroundCondition.awaitUninterruptibly();
             }
 
@@ -382,7 +380,7 @@ public class DbImpl implements DB
         else if (shuttingDown.get()) {
             // DB is being shutdown; no more background compactions
         }
-        else if (immutableMemTable == null &&
+        else if (immutable.memTable == null &&
                 manualCompaction == null &&
                 !versions.needsCompaction()) {
             // No work to be done
@@ -580,7 +578,7 @@ public class DbImpl implements DB
             lookupKey = new LookupKey(Slices.wrappedBuffer(key), snapshot.getLastSequence());
 
             // First look in the memtable, then in the immutable memtable (if any).
-            LookupResult lookupResult = memTable.get(lookupKey);
+            LookupResult lookupResult = mutable.memTable.get(lookupKey);
             if (lookupResult != null) {
                 Slice value = lookupResult.getValue();
                 if (value == null) {
@@ -588,8 +586,8 @@ public class DbImpl implements DB
                 }
                 return value.getBytes();
             }
-            if (immutableMemTable != null) {
-                lookupResult = immutableMemTable.get(lookupKey);
+            if (immutable.memTable != null) {
+                lookupResult = immutable.memTable.get(lookupKey);
                 if (lookupResult != null) {
                     Slice value = lookupResult.getValue();
 					if (value == null) {
@@ -671,27 +669,36 @@ public class DbImpl implements DB
     public Snapshot writeInternal(WriteBatchImpl updates, WriteOptions options)
             throws DBException
     {
-        checkBackgroundException();
+         checkBackgroundException();
          long sequenceEnd;
          if (updates.size() != 0) {
-             makeRoomForWrite(false);
 
-             // Get sequence numbers for this change set
-             final long sequenceDelta = updates.size();
-             final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta)+1;
-             sequenceEnd = sequenceBegin + sequenceDelta-1;
+             throttleWritesIfNecessary();
+        
+             MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
-             // Log write
-             Slice record = writeWriteBatch(updates, sequenceBegin);
-             try {
-                 log.addRecord(record, options.sync());
+             try{
+                // Get sequence numbers for this change set
+                final long sequenceDelta = updates.size();
+                final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta)+1;
+                sequenceEnd = sequenceBegin + sequenceDelta-1;
+
+                // Log write
+                Slice record = writeWriteBatch(updates, sequenceBegin);
+                try {
+                    memlog.log.addRecord(record, options.sync());
+                }
+                catch (IOException e) {
+                    throw Throwables.propagate(e);
+                }
+
+                // Update memtable
+                updates.forEach(new InsertIntoHandler(memlog.memTable, sequenceBegin));
              }
-             catch (IOException e) {
-                 throw Throwables.propagate(e);
+             finally
+             {
+                memlog.release();
              }
-
-             // Update memtable
-             updates.forEach(new InsertIntoHandler(memTable, sequenceBegin));
          } else {
              sequenceEnd = versions.getLastSequence();
          }
@@ -787,51 +794,110 @@ public class DbImpl implements DB
         }
         return snapshot;
     }
-
-    private void makeRoomForWrite(boolean force)
+    
+    private void throttleWritesIfNecessary()
     {
-        boolean allowDelay = !force;
+       boolean allowDelay = true;
+       while(true)
+       {
+          if(allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) {
+             // We are getting close to hitting a hard limit on the number of
+             // L0 files.  Rather than delaying a single write by several
+             // seconds when we hit the hard limit, start delaying each
+             // individual write by 1ms to reduce latency variance.  Also,
+             // this delay hands over some CPU to the compaction thread in
+             // case it is sharing the same core as the writer.
+             try {
+                 Thread.sleep(1);
+             }
+             catch (InterruptedException e) {
+                 Thread.currentThread().interrupt();
+                 throw new RuntimeException(e);
+             }
+             allowDelay = false;
+          }
+          if(versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
+             try{
+                mutex.lock();
+                backgroundCondition.awaitUninterruptibly();
+             }
+             finally{
+                mutex.unlock();
+             }
+          }
+          else {
+             break;
+          }
+       }
+    }
 
-        while (true) {
-            // todo background processing system need work
-//            if (!bg_error_.ok()) {
-//              // Yield previous error
-//              s = bg_error_;
-//              break;
-//            } else
-            if (allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) {
-                // We are getting close to hitting a hard limit on the number of
-                // L0 files.  Rather than delaying a single write by several
-                // seconds when we hit the hard limit, start delaying each
-                // individual write by 1ms to reduce latency variance.  Also,
-                // this delay hands over some CPU to the compaction thread in
-                // case it is sharing the same core as the writer.
-                try {
-                    Thread.sleep(1);
-                }
-                catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException(e);
-                }
-
-                // Do not delay a single write more than once
-                allowDelay = false;
-            }
-            else if (!force && memTable.approximateMemoryUsage() <= options.writeBufferSize()) {
-                // There is room in current memtable
-                break;
-            }
+    private MemTableAndLog makeRoomForWrite(int writeUsageSize)
+    {
+        int memtableMax = options.writeBufferSize();
+        MemTableAndLog current;
+        do{
+           current = this.mutable.acquire();
+           long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
+           if(previousUsage <= memtableMax && previousUsage + writeUsageSize > memtableMax)
+           {
+              //this condition can only be true for one writer
+              //this writer is the one which exceeded the memtable buffer limit first
+              //so here we swap the memtables
+              
+              //if the previous memtable hasn't been flushed yet, we must wait
+              while(this.immutable != null)
+              {
+                 current.acquireAll(); //block other writers that might be spinning in wait for a new memtable
+                 try{
+                    this.mutex.lock();
+                    this.backgroundCondition.awaitUninterruptibly();
+                 }
+                 finally{
+                    this.mutex.unlock();
+                 }
+                 current.releaseAll();
+              }
+              
+              long logNumber = versions.getNextFileNumber();
+              try
+              {
+                 this.mutable = new MemTableAndLog(new MemTable(internalKeyComparator), Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options));
+              }
+              catch (IOException e)
+              {
+                 //we've failed to create a new memtable and update this.mutable
+                 //other writers trying to acquire it (those spinning in this loop) should be notified
+                 current.notifyFailureToSwap(e);
+                 current.release();
+                 throw new DBException(e);
+              }
+              
+              ////////////////////////////
+              
+              maybeScheduleCompaction();
+              break;
+           }
+           else if (previousUsage < memtableMax)
+           {
+              //this write can fit into the memtable
+              break;
+           }
+           else
+           {
+              //the write exceeds the memtable usage limit, but it was not the first to do so
+              //loop back and acquire the new memtable.
+              //incidentally, this means that the memtable's memory usage was incremented superfluously
+              //it won't receive any further writes, however, and the usage changes are only relevant to this function
+              current.release();
+           }
+        } while(true);
+        /*
             else{
                try{
                   mutex.lock();
                   if (immutableMemTable != null) {
                       // We have filled up the current memtable, but the previous
                       // one is still being compacted, so we wait.
-                      backgroundCondition.awaitUninterruptibly();
-                  }
-                  else if (versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
-                      // There are too many level-0 files.
-      //                Log(options_.info_log, "waiting...\n");
                       backgroundCondition.awaitUninterruptibly();
                   }
                   else {
@@ -873,6 +939,8 @@ public class DbImpl implements DB
                
             }
         }
+        */
+        return current;
     }
 
     public void compactMemTable()
@@ -891,7 +959,7 @@ public class DbImpl implements DB
             throws IOException
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
-        if (immutableMemTable == null) {
+        if (this.immutable == null) {
             return;
         }
 
@@ -899,7 +967,7 @@ public class DbImpl implements DB
             // Save the contents of the memtable as a new Table
             VersionEdit edit = new VersionEdit();
             Version base = versions.getCurrent();
-            writeLevel0Table(immutableMemTable, edit, base);
+            writeLevel0Table(immutable.memTable, edit, base);
 
             if (shuttingDown.get()) {
                 throw new DatabaseShutdownException("Database shutdown during memtable compaction");
@@ -910,7 +978,7 @@ public class DbImpl implements DB
             edit.setLogNumber(log.getFileNumber());  // Earlier logs no longer needed
             versions.logAndApply(edit);
 
-            immutableMemTable = null;
+            this.immutable = null;
 
             deleteObsoleteFiles();
         }
@@ -1415,4 +1483,57 @@ public class DbImpl implements DB
     public void compactRange(byte[] begin, byte[] end) throws DBException {
         throw new UnsupportedOperationException("Not yet implemented");
     }
+    
+    private static class MemTableAndLog
+    {
+       //group the memtable and its accompanying log so that concurrent writes
+       //can't be split between structures and subsequently lost in crash
+       public final MemTable memTable;
+       public final LogWriter log;
+       
+       private final ReadWriteLock lock = new SimpleReadWriteLock(true);
+       private volatile DBException failureInSwap = null;
+
+       public MemTableAndLog(MemTable memTable, LogWriter log)
+       {
+          this.memTable = memTable;
+          this.log = log;
+       }
+       
+       public MemTableAndLog acquire()
+       {
+          if(failureInSwap != null)
+             throw failureInSwap;
+          lock.readLock().lock();
+          return this;
+       }
+       
+       public void release()
+       {
+          lock.readLock().unlock();
+       }
+       
+       /**
+        * If the mutable memtable fails to be swapped -- e.g. the swapper encounters an IOException while creating a new log writer --
+        * new acquires of that memtable should also fail (because the swap was initiated by exceeding the write buffer limit)
+        * @param t cause of failure
+        */
+       public void notifyFailureToSwap(Throwable t)
+       {
+          failureInSwap = new DBException(t);
+       }
+       
+       public MemTableAndLog acquireAll()
+       {
+          lock.writeLock().lock();
+          return this;
+       }
+       
+       public void releaseAll()
+       {
+          lock.writeLock().unlock();
+       }
+       
+    }
+
 }

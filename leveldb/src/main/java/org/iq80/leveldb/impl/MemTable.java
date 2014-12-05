@@ -50,6 +50,11 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
    {
       return approximateMemoryUsage.get();
    }
+   
+   protected long getAndAddApproximateMemoryUsage(long delta)
+   {
+      return approximateMemoryUsage.getAndAdd(delta);
+   }
 
    public void add(long sequenceNumber, ValueType valueType, Slice key, Slice value)
    {
@@ -59,8 +64,6 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
 
       InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType);
       table.put(internalKey, value);
-
-      approximateMemoryUsage.addAndGet(key.length() + SIZE_OF_LONG + value.length());
    }
 
    public LookupResult get(LookupKey key)

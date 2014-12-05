@@ -161,6 +161,8 @@ public abstract class LogWriter
         }
         while (sliceInput.isReadable());
 
+        assert newWrite.getBlockOffset() == blockOffset: "calculated block offset and actual block offset mismatch";
+
         return record;
     }
 
