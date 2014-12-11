@@ -31,6 +31,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
@@ -81,22 +83,22 @@ public abstract class LogWriter
         return fileNumber;
     }
     
-    private final AtomicReference<WritePosition> lastWrite = new AtomicReference<>(new WritePosition(0, 0));
+    //position in the file at which the last write ends
+    private final AtomicLong lastWritePosition = new AtomicLong(0);
 
     protected WriteRecord buildRecord(SliceInput sliceInput)
     {
-        WritePosition newWrite = new WritePosition();
-        WritePosition previousWrite;
+        long previousWrite, newWrite;
         do {
            // the way that data is split along block boundaries is dependent on the last data's position
-           previousWrite = lastWrite.get();
+           previousWrite = lastWritePosition.get();
         }
         //depending on the size of input data, the calculation performed in the CAS could take varying amounts of time.
         //this can lead to a lot of wasted cycles in high contention cases when the calculation is performed but the CAS fails.
         //generally speaking, small input data or data that is unlikely to span multiple blocks can be calculated quickly.
         //even with contention and wasted cycles, this is often better than synchronized performance
-        while(!lastWrite.compareAndSet(previousWrite, newWrite.recalculate(previousWrite, sliceInput)));
-        WriteRecord record = new WriteRecord(previousWrite.getEndPosition(), (int) (newWrite.getEndPosition() - previousWrite.getEndPosition()));
+        while(!lastWritePosition.compareAndSet(previousWrite, newWrite = calculateEndPosition(previousWrite, sliceInput)));
+        WriteRecord record = new WriteRecord(previousWrite, (int) (newWrite - previousWrite));
 
         // Fragment the record into chunks as necessary and write it.  Note that if record
         // is empty, we still want to iterate once to write a single
@@ -104,7 +106,7 @@ public abstract class LogWriter
 
         // used to track first, middle and last blocks
         boolean begin = true;
-        int blockOffset = previousWrite.getBlockOffset();
+        int blockOffset = (int) (previousWrite%BLOCK_SIZE);
         do {
             int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
             Preconditions.checkState(bytesRemainingInBlock >= 0);
@@ -197,72 +199,40 @@ public abstract class LogWriter
 
     abstract void addRecord(Slice record, boolean sync)
             throws IOException;
-    
-    private static class WritePosition
+ 
+    /**
+     * calculates the end of this write's data within the log file given the previous writes position,
+     * taking into account new headers and additions around block boundaries
+     * @param previousWrite end position of the last record submitted for writing
+     * @param newData slice with new data to be written
+     * @return this write's ending position
+     */
+    public long calculateEndPosition(long previousWrite, SliceInput newData)
     {
-       private int blockOffset;
-       private long endPosition;
-       
-       public WritePosition()
-       {
-          this(0, 0);
+       int firstBlockWrite;
+       int dataRemaining = newData.available();
+       int remainingInBlock = BLOCK_SIZE - (int)(previousWrite%BLOCK_SIZE);
+       if(remainingInBlock < HEADER_SIZE){
+          //zero fill
+          firstBlockWrite = remainingInBlock;
        }
-       
-       public WritePosition(int blockOffset, long endPosition)
-       {
-          this.blockOffset = blockOffset;
-          this.endPosition = endPosition;
-       }
-       
-       public int getBlockOffset()
-       {
-          return this.blockOffset;
-       }
-       
-       public long getEndPosition()
-       {
-          return this.endPosition;
-       }
-       
-       /**
-        * calculates this write's ending blockOffset within the last record block and the absolute position of the end of its data within the log file
-        * @param previousWrite WritePosition belonging to the preceding record submitted for writing
-        * @param newData slice with new data to be written
-        * @return this
-        */
-       public WritePosition recalculate(WritePosition previousWrite, SliceInput newData)
-       {
-          int firstBlockWrite;
-          int dataRemaining = newData.available();
-          int remainingInBlock = BLOCK_SIZE - previousWrite.blockOffset;
-          if(remainingInBlock < HEADER_SIZE){
-             //zero fill
-             firstBlockWrite = remainingInBlock;
+       else{
+          remainingInBlock -= (firstBlockWrite = HEADER_SIZE);
+          if(remainingInBlock >= dataRemaining)
+          {
+             //everything fits into the first block
+             return previousWrite + firstBlockWrite + dataRemaining;
           }
-          else{
-             firstBlockWrite = HEADER_SIZE;
-             remainingInBlock -= HEADER_SIZE;
-             if(remainingInBlock >= dataRemaining)
-             {
-                //everything fits into the first block
-                firstBlockWrite += dataRemaining;
-                this.blockOffset = previousWrite.blockOffset + firstBlockWrite;
-                this.endPosition = previousWrite.endPosition + firstBlockWrite;
-                return this;
-             }
-             firstBlockWrite += remainingInBlock;
-             dataRemaining -= remainingInBlock;
-          }
-          //all subsequent data goes into new blocks
-          final int headerCount = dataRemaining / (BLOCK_SIZE - HEADER_SIZE) + 1;
-          final int newBlockWrite = dataRemaining + (headerCount * HEADER_SIZE);
+          firstBlockWrite += remainingInBlock;
+          dataRemaining -= remainingInBlock;
+       }
+       //all subsequent data goes into new blocks
+       final int headerCount = dataRemaining / (BLOCK_SIZE - HEADER_SIZE) + 1;
+       final int newBlockWrite = dataRemaining + (headerCount * HEADER_SIZE);
 
-          this.blockOffset = newBlockWrite % BLOCK_SIZE;
-          this.endPosition = previousWrite.endPosition + newBlockWrite + firstBlockWrite;
-          return this;
-       }
+       return previousWrite + newBlockWrite + firstBlockWrite;
     }
-    
+
     protected static class WriteRecord
     {
        final long startPosition;
