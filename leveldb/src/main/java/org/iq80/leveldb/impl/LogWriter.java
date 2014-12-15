@@ -18,7 +18,8 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
-import org.iq80.leveldb.util.ConcurrentZeroCopyWriter;
+import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -30,13 +31,7 @@ import com.google.common.base.Preconditions;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
 import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
@@ -70,8 +65,7 @@ public abstract class LogWriter
 
     public void delete()
     {
-        closed.set(true);
-
+        Closeables.closeQuietly(this);
         // try to delete the file
         getFile().delete();
     }
@@ -92,7 +86,7 @@ public abstract class LogWriter
         // is empty, we still want to iterate once to write a single
         // zero-length chunk.
 
-        try(CloseableLogBuffer cbb = getWriter().requestSpace(new LongToIntFunction()
+        try(CloseableLogBuffer buffer = getWriter().requestSpace(new LongToIntFunction()
            {
               @Override
               public int applyAsInt(long previousWrite)
@@ -103,7 +97,7 @@ public abstract class LogWriter
         {
            // used to track first, middle and last blocks
            boolean begin = true;
-           int blockOffset = (int) (cbb.lastEndPosition % BLOCK_SIZE);
+           int blockOffset = (int) (buffer.lastEndPosition % BLOCK_SIZE);
            do {
                int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
                Preconditions.checkState(bytesRemainingInBlock >= 0);
@@ -113,7 +107,7 @@ public abstract class LogWriter
                    if (bytesRemainingInBlock > 0) {
                        // Fill the rest of the block with zeros
                        // todo lame... need a better way to write zeros
-                       cbb.buffer.put(new byte[bytesRemainingInBlock]);
+                       buffer.put(new byte[bytesRemainingInBlock]);
                    }
                    blockOffset = 0;
                    bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
@@ -153,7 +147,7 @@ public abstract class LogWriter
 
                // write the chunk
                Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
-               blockOffset += appendChunk(cbb.buffer, type, sliceInput.readSlice(fragmentLength));
+               blockOffset += appendChunk(buffer, type, sliceInput.readSlice(fragmentLength));
 
                // we are no longer on the first chunk
                begin = false;
@@ -162,7 +156,7 @@ public abstract class LogWriter
         }
     }
 
-    private static int appendChunk(ByteBuffer buffer, LogChunkType type, Slice slice)
+    private static int appendChunk(CloseableByteBuffer buffer, LogChunkType type, Slice slice)
     {
         final int length = slice.length();
         Preconditions.checkArgument(length <= 0xffff, "length %s is larger than two bytes", length);
@@ -170,10 +164,18 @@ public abstract class LogWriter
         int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
 
         // Format the header
-        buffer.putInt(crc);
-        buffer.put((byte) (length & 0xff));
-        buffer.put((byte) (length >>> 8));
-        buffer.put((byte) (type.getPersistentId()));
+        SliceOutput so = Slices.allocate(HEADER_SIZE).output();
+
+        so.writeInt(crc);
+        so.write((byte) (length & 0xff));
+        so.write((byte) (length >>> 8));
+        so.write((byte) (type.getPersistentId()));
+        buffer.put(so.slice().toByteBuffer());
+        //buffer.putInt(crc);
+        //buffer.put((byte) (length & 0xff));
+        //buffer.put((byte) (length >>> 8));
+        //buffer.put((byte) (type.getPersistentId()));
+        
 
         buffer.put(slice.toByteBuffer());
 
@@ -191,7 +193,7 @@ public abstract class LogWriter
           sync();
     }
     
-    abstract ConcurrentZeroCopyWriter<CloseableLogBuffer> getWriter();
+    abstract ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter();
     abstract void sync() throws IOException;
  
     /**
@@ -230,9 +232,9 @@ public abstract class LogWriter
     protected abstract static class CloseableLogBuffer extends CloseableByteBuffer
     {
        private final long lastEndPosition;
-       protected CloseableLogBuffer(ByteBuffer buffer, long endPosition)
+       protected CloseableLogBuffer(long endPosition)
        {
-          super(buffer);
+          super();
           this.lastEndPosition = endPosition;
        }
     }

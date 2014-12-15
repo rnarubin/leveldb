@@ -17,7 +17,8 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.ConcurrentZeroCopyWriter;
+import org.iq80.leveldb.util.CloseableByteBuffer;
+import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -32,7 +33,8 @@ public class FileChannelLogWriter
     private final FileChannel fileChannel;
     private final ConcurrentFileWriter writer;
 
-    public FileChannelLogWriter(File file, long fileNumber)
+    @SuppressWarnings("resource")
+   public FileChannelLogWriter(File file, long fileNumber)
             throws IOException
     {
        super(file, fileNumber);
@@ -50,19 +52,72 @@ public class FileChannelLogWriter
        fileChannel.force(false);
     }
     
+    public void close() throws IOException
+    {
+       super.close();
+       fileChannel.close();
+    }
+    
 
-    private class ConcurrentFileWriter extends ConcurrentZeroCopyWriter<CloseableLogBuffer>
+    private class ConcurrentFileWriter extends ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
       protected CloseableLogBuffer getBuffer(final long position, final int length)
       {
-         return new CloseableLogBuffer(ByteBuffer.allocate(length), position)
+         return new CloseableFileLogBuffer(position);
+      }
+      
+      private class CloseableFileLogBuffer extends CloseableLogBuffer
+      {
+         private IOException encounteredException = null;
+         private long position;
+         protected CloseableFileLogBuffer(long endPosition)
          {
-            @Override
-            public void close() throws IOException
+            super(endPosition);
+            this.position = endPosition;
+         }
+
+         @Override
+         public CloseableByteBuffer put(byte b)
+         {
+            throw new UnsupportedOperationException();
+         }
+         @Override
+         public CloseableByteBuffer put(byte[] b)
+         {
+            return put(ByteBuffer.wrap(b));
+         }
+
+         @Override
+         public CloseableByteBuffer put(ByteBuffer b)
+         {
+            try
             {
-               fileChannel.write(this.buffer, position);
+               while(b.remaining() > 0)
+               {
+                  position += fileChannel.write(b, position);
+               }
             }
-         };
+            catch (IOException e)
+            {
+               encounteredException = e;
+            }
+            
+            return this;
+         }
+         @Override
+         public CloseableByteBuffer putInt(int b)
+         {
+            throw new UnsupportedOperationException();
+         }
+
+         @Override
+         public void close() throws IOException
+         {
+            if(encounteredException != null)
+            {
+               throw encounteredException;
+            }
+         }
       }
        
     }

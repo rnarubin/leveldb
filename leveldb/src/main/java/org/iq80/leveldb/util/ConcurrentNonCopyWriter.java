@@ -2,7 +2,7 @@ package org.iq80.leveldb.util;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-public abstract class ConcurrentZeroCopyWriter<B extends CloseableByteBuffer>
+public abstract class ConcurrentNonCopyWriter<B extends CloseableByteBuffer>
 {
    private final AtomicLong position = new AtomicLong(0);
 
