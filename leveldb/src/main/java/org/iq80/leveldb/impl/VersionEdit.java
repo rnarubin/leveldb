@@ -22,6 +22,8 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
+
 import org.iq80.leveldb.util.DynamicSliceOutput;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -37,8 +39,8 @@ public class VersionEdit
     private Long previousLogNumber;
     private Long lastSequenceNumber;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
-    private final Multimap<Integer, FileMetaData> newFiles = ArrayListMultimap.create();
-    private final Multimap<Integer, Long> deletedFiles = ArrayListMultimap.create();
+    private final Multimap<Integer, FileMetaData> newFiles = Multimaps.synchronizedMultimap(ArrayListMultimap.<Integer, FileMetaData>create());
+    private final Multimap<Integer, Long> deletedFiles = Multimaps.synchronizedMultimap(ArrayListMultimap.<Integer, Long>create());
 
     public VersionEdit()
     {

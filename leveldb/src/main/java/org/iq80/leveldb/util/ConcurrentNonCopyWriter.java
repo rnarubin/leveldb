@@ -19,7 +19,7 @@ public abstract class ConcurrentNonCopyWriter<B extends CloseableByteBuffer>
       {
          oldPosition = this.position.get();
       } while (!this.position.compareAndSet(oldPosition,
-            length = getLength.applyAsInt(oldPosition)));
+            oldPosition + (length = getLength.applyAsInt(oldPosition))));
       return getBuffer(oldPosition, length);
    }
 

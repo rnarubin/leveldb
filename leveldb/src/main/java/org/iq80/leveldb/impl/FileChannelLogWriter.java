@@ -20,6 +20,8 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 
+import com.google.common.base.Preconditions;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -63,17 +65,18 @@ public class FileChannelLogWriter
     {
       protected CloseableLogBuffer getBuffer(final long position, final int length)
       {
-         return new CloseableFileLogBuffer(position);
+         return new CloseableFileLogBuffer(position, length);
       }
       
       private class CloseableFileLogBuffer extends CloseableLogBuffer
       {
          private IOException encounteredException = null;
-         private long position;
-         protected CloseableFileLogBuffer(long endPosition)
+         private long position, limit;
+         protected CloseableFileLogBuffer(long endPosition, int length)
          {
             super(endPosition);
             this.position = endPosition;
+            this.limit = this.position + length;
          }
 
          @Override
@@ -92,10 +95,13 @@ public class FileChannelLogWriter
          {
             try
             {
-               while(b.remaining() > 0)
+               int remaining = b.remaining();
+               Preconditions.checkArgument(position + remaining <= limit, "Buffer put exceeds requested space");
+               do
                {
                   position += fileChannel.write(b, position);
                }
+               while(b.remaining() > 0);
             }
             catch (IOException e)
             {

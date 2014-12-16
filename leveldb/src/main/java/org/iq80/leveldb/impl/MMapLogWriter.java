@@ -21,6 +21,7 @@ import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.ByteBufferSupport;
+import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
@@ -49,6 +50,20 @@ public class MMapLogWriter
         Preconditions.checkState(!isClosed(), "Log has been closed");
         throw new UnsupportedOperationException("need to fix mmap");
     }
+
+   @Override
+   ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter()
+   {
+      // TODO Auto-generated method stub
+      return null;
+   }
+
+   @Override
+   void sync() throws IOException
+   {
+      // TODO Auto-generated method stub
+      
+   }
 
     /*
     private static class AsyncMMapWriter

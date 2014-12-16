@@ -40,6 +40,11 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
    {
       table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
    }
+   
+   public void clear()
+   {
+      table.clear();
+   }
 
    public boolean isEmpty()
    {

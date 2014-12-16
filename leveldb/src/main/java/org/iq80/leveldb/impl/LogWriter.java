@@ -185,7 +185,7 @@ public abstract class LogWriter
     public void addRecord(Slice record, boolean sync)
             throws IOException
     {
-       Preconditions.checkState(isClosed(), "Log is closed");
+       Preconditions.checkState(!isClosed(), "Log is closed");
        
        buildRecord(record.input());
        
