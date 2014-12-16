@@ -19,6 +19,7 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.SizeOf;
 
 import com.google.common.base.Preconditions;
 
@@ -26,6 +27,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 
 public class FileChannelLogWriter
@@ -71,7 +73,9 @@ public class FileChannelLogWriter
       private class CloseableFileLogBuffer extends CloseableLogBuffer
       {
          private IOException encounteredException = null;
-         private long position, limit;
+         private long position;
+         private final long limit;
+         private final ByteBuffer scratch = ByteBuffer.allocateDirect(SizeOf.SIZE_OF_LONG).order(ByteOrder.LITTLE_ENDIAN);
          protected CloseableFileLogBuffer(long endPosition, int length)
          {
             super(endPosition);
@@ -82,8 +86,20 @@ public class FileChannelLogWriter
          @Override
          public CloseableByteBuffer put(byte b)
          {
-            throw new UnsupportedOperationException();
+            scratch.clear();
+            scratch.put(b);
+            scratch.flip();
+            return put(scratch);
          }
+         @Override
+         public CloseableByteBuffer putInt(int b)
+         {
+            scratch.clear();
+            scratch.putInt(b);
+            scratch.flip();
+            return put(scratch);
+         }
+
          @Override
          public CloseableByteBuffer put(byte[] b)
          {
@@ -109,11 +125,6 @@ public class FileChannelLogWriter
             }
             
             return this;
-         }
-         @Override
-         public CloseableByteBuffer putInt(int b)
-         {
-            throw new UnsupportedOperationException();
          }
 
          @Override

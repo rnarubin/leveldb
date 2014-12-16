@@ -20,7 +20,6 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.ImmutableList;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceOutput;
@@ -33,7 +32,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -43,8 +41,14 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
 import static org.testng.FileAssert.fail;
 
-public class LogTest
+public abstract class LogTest
 {
+   
+   protected LogTest(Options options)
+   {
+      this.options = options;
+   }
+
     private final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
     {
         @Override
@@ -61,6 +65,7 @@ public class LogTest
     };
 
     private LogWriter writer;
+    private Options options;
 
     @Test
     public void testEmptyBlock()
@@ -163,7 +168,7 @@ public class LogTest
     public void setUp()
             throws Exception
     {
-        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, new Options());
+        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, options);
     }
 
     @AfterMethod
@@ -189,5 +194,21 @@ public class LogTest
             sliceOutput.writeBytes(bytes);
         }
         return slice;
+    }
+    
+    public static class FileLogTest extends LogTest
+    {
+      public FileLogTest()
+      {
+         super(new Options().useMMap(false));
+      }
+    }
+    
+    public static class MMapLogTest extends LogTest
+    {
+       public MMapLogTest()
+       {
+          super(new Options().useMMap(true));
+       }
     }
 }

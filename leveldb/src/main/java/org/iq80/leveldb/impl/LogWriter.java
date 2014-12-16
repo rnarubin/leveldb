@@ -21,6 +21,7 @@ import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.util.SizeOf;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
@@ -164,17 +165,10 @@ public abstract class LogWriter
         int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
 
         // Format the header
-        SliceOutput so = Slices.allocate(HEADER_SIZE).output();
-
-        so.writeInt(crc);
-        so.write((byte) (length & 0xff));
-        so.write((byte) (length >>> 8));
-        so.write((byte) (type.getPersistentId()));
-        buffer.put(so.slice().toByteBuffer());
-        //buffer.putInt(crc);
-        //buffer.put((byte) (length & 0xff));
-        //buffer.put((byte) (length >>> 8));
-        //buffer.put((byte) (type.getPersistentId()));
+        buffer.putInt(crc);
+        buffer.put((byte) (length & 0xff));
+        buffer.put((byte) (length >>> 8));
+        buffer.put((byte) (type.getPersistentId()));
         
 
         buffer.put(slice.toByteBuffer());
@@ -203,7 +197,7 @@ public abstract class LogWriter
      * @param newData slice with new data to be written
      * @return this write's size in bytes
      */
-    public int calculateWriteSize(long previousWrite, SliceInput newData)
+    public static int calculateWriteSize(long previousWrite, SliceInput newData)
     {
        int firstBlockWrite;
        int dataRemaining = newData.available();

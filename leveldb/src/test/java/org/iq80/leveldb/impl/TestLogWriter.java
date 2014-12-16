@@ -1,5 +1,6 @@
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.Slice;
 import org.testng.annotations.Test;
 
@@ -11,8 +12,15 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 
 
-public class TestFileChannelLogWriter
+public abstract class TestLogWriter
 {
+   private Options options;
+   
+   protected TestLogWriter(Options options)
+   {
+      this.options = options;
+   }
+   
     @Test
     public void testLogRecordBounds()
             throws Exception
@@ -22,7 +30,7 @@ public class TestFileChannelLogWriter
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             Slice record = new Slice(recordSize);
 
-            LogWriter writer = new FileChannelLogWriter(file, 10);
+            LogWriter writer = Logs.createLogWriter(file, 10, options);
             writer.addRecord(record, true);
             writer.close();
 
@@ -59,5 +67,21 @@ public class TestFileChannelLogWriter
             fail("corruption at " + bytes + " reason: " + reason.toString());
         }
 
+    }
+    
+    public static class TestFileChannel extends TestLogWriter
+    {
+       public TestFileChannel()
+       {
+          super(new Options().useMMap(false));
+       }
+    }
+    
+    public static class TestMMap extends TestLogWriter
+    {
+       public TestMMap()
+       {
+          super(new Options().useMMap(true));
+       }
     }
 }

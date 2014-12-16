@@ -17,17 +17,21 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
 
-import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.ByteBufferSupport;
+import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.SizeOf;
 import org.iq80.leveldb.util.Slice;
 
+import com.google.common.base.Preconditions;
+
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
@@ -36,34 +40,108 @@ public class MMapLogWriter
         extends LogWriter
 {
     private static final int PAGE_SIZE = 1024 * 1024;
+    private final FileChannel fileChannel;
+    private final ConcurrentMMapWriter writer;
 
     public MMapLogWriter(File file, long fileNumber)
             throws IOException
     {
         super(file, fileNumber);
-    }
-
-    // Writes a stream of chunks such that no chunk is split across a block boundary
-    public void addRecord(Slice record, boolean sync)
-            throws IOException
-    {
-        Preconditions.checkState(!isClosed(), "Log has been closed");
-        throw new UnsupportedOperationException("need to fix mmap");
+        this.fileChannel = new FileOutputStream(file, true).getChannel();
+        this.writer = new ConcurrentMMapWriter();
     }
 
    @Override
    ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter()
    {
-      // TODO Auto-generated method stub
-      return null;
+      throw new UnsupportedOperationException("mmap not yet implemented");
+      //return this.writer;
    }
 
    @Override
    void sync() throws IOException
    {
-      // TODO Auto-generated method stub
-      
+
    }
+
+    private class ConcurrentMMapWriter extends ConcurrentNonCopyWriter<CloseableLogBuffer>
+    {
+       private MappedRegion region;
+
+       ConcurrentMMapWriter() throws IOException
+       {
+          region = new MappedRegion(0);
+       }
+
+       @Override
+       protected CloseableLogBuffer getBuffer(final long position, final int length)
+       {
+          //return new CloseableMMapLogBuffer(position, ByteBuffer.allocate(length));
+          return null;
+       }
+      
+       private class MappedRegion
+       {
+          public final long position;
+          private final MappedByteBuffer mmap;
+          MappedRegion(long position) throws IOException
+          {
+             this.position = position;
+             this.mmap = fileChannel.map(MapMode.READ_WRITE, position, PAGE_SIZE);
+          }
+          
+          public CloseableMMapLogBuffer slice(long position, int length)
+          {
+             ByteBuffer ret = mmap.duplicate();
+             ret.position((int)(this.position - position));
+             ret.limit(ret.position() + length);
+             return new CloseableMMapLogBuffer(position, ret);
+          }
+
+          private class CloseableMMapLogBuffer extends CloseableLogBuffer
+          {
+             private ByteBuffer slice;
+             protected CloseableMMapLogBuffer(long endPosition, ByteBuffer slice)
+             {
+                super(endPosition);
+                this.slice = slice;
+             }
+          
+             @Override
+             public CloseableByteBuffer put(byte b)
+             {
+                slice.put(b);
+                return this;
+             }
+             @Override
+             public CloseableByteBuffer putInt(int b)
+             {
+                slice.putInt(b);
+                return this;
+             }
+          
+             @Override
+             public CloseableByteBuffer put(byte[] b)
+             {
+                slice.put(b);
+                return this;
+             }
+          
+             @Override
+             public CloseableByteBuffer put(ByteBuffer b)
+             {
+                slice.put(b);
+                return this;
+             }
+          
+             @Override
+             public void close() throws IOException
+             {
+                slice = null;
+             }
+          }
+       }
+    }
 
     /*
     private static class AsyncMMapWriter
