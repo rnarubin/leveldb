@@ -27,7 +27,6 @@ import org.iq80.leveldb.util.Slice;
 import com.google.common.base.Preconditions;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -47,7 +46,7 @@ public class MMapLogWriter
             throws IOException
     {
         super(file, fileNumber);
-        this.fileChannel = new FileOutputStream(file, true).getChannel();
+        this.fileChannel = new RandomAccessFile(file, "rw").getChannel();
         this.writer = new ConcurrentMMapWriter();
     }
 
