@@ -29,7 +29,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
@@ -40,8 +39,6 @@ public class FileChannelLogWriter
    
     private final FileChannel fileChannel;
     private final ConcurrentFileWriter writer;
-    private final ScratchBuffer scratchCache[] = new ScratchBuffer[64];
-    private final AtomicLong scratchBitSet = new AtomicLong(0xFFFFFFFFFFFFFFFFL);
 
     @SuppressWarnings("resource")
    public FileChannelLogWriter(File file, long fileNumber)
@@ -50,14 +47,6 @@ public class FileChannelLogWriter
        super(file, fileNumber);
        this.fileChannel = new FileOutputStream(file, true).getChannel();
        this.writer = new ConcurrentFileWriter();
-
-       ByteBuffer cache = ByteBuffer.allocateDirect(64 * SIZE_OF_LONG);
-       for(int i = 0, pos = 0; i < scratchCache.length; i++, pos += SIZE_OF_LONG){
-          cache.position(pos);
-          ByteBuffer subset = cache.slice().order(ByteOrder.LITTLE_ENDIAN);
-          subset.limit(subset.position() + SIZE_OF_LONG);
-          scratchCache[i] = new ScratchBuffer(i, subset);
-       }
     }
     
     protected ConcurrentFileWriter getWriter()
@@ -76,46 +65,61 @@ public class FileChannelLogWriter
        fileChannel.close();
     }
     
-    private ScratchBuffer getScratchBuffer()
-    {
-       long state, bitIndex;
-       do{
-          state = scratchBitSet.get();
-          if((bitIndex = Long.lowestOneBit(state)) == 0)
-          {
-             //no scratch space available in cache, allocate heap buffer
-             return new ScratchBuffer(-1, ByteBuffer.allocate(SizeOf.SIZE_OF_LONG).order(ByteOrder.LITTLE_ENDIAN));
-          }
-       } while(!scratchBitSet.compareAndSet(state, state & (~bitIndex)));
-       final int cacheIndex = Long.numberOfTrailingZeros(bitIndex);
-       return scratchCache[cacheIndex];
-    }
-    
-    private void releaseScratchBuffer(ScratchBuffer scratch)
-    {
-       if(scratch.index < 0)
-          return; //heap allocated, do nothing
-
-       long state;
-       do{
-          state = scratchBitSet.get();
-       } while(!scratchBitSet.compareAndSet(state, state | (1 << scratch.index)));
-    }
-    
-    private static class ScratchBuffer
-    {
-       private final int index;
-       public final ByteBuffer buffer;
-       ScratchBuffer(int index, ByteBuffer buffer)
-       {
-          this.index = index;
-          this.buffer = buffer;
-       }
-    }
-    
 
     private class ConcurrentFileWriter extends ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
+       private final ScratchBuffer scratchCache[] = new ScratchBuffer[64];
+       private final AtomicLong scratchBitSet = new AtomicLong(0xFFFFFFFFFFFFFFFFL);
+       
+       ConcurrentFileWriter()
+       {
+          ByteBuffer cache = ByteBuffer.allocateDirect(64 * SIZE_OF_LONG);
+          for(int i = 0, pos = 0; i < scratchCache.length; i++, pos += SIZE_OF_LONG){
+             cache.position(pos);
+             ByteBuffer subset = cache.slice().order(ByteOrder.LITTLE_ENDIAN);
+             subset.limit(subset.position() + SIZE_OF_LONG);
+             scratchCache[i] = new ScratchBuffer(i, subset);
+          }
+          
+       }
+    
+       private ScratchBuffer getScratchBuffer()
+       {
+          long state, bitIndex;
+          do{
+             state = scratchBitSet.get();
+             if((bitIndex = Long.lowestOneBit(state)) == 0)
+             {
+                //no scratch space available in cache, allocate heap buffer
+                return new ScratchBuffer(-1, ByteBuffer.allocate(SizeOf.SIZE_OF_LONG).order(ByteOrder.LITTLE_ENDIAN));
+             }
+          } while(!scratchBitSet.compareAndSet(state, state & (~bitIndex)));
+          final int cacheIndex = Long.numberOfTrailingZeros(bitIndex);
+          return scratchCache[cacheIndex];
+       }
+       
+       private void releaseScratchBuffer(ScratchBuffer scratch)
+       {
+          if(scratch.index < 0)
+             return; //heap allocated, do nothing
+
+          long state;
+          do{
+             state = scratchBitSet.get();
+          } while(!scratchBitSet.compareAndSet(state, state | (1 << scratch.index)));
+       }
+       
+       private class ScratchBuffer
+       {
+          private final int index;
+          public final ByteBuffer buffer;
+          ScratchBuffer(int index, ByteBuffer buffer)
+          {
+             this.index = index;
+             this.buffer = buffer;
+          }
+       }
+
       protected CloseableLogBuffer getBuffer(final long position, final int length)
       {
          return new CloseableFileLogBuffer(position, length);
