@@ -328,7 +328,7 @@ public class DbImpl implements DB
     public void flushMemTable()
     {
         makeRoomForWrite(options.writeBufferSize()).release();
-        
+
         // todo bg_error code
         while(memTables.immutableExists()) {
             memTables.waitForImmutableCompaction();
@@ -394,11 +394,10 @@ public class DbImpl implements DB
             });
         }
     }
-    
+
     public void checkBackgroundException() {
         Throwable e = backgroundException;
         if(e!=null) {
-            backgroundException = null; //clear the exception now that we throw it
             throw new BackgroundProcessingException(e);
         }
     }
@@ -670,7 +669,7 @@ public class DbImpl implements DB
          if (updates.size() != 0) {
 
              throttleWritesIfNecessary();
-        
+
              MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
              try{
@@ -791,7 +790,7 @@ public class DbImpl implements DB
         }
         return snapshot;
     }
-    
+
     private void throttleWritesIfNecessary()
     {
        boolean allowDelay = true;
@@ -840,21 +839,21 @@ public class DbImpl implements DB
               //this condition can only be true for one writer
               //this writer is the one which exceeded the memtable buffer limit first
               //so here we swap the memtables
-              
+
               //if the previous memtable hasn't been flushed yet, we must wait
               while(this.memTables.immutableExists())
               {
                  current.release();
+                 current.acquireAll(); //block other writers that might be spinning in wait for a new memtable
                  try{
-                    current.acquireAll(); //block other writers that might be spinning in wait for a new memtable
                     this.memTables.waitForImmutableCompaction();
-                    current.releaseAll();
                  }
                  finally{
-                    current.acquire();
+                    current.releaseAll();
                  }
+                 current.acquire();
               }
-              
+
               long logNumber = versions.getNextFileNumber();
               try
               {
@@ -865,12 +864,12 @@ public class DbImpl implements DB
               catch (IOException e)
               {
                  //we've failed to create a new memtable and update mutable/immutable
-                 //other writers trying to acquire it (those spinning in this loop, or new writers) should be notified
-                 current.notifyFailureToSwap(e);
+                 //other writers trying to acquire it (those spinning in this loop, or new writers) should be fail
+                 backgroundException = e;
                  current.release();
                  throw new DBException(e);
               }
-              
+
               maybeScheduleCompaction();
               break;
            }
@@ -885,7 +884,9 @@ public class DbImpl implements DB
               //loop back and acquire the new memtable.
               //incidentally, this means that the memtable's memory usage was incremented superfluously
               //it won't receive any further writes, however, and the usage changes are only relevant to this function
+
               current.release();
+              checkBackgroundException();
            }
         } while(true);
 
@@ -907,27 +908,27 @@ public class DbImpl implements DB
         }
 
         // Save the contents of the memtable as a new Table
-        
+
         //block until pending writes have finished
         MemTableAndLog immutable = tables.immutable.acquireAll();
         immutable.log.close();
         VersionEdit edit = new VersionEdit();
         Version base = versions.getCurrent();
         writeLevel0Table(immutable.memTable, edit, base);
-        
+
         if (shuttingDown.get()) {
             throw new DatabaseShutdownException("Database shutdown during memtable compaction");
         }
-        
+
         edit.setPreviousLogNumber(0);
         edit.setLogNumber(immutable.log.getFileNumber());  // Earlier logs no longer needed
         versions.logAndApply(edit);
-        
+
         this.memTables = new MemTables(this.memTables.mutable, null);
         immutable.memTable.clear();
         tables.finishCompaction();
         immutable.releaseAll();
-        
+
         deleteObsoleteFiles();
     }
 
@@ -972,7 +973,7 @@ public class DbImpl implements DB
             try {
                 TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalUserComparator(internalKeyComparator));
 
-                
+
                 for (Entry<InternalKey, Slice> entry : data) {
                     // update keys
                     InternalKey key = entry.getKey();
@@ -1371,7 +1372,7 @@ public class DbImpl implements DB
             super(message);
         }
     }
-    
+
     public static class BackgroundProcessingException extends DBException {
         public BackgroundProcessingException(Throwable cause)
         {
@@ -1418,59 +1419,46 @@ public class DbImpl implements DB
     public void compactRange(byte[] begin, byte[] end) throws DBException {
         throw new UnsupportedOperationException("Not yet implemented");
     }
-    
+
     private static class MemTableAndLog
     {
        //group the memtable and its accompanying log so that concurrent writes
        //can't be split between structures and subsequently lost in crash
        public final MemTable memTable;
        public final LogWriter log;
-       
+
        private final ReadWriteLock lock = new SimpleReadWriteLock(true);
-       private volatile DBException failureInSwap = null;
 
        public MemTableAndLog(MemTable memTable, LogWriter log)
        {
           this.memTable = memTable;
           this.log = log;
        }
-       
+
        public MemTableAndLog acquire()
        {
-          if(failureInSwap != null)
-             throw failureInSwap;
           lock.readLock().lock();
           return this;
        }
-       
+
        public void release()
        {
           lock.readLock().unlock();
        }
-       
-       /**
-        * If the mutable memtable fails to be swapped -- e.g. the swapper encounters an IOException while creating a new log writer --
-        * new acquires of that memtable should also fail (because the swap was initiated by exceeding the write buffer limit)
-        * @param t cause of failure
-        */
-       public void notifyFailureToSwap(Throwable t)
-       {
-          failureInSwap = new DBException(t);
-       }
-       
+
        public MemTableAndLog acquireAll()
        {
           lock.writeLock().lock();
           return this;
        }
-       
+
        public void releaseAll()
        {
           lock.writeLock().unlock();
        }
-       
+
     }
-    
+
     private static class MemTables
     {
        final MemTableAndLog mutable, immutable;
@@ -1485,17 +1473,17 @@ public class DbImpl implements DB
              finishCompaction();
           }
        }
-       
+
        void finishCompaction()
        {
           this.immutableIsCompacting.set(null);
        }
-       
+
        boolean immutableExists()
        {
           return !this.immutableIsCompacting.isDone();
        }
-       
+
        void waitForImmutableCompaction()
        {
           try
