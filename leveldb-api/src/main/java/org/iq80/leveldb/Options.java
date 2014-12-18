@@ -40,8 +40,7 @@ public class Options {
     // virtual address space on a 32 bit system when all the data is getting mapped
     // into memory.  If you really want to use MMAP anyways, use -Dleveldb.mmap=true
     // or set useMMap(boolean) to true
-    //TODO: fix mmap
-    public static final boolean USE_MMAP_DEFAULT = false;//Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""+(CPU_DATA_MODEL>32)));
+    public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""+(CPU_DATA_MODEL>32)));
     private boolean useMMap = USE_MMAP_DEFAULT;
 
     static void checkArgNotNull(Object value, String name) {

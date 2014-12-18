@@ -226,10 +226,10 @@ public abstract class LogWriter
     protected abstract static class CloseableLogBuffer extends CloseableByteBuffer
     {
        private final long lastEndPosition;
-       protected CloseableLogBuffer(long endPosition)
+       protected CloseableLogBuffer(long startPosition)
        {
           super();
-          this.lastEndPosition = endPosition;
+          this.lastEndPosition = startPosition;
        }
     }
 }

@@ -18,13 +18,9 @@
 package org.iq80.leveldb.impl;
 
 
-import org.iq80.leveldb.util.ByteBufferSupport;
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
-import org.iq80.leveldb.util.SizeOf;
-import org.iq80.leveldb.util.Slice;
-
-import com.google.common.base.Preconditions;
+import org.iq80.leveldb.util.LongToIntFunction;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,6 +30,7 @@ import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class MMapLogWriter
         extends LogWriter
@@ -53,8 +50,7 @@ public class MMapLogWriter
    @Override
    ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter()
    {
-      throw new UnsupportedOperationException("mmap not yet implemented");
-      //return this.writer;
+      return this.writer;
    }
 
    @Override
@@ -63,46 +59,101 @@ public class MMapLogWriter
 
    }
 
-    private class ConcurrentMMapWriter extends ConcurrentNonCopyWriter<CloseableLogBuffer>
+    private class ConcurrentMMapWriter implements ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
-       private MappedRegion region;
-
+       private long filePosition;
+       private volatile MappedRegion region;
+       
        ConcurrentMMapWriter() throws IOException
        {
-          region = new MappedRegion(0);
+          this.filePosition = 0;
+          this.region = new MappedRegion(this.filePosition);
        }
 
        @Override
-       protected CloseableLogBuffer getBuffer(final long position, final int length)
+       public CloseableLogBuffer requestSpace(final int length) throws IOException
        {
-          //return new CloseableMMapLogBuffer(position, ByteBuffer.allocate(length));
-          return null;
+          return requestSpace(new LongToIntFunction()
+          {
+             public final int applyAsInt(long ignored)
+             {
+                return length;
+             }
+          });
        }
-      
+       
+       @Override
+       public CloseableLogBuffer requestSpace(LongToIntFunction getLength) throws IOException
+       {
+          MappedRegion current;
+          int length;
+          long offset;
+          do {
+             current = region;
+             offset = current.offset.get();
+             if(current.offset.compareAndSet(offset, offset + (length = getLength.applyAsInt(offset))))
+             {
+                //CAS success
+                if(length > PAGE_SIZE)
+                {
+                   //incoming write is huge
+                   //do people use leveldb for key/values > 1MB?
+                   //this might require some hard decisions with the thread safe design
+                   //compromise memory usage, fragment buffers?
+                   //allocate non-standard size mmap?
+                   //defer
+                   throw new UnsupportedOperationException(String.format("requested allocation of this size (%d > %d max) is not yet supported with memory mapping (turn off mmap)", length, PAGE_SIZE));
+                }
+                if(offset <= current.limit && offset + length > current.limit)
+                {
+                   //this is the first write which does not fit into the currently mapped region
+                   MappedRegion newRegion = new MappedRegion(offset);
+                   newRegion.offset.addAndGet(length);
+                   region = newRegion;
+                   return newRegion.slice(offset, length);
+                }
+                else if(offset < current.limit)
+                {
+                   //write fits in current region
+                   return current.slice(offset, length);
+                }
+                //else
+                //doesn't fit into region, but wasn't the first to exceed the limit
+                //loop back
+             }
+             //CAS fail, loop back
+          } while(true);
+       }
+       
        private class MappedRegion
        {
-          public final long position;
+          public final long filePosition;
+          public final long limit;
+          public final AtomicLong offset;
           private final MappedByteBuffer mmap;
           MappedRegion(long position) throws IOException
           {
-             this.position = position;
-             this.mmap = fileChannel.map(MapMode.READ_WRITE, position, PAGE_SIZE);
+             final int size = PAGE_SIZE;
+             this.filePosition = position;
+             this.offset = new AtomicLong(filePosition);
+             this.limit = filePosition + size;
+             this.mmap = fileChannel.map(MapMode.READ_WRITE, filePosition, size);
           }
           
-          public CloseableMMapLogBuffer slice(long position, int length)
+          public CloseableMMapLogBuffer slice(long offset, int length)
           {
              ByteBuffer ret = mmap.duplicate();
-             ret.position((int)(this.position - position));
+             ret.position((int)(offset - filePosition));
              ret.limit(ret.position() + length);
-             return new CloseableMMapLogBuffer(position, ret);
+             return new CloseableMMapLogBuffer(offset, ret.order(ByteOrder.LITTLE_ENDIAN));
           }
 
           private class CloseableMMapLogBuffer extends CloseableLogBuffer
           {
              private ByteBuffer slice;
-             protected CloseableMMapLogBuffer(long endPosition, ByteBuffer slice)
+             protected CloseableMMapLogBuffer(long startPosition, ByteBuffer slice)
              {
-                super(endPosition);
+                super(startPosition);
                 this.slice = slice;
              }
           
@@ -137,6 +188,11 @@ public class MMapLogWriter
              public void close() throws IOException
              {
                 slice = null;
+                //could consider tracking references to slices of this mapped region and manually unmap when everyone has closed.
+                //that's not as easy to do thread safely while limiting contention though.
+                //as it stands, the JVM unmaps the region at the time of GC (which of course takes care of the reference tracking)
+                //so this is only a true concern when operating in a memory constrained environment
+                //but in those cases you could turn off leveldb's mmapping (and if memory was really a strict concern you'd probably not use Java)
              }
           }
        }

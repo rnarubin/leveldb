@@ -19,6 +19,7 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.SizeOf;
 
 import com.google.common.base.Preconditions;
@@ -66,10 +67,11 @@ public class FileChannelLogWriter
     }
     
 
-    private class ConcurrentFileWriter extends ConcurrentNonCopyWriter<CloseableLogBuffer>
+    private class ConcurrentFileWriter implements ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
        private final ScratchBuffer scratchCache[] = new ScratchBuffer[64];
        private final AtomicLong scratchBitSet = new AtomicLong(0xFFFFFFFFFFFFFFFFL);
+       private final AtomicLong position = new AtomicLong(0);
        
        ConcurrentFileWriter()
        {
@@ -80,7 +82,6 @@ public class FileChannelLogWriter
              subset.limit(subset.position() + SIZE_OF_LONG);
              scratchCache[i] = new ScratchBuffer(i, subset);
           }
-          
        }
     
        private ScratchBuffer getScratchBuffer()
@@ -120,7 +121,25 @@ public class FileChannelLogWriter
           }
        }
 
-      protected CloseableLogBuffer getBuffer(final long position, final int length)
+      @Override
+      public CloseableLogBuffer requestSpace(int length)
+      {
+         return getBuffer(position.getAndAdd(length), length);
+      }
+
+      @Override
+      public CloseableLogBuffer requestSpace(LongToIntFunction getLength)
+      {
+         long state;
+         int length;
+         do {
+            state = position.get();
+         } while(!position.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
+         
+         return getBuffer(state, length);
+      }
+
+      private CloseableLogBuffer getBuffer(final long position, final int length)
       {
          return new CloseableFileLogBuffer(position, length);
       }
@@ -133,10 +152,10 @@ public class FileChannelLogWriter
          //use scratch space and a minimum flush size to improve writing of headers
          private ScratchBuffer scratch = getScratchBuffer();
          private final static int writeMin = 8;
-         protected CloseableFileLogBuffer(long endPosition, int length)
+         protected CloseableFileLogBuffer(long startPosition, int length)
          {
-            super(endPosition);
-            this.position = endPosition;
+            super(startPosition);
+            this.position = startPosition;
             this.limit = this.position + length;
          }
 
