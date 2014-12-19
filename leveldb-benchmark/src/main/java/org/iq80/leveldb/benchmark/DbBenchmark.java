@@ -24,6 +24,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 
+import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.DBIterator;
@@ -127,6 +129,7 @@ public class DbBenchmark
         compressionRatio = (Double) flags.get(Flag.compression_ratio);
         useExisting = (Boolean) flags.get(Flag.use_existing_db);
         thread_count = (Integer) flags.get(Flag.thread_count);
+        keySize = (Integer) flags.get(Flag.key_size);
         heap_counter_ = 0;
         bytes_ = 0;
         rand_ = new Random(301);
@@ -258,8 +261,14 @@ public class DbBenchmark
         System.out.printf("FileSize:   %.1f MB (estimated)\n",
                 (((keySize + valueSize * compressionRatio) * num_)
                         / 1048576.0));
+        printOptions();
         printWarnings();
         System.out.printf("------------------------------------------------\n");
+    }
+    
+    void printOptions()
+    {
+       System.out.println(ReflectionToStringBuilder.toString(defaultOptions(), ToStringStyle.MULTI_LINE_STYLE));
     }
 
     void printWarnings()
@@ -472,13 +481,13 @@ public class DbBenchmark
         }
     }
 
-    public static byte[] formatNumber(long n)
+    public byte[] formatNumber(long n)
     {
         Preconditions.checkArgument(n >= 0, "number must be positive");
 
-        byte []slice = new byte[16];
+        byte []slice = new byte[keySize];
 
-        int i = 15;
+        int i = slice.length-1;
         while (n > 0) {
             slice[i--] = (byte) ('0' + (n % 10));
             n /= 10;
@@ -857,6 +866,16 @@ public class DbBenchmark
 
         // Size of each value
         value_size(100)
+                {
+                    @Override
+                    public Object parseValue(String value)
+                    {
+                        return Integer.parseInt(value);
+                    }
+                },
+
+        // Size of each key
+        key_size(16)
                 {
                     @Override
                     public Object parseValue(String value)
