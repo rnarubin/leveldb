@@ -55,6 +55,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -449,11 +450,11 @@ public class DbBenchmark
                      for (int i = start; i < end; i += entries_per_batch) {
                         WriteBatch batch = db_.createWriteBatch();
                         for (int j = 0; j < entries_per_batch; j++) {
-                        int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                        byte[] key = keygen(order, k);
-                        batch.put(key, gen_.generate(valueSize));
-                        bytes_ += valueSize + key.length;
-                        finishedSingleOp();
+                           int k = (order == SEQUENTIAL) ? i + j : ThreadLocalRandom.current().nextInt(num_);
+                           byte[] key = keygen(order, k);
+                           batch.put(key, gen_.generate(valueSize));
+                           bytes_ += valueSize + key.length;
+                           finishedSingleOp();
                         }
                         db_.write(batch, writeOptions);
                         batch.close();
