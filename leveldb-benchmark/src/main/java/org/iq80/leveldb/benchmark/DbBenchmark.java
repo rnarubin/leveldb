@@ -113,8 +113,8 @@ public class DbBenchmark
     private final int thread_count;
 
     // State kept for progress messages
-    AtomicInteger done_;
-    AtomicInteger next_report_;     // When to report next
+    int done_;
+    int next_report_;     // When to report next
 
     final DBFactory factory;
 
@@ -352,8 +352,8 @@ public class DbBenchmark
         message_ = null;
         last_op_finish_ = startTime;
         // hist.clear();
-        done_ = new AtomicInteger(0);
-        next_report_ = new AtomicInteger(100);
+        done_ = 0;
+        next_report_ = 100;
     }
 
     private void stop(String benchmark)
@@ -363,8 +363,8 @@ public class DbBenchmark
 
         // Pretend at least one op was done in case we are running a benchmark
         // that does nto call FinishedSingleOp().
-        if (done_.get() < 1) {
-            done_.set(1);
+        if (done_ < 1) {
+            done_ = 1;
         }
 
         if (bytes_ > 0) {
@@ -382,7 +382,7 @@ public class DbBenchmark
 
         System.out.printf("%-12s : %11.5f micros/op;%s%s\n",
                 benchmark,
-                elapsedSeconds * 1e6 / done_.get(),
+                elapsedSeconds * 1e6 / done_,
                 (message_ == null ? "" : " "),
                 message_);
 //        if (FLAGS_histogram) {
@@ -454,7 +454,11 @@ public class DbBenchmark
                            byte[] key = keygen(order, k);
                            batch.put(key, gen_.generate(valueSize));
                            bytes_ += valueSize + key.length;
-                           finishedSingleOp();
+                           if(start == 0)
+                           {
+                              //avoid contention in counting with a small cheat
+                              finishedOps(thread_count);
+                           }
                         }
                         db_.write(batch, writeOptions);
                         batch.close();
@@ -501,35 +505,42 @@ public class DbBenchmark
 
     private void finishedSingleOp()
     {
+       finishedOps(1);
+    }
+    
+    private void finishedOps(int n)
+    {
 //        if (histogram) {
 //            todo
 //        }
-        if (done_.incrementAndGet() >= next_report_.get()) {
+       done_ += n;
+        if (done_ >= next_report_) {
 
-            if (next_report_.get() < 1000) {
-                next_report_.addAndGet(100);
+            if (next_report_ < 1000) {
+                next_report_ += 100;
             }
-            else if (next_report_.get() < 5000) {
-                next_report_.addAndGet(500);
+            else if (next_report_ < 5000) {
+                next_report_ += 500;
             }
-            else if (next_report_.get() < 10000) {
-                next_report_.addAndGet(1000);
+            else if (next_report_ < 10000) {
+                next_report_ += 1000;
             }
-            else if (next_report_.get() < 50000) {
-                next_report_.addAndGet(5000);
+            else if (next_report_ < 50000) {
+                next_report_ += 5000;
             }
-            else if (next_report_.get() < 100000) {
-                next_report_.addAndGet(10000);
+            else if (next_report_ < 100000) {
+                next_report_ += 10000;
             }
-            else if (next_report_.get() < 500000) {
-                next_report_.addAndGet(50000);
+            else if (next_report_ < 500000) {
+                next_report_ += 50000;
             }
             else {
-                next_report_.addAndGet(100000);
+                next_report_ += 100000;
             }
-            System.out.printf("... finished %d ops%30s\r", done_.get(), "");
+            System.out.printf("... finished %d ops%30s\r", done_, "");
 
         }
+       
     }
 
     private void readSequential()
