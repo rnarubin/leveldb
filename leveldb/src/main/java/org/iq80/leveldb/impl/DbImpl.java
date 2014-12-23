@@ -18,6 +18,7 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Supplier;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.SettableFuture;
@@ -41,8 +42,11 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.ConcurrentObjectPool;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.ObjectPool;
+import org.iq80.leveldb.util.ObjectPool.PooledObject;
 import org.iq80.leveldb.util.SimpleReadWriteLock;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -57,6 +61,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
@@ -615,7 +620,7 @@ public class DbImpl implements DB
         }
         return null;
     }
-
+    
     @Override
     public void put(byte[] key, byte[] value)
             throws DBException
@@ -623,12 +628,11 @@ public class DbImpl implements DB
         put(key, value, new WriteOptions());
     }
 
-    @SuppressWarnings("resource")
     @Override
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl().put(key, value), options);
+       return writeInternal(new WriteBatchImpl().put(key, value), options);
     }
 
     @SuppressWarnings("resource")

@@ -19,10 +19,14 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.ConcurrentObjectPool;
 import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.util.ObjectPool;
+import org.iq80.leveldb.util.ObjectPool.PooledObject;
 import org.iq80.leveldb.util.SizeOf;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Supplier;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -30,6 +34,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
@@ -69,58 +75,30 @@ public class FileChannelLogWriter
 
     private class ConcurrentFileWriter implements ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
-       private final ScratchBuffer scratchCache[] = new ScratchBuffer[64];
-       private final AtomicLong scratchBitSet = new AtomicLong(0xFFFFFFFFFFFFFFFFL);
        private final AtomicLong position = new AtomicLong(0);
+       private final ObjectPool<ByteBuffer> scratchCache;
        
        ConcurrentFileWriter()
        {
-          ByteBuffer cache = ByteBuffer.allocateDirect(64 * SIZE_OF_LONG);
-          for(int i = 0, pos = 0; i < scratchCache.length; i++, pos += SIZE_OF_LONG){
+          final int numCachedBuffers = 64;
+          ByteBuffer cache = ByteBuffer.allocateDirect(numCachedBuffers * SIZE_OF_LONG);
+          ArrayList<ByteBuffer> bufs = new ArrayList<>(numCachedBuffers);
+          for(int i = 0, pos = 0; i < numCachedBuffers; i++, pos += SIZE_OF_LONG){
              cache.position(pos);
              ByteBuffer subset = cache.slice().order(ByteOrder.LITTLE_ENDIAN);
              subset.limit(subset.position() + SIZE_OF_LONG);
-             scratchCache[i] = new ScratchBuffer(i, subset);
+             bufs.add(subset);
           }
+          scratchCache = ConcurrentObjectPool.fixedAllocatingPool(bufs, new Supplier<ByteBuffer>()
+          {
+              @Override
+              public ByteBuffer get()
+              {
+                 return ByteBuffer.allocate(SizeOf.SIZE_OF_LONG).order(ByteOrder.LITTLE_ENDIAN);
+              }
+          });
        }
     
-       private ScratchBuffer getScratchBuffer()
-       {
-          long state, bitIndex;
-          do{
-             state = scratchBitSet.get();
-             if((bitIndex = Long.lowestOneBit(state)) == 0)
-             {
-                //no scratch space available in cache, allocate heap buffer
-                return new ScratchBuffer(-1, ByteBuffer.allocate(SizeOf.SIZE_OF_LONG).order(ByteOrder.LITTLE_ENDIAN));
-             }
-          } while(!scratchBitSet.compareAndSet(state, state & (~bitIndex)));
-          final int cacheIndex = Long.numberOfTrailingZeros(bitIndex);
-          return scratchCache[cacheIndex];
-       }
-       
-       private void releaseScratchBuffer(ScratchBuffer scratch)
-       {
-          if(scratch.index < 0)
-             return; //heap allocated, do nothing
-
-          long state;
-          do{
-             state = scratchBitSet.get();
-          } while(!scratchBitSet.compareAndSet(state, state | (1 << scratch.index)));
-       }
-       
-       private class ScratchBuffer
-       {
-          private final int index;
-          public final ByteBuffer buffer;
-          ScratchBuffer(int index, ByteBuffer buffer)
-          {
-             this.index = index;
-             this.buffer = buffer;
-          }
-       }
-
       @Override
       public CloseableLogBuffer requestSpace(int length)
       {
@@ -150,7 +128,8 @@ public class FileChannelLogWriter
          private long position;
          private final long limit;
          //use scratch space and a minimum flush size to improve writing of headers
-         private ScratchBuffer scratch = getScratchBuffer();
+         private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
+         private ByteBuffer buffer = scratch.get();
          private final static int writeMin = 8;
          protected CloseableFileLogBuffer(long startPosition, int length)
          {
@@ -162,8 +141,8 @@ public class FileChannelLogWriter
          @Override
          public CloseableByteBuffer put(byte b)
          {
-            scratch.buffer.put(b);
-            if(scratch.buffer.position() >= writeMin)
+            buffer.put(b);
+            if(buffer.position() >= writeMin)
             {
                putScratch();
             }
@@ -172,8 +151,8 @@ public class FileChannelLogWriter
          @Override
          public CloseableByteBuffer putInt(int b)
          {
-            scratch.buffer.putInt(b);
-            if(scratch.buffer.position() >= writeMin)
+            buffer.putInt(b);
+            if(buffer.position() >= writeMin)
             {
                putScratch();
             }
@@ -182,9 +161,9 @@ public class FileChannelLogWriter
          
          private void putScratch()
          {
-            scratch.buffer.flip();
-            put(scratch.buffer);
-            scratch.buffer.clear();
+            buffer.flip();
+            put(buffer);
+            buffer.clear();
          }
 
          @Override
@@ -196,7 +175,7 @@ public class FileChannelLogWriter
          @Override
          public CloseableByteBuffer put(ByteBuffer b)
          {
-            if(scratch.buffer.position() > 0)
+            if(buffer.position() > 0)
             {
                //scratch hasn't been flushed before a bigger write has come in
                putScratch();
@@ -220,8 +199,8 @@ public class FileChannelLogWriter
          @Override
          public void close() throws IOException
          {
-            releaseScratchBuffer(scratch);
-            scratch = null; //help gc, but also crash in case of use after close rather than undefined behavior, or close checks everywhere
+            buffer = null;
+            scratch.close();
             if(encounteredException != null)
             {
                throw encounteredException;
