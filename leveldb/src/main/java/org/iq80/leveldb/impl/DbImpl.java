@@ -672,7 +672,7 @@ public class DbImpl implements DB
          long sequenceEnd;
          if (updates.size() != 0) {
 
-             //throttleWritesIfNecessary();
+             throttleWritesIfNecessary();
 
              MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
@@ -797,6 +797,10 @@ public class DbImpl implements DB
 
     private void throttleWritesIfNecessary()
     {
+       if(!this.options.throttleLevel0())
+       {
+          return;
+       }
        boolean allowDelay = true;
        while(true)
        {

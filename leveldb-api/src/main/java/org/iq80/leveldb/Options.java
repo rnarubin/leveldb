@@ -42,6 +42,8 @@ public class Options {
     // or set useMMap(boolean) to true
     public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""+(CPU_DATA_MODEL>32)));
     private boolean useMMap = USE_MMAP_DEFAULT;
+    
+    private boolean throttleLevel0 = true;
 
     static void checkArgNotNull(Object value, String name) {
         if(value==null) {
@@ -181,6 +183,15 @@ public class Options {
 
     public Options useMMap(boolean useMMap){
        this.useMMap = useMMap;
+       return this;
+    }
+    
+    public boolean throttleLevel0() {
+       return throttleLevel0;
+    }
+    
+    public Options throttleLevel0(boolean throttleLevel0) {
+       this.throttleLevel0 = throttleLevel0;
        return this;
     }
 
