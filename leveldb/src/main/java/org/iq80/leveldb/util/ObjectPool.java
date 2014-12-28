@@ -26,22 +26,4 @@ public interface ObjectPool<T>
       @Override
       public void close();
    }
-   
-   static class SimplePooledObject<T> implements PooledObject<T>
-   {
-      private final T object;
-      public SimplePooledObject(T object)
-      {
-         this.object = object;
-      }
-      
-      @Override
-      public void close(){} //noop
-      
-      @Override
-      public T get()
-      {
-         return object;
-      }
-   }
 }

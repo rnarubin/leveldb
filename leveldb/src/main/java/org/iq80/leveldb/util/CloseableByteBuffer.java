@@ -4,15 +4,15 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-public abstract class CloseableByteBuffer implements Closeable
+public interface CloseableByteBuffer extends Closeable
 {
    /*
     * actually extending ByteBuffer is not permitted, user polymorphism was not an intended feature of the class it seems
     */
-   public abstract CloseableByteBuffer put(byte b);
-   public abstract CloseableByteBuffer put(byte[] b);
-   public abstract CloseableByteBuffer put(ByteBuffer b);
-   public abstract CloseableByteBuffer putInt(int b);
+   public CloseableByteBuffer put(byte b);
+   public CloseableByteBuffer put(byte[] b);
+   public CloseableByteBuffer put(ByteBuffer b);
+   public CloseableByteBuffer putInt(int b);
    
-   public abstract void close() throws IOException;
+   public void close() throws IOException;
 }

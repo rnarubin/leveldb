@@ -223,7 +223,7 @@ public abstract class LogWriter
        return newBlockWrite + firstBlockWrite;
     }
     
-    protected abstract static class CloseableLogBuffer extends CloseableByteBuffer
+    protected abstract static class CloseableLogBuffer implements CloseableByteBuffer
     {
        private final long lastEndPosition;
        protected CloseableLogBuffer(long startPosition)

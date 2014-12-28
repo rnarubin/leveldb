@@ -35,11 +35,12 @@ import java.util.concurrent.atomic.AtomicLong;
 public class MMapLogWriter
         extends LogWriter
 {
-    private static final int PAGE_SIZE = 1024 * 1024;
+    private static final int PAGE_SIZE = 10 * 1024 * 1024;
     private final FileChannel fileChannel;
     private final ConcurrentMMapWriter writer;
 
-    public MMapLogWriter(File file, long fileNumber)
+    @SuppressWarnings("resource")
+   public MMapLogWriter(File file, long fileNumber)
             throws IOException
     {
         super(file, fileNumber);
@@ -56,7 +57,14 @@ public class MMapLogWriter
    @Override
    void sync() throws IOException
    {
-
+      //TODO: sync
+   }
+   
+   @Override
+   public void close() throws IOException
+   {
+      super.close();
+      fileChannel.close();
    }
 
     private class ConcurrentMMapWriter implements ConcurrentNonCopyWriter<CloseableLogBuffer>
@@ -197,85 +205,4 @@ public class MMapLogWriter
           }
        }
     }
-
-    /*
-    private static class AsyncMMapWriter
-            extends AsyncWriter
-    {
-        private final FileChannel fileChannel;
-        private MappedByteBuffer mappedByteBuffer;
-        private long fileOffset;
-
-        public AsyncMMapWriter(FileChannel channel, BackgroundExceptionHandler bgExceptionHandler, ThrottlePolicy throttlePolicy)
-                throws IOException
-        {
-            super(bgExceptionHandler, throttlePolicy);
-            this.fileChannel = channel;
-            this.mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, 0, PAGE_SIZE);
-        }
-
-        public MappedByteBuffer getMappedByteBuffer()
-        {
-            return mappedByteBuffer;
-        }
-
-        @Override
-        protected long write(List<ByteBuffer[]> b){ throw new UnsupportedOperationException();}
-        protected long write(ByteBuffer[] buffers)
-                throws IOException
-        {
-            int totalLength = 0;
-            for (ByteBuffer b : buffers) {
-                totalLength += b.remaining();
-            }
-            ensureCapacity(totalLength);
-            for (ByteBuffer b : buffers) {
-                mappedByteBuffer.put(b);
-            }
-
-            return totalLength;
-        }
-
-        @Override
-        public void close()
-                throws IOException
-        {
-            try {
-                super.close();
-            }
-            finally {
-                destroyMappedByteBuffer();
-                if (fileChannel.isOpen()) {
-                    fileChannel.truncate(fileOffset);
-                }
-            }
-        }
-
-        private void ensureCapacity(int bytes)
-                throws IOException
-        {
-            if (mappedByteBuffer.remaining() < bytes) {
-                // remap
-                fileOffset += mappedByteBuffer.position();
-                unmap();
-
-                mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, fileOffset, PAGE_SIZE);
-            }
-        }
-
-        private void unmap()
-        {
-            ByteBufferSupport.unmap(mappedByteBuffer);
-        }
-
-        private void destroyMappedByteBuffer()
-        {
-            if (mappedByteBuffer != null) {
-                fileOffset += mappedByteBuffer.position();
-                unmap();
-            }
-            mappedByteBuffer = null;
-        }
-    }
-    */
 }

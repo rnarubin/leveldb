@@ -42,7 +42,7 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.ConcurrentObjectPool;
+import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.ObjectPool;
@@ -672,7 +672,7 @@ public class DbImpl implements DB
          long sequenceEnd;
          if (updates.size() != 0) {
 
-             throttleWritesIfNecessary();
+             //throttleWritesIfNecessary();
 
              MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
