@@ -17,13 +17,18 @@
  */
 package org.iq80.leveldb.impl;
 
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Multiset;
+import com.google.common.collect.Multisets;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -32,8 +37,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static java.util.Arrays.asList;
@@ -95,6 +106,8 @@ public abstract class LogTest
                 toSlice("Lagavulin"));
 
         testLog(records);
+
+        testConcurrentLog(records, true, 3);
     }
 
     @Test
@@ -117,6 +130,36 @@ public abstract class LogTest
                 toSlice("Lagavulin", 4000));
 
         testLog(records);
+        
+        testConcurrentLog(records, true, 3);
+    }
+    
+    @Test
+    public void testManySmallRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    {
+       Random rand = new Random(0);
+       List<Slice> records = new ArrayList<>();
+       for(int i = 0; i < 1_000_000; i++) {
+          byte[] b = new byte[rand.nextInt(20)+5];
+          rand.nextBytes(b);
+          records.add(toSlice(new String(b, StandardCharsets.UTF_8)));
+       }
+       
+       testConcurrentLog(records, true, 8);
+    }
+    
+    @Test
+    public void testManyLargeRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    {
+       Random rand = new Random(0);
+       List<Slice> records = new ArrayList<>();
+       for(int i = 0; i < 10_000; i++) {
+          byte[] b = new byte[rand.nextInt(20)+5];
+          rand.nextBytes(b);
+          records.add(toSlice(new String(b, StandardCharsets.UTF_8), 4000));
+       }
+       
+       testConcurrentLog(records, true, 8);
     }
     
     @Test
@@ -161,6 +204,43 @@ public abstract class LogTest
         }
         finally {
             Closeables.closeQuietly(fileChannel);
+        }
+    }
+    
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter) throws InterruptedException, ExecutionException, IOException
+    {
+       testConcurrentLog(record, closeWriter, Runtime.getRuntime().availableProcessors());
+    }
+    
+    @SuppressWarnings("resource")
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter, int threads) throws InterruptedException, ExecutionException, IOException
+    {
+       Multiset<Slice> recordBag = HashMultiset.create();
+       List<Callable<Void>> work = new ArrayList<>(record.size());
+       for(final Slice s:record) {
+          work.add(new Callable<Void>(){
+            @Override
+            public Void call() throws IOException
+            {
+               writer.addRecord(s, false);
+               return null;
+            }
+          });
+          recordBag.add(s);
+       }
+       new ConcurrencyHelper<Void>(threads).submitAll(work).close();
+
+       if(closeWriter) {
+          writer.close();
+       }
+
+        try (FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel()) {
+            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
+            for(Slice actual = reader.readRecord(); actual != null; actual = reader.readRecord())
+            {
+               Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
+            }
+            Assert.assertEquals(recordBag.size(), 0, "Not all added slices found in log");
         }
     }
 

@@ -113,6 +113,18 @@ public abstract class ObjectPools
       }
       
       @Override
+      public PooledObject<T> tryAcquire()
+      {
+         if(sem.tryAcquire())
+         {
+            PooledObject<T> ret;
+            while((ret = super.acquire()) == null);
+            return ret;
+         }
+         return null;
+      }
+      
+      @Override
       protected void release(IndexedPooledObject pooledObject)
       {
          super.release(pooledObject);
@@ -195,6 +207,12 @@ public abstract class ObjectPools
             return null;
          }
          return pool[bitSetIndex*bitsPerSegment + Integer.numberOfTrailingZeros(bitIndex)];
+      }
+      
+      @Override
+      public PooledObject<T> tryAcquire()
+      {
+         return acquire();
       }
       
       protected void release(IndexedPooledObject pooledObject)

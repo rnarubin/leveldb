@@ -31,6 +31,7 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -46,7 +47,7 @@ public class FileChannelLogWriter
             throws IOException
     {
        super(file, fileNumber);
-       this.fileChannel = new FileOutputStream(file, true).getChannel();
+       this.fileChannel = new FileOutputStream(file, false).getChannel();
        this.writer = new ConcurrentFileWriter();
     }
     
@@ -71,18 +72,13 @@ public class FileChannelLogWriter
 
     private class ConcurrentFileWriter implements ConcurrentNonCopyWriter<CloseableLogBuffer>
     {
-       private final AtomicLong position = new AtomicLong(0);
-       private final ObjectPool<ByteBuffer> scratchCache;
+       private final AtomicLong filePosition = new AtomicLong(0);
+       private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(64, 1024);
        
-       ConcurrentFileWriter()
-       {
-          scratchCache = ObjectPools.directBufferPool(64, 1024);
-       }
-    
       @Override
       public CloseableLogBuffer requestSpace(int length)
       {
-         return getBuffer(position.getAndAdd(length), length);
+         return new CloseableFileLogBuffer(filePosition.getAndAdd(length), length);
       }
 
       @Override
@@ -91,17 +87,12 @@ public class FileChannelLogWriter
          long state;
          int length;
          do {
-            state = position.get();
-         } while(!position.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
+            state = filePosition.get();
+         } while(!filePosition.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
          
-         return getBuffer(state, length);
+         return new CloseableFileLogBuffer(state, length);
       }
 
-      private CloseableLogBuffer getBuffer(final long position, final int length)
-      {
-         return new CloseableFileLogBuffer(position, length);
-      }
-      
       private class CloseableFileLogBuffer extends CloseableLogBuffer
       {
          private IOException encounteredException = null;
@@ -110,11 +101,11 @@ public class FileChannelLogWriter
          //use scratch space and a minimum flush size to improve small write performance
          private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
          private ByteBuffer buffer = scratch.get().order(ByteOrder.LITTLE_ENDIAN);
-         protected CloseableFileLogBuffer(long startPosition, int length)
+         protected CloseableFileLogBuffer(final long startPosition, final int length)
          {
             super(startPosition);
             this.position = startPosition;
-            this.limit = this.position + length;
+            this.limit = startPosition + length;
          }
 
          @Override
@@ -206,5 +197,4 @@ public class FileChannelLogWriter
       }
        
     }
-
 }

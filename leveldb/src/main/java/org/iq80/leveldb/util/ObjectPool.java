@@ -10,10 +10,12 @@ public interface ObjectPool<T>
     */
    public PooledObject<T> acquire();
    
+
    /**
-    * returns the total number of objects in the pool (both available and acquired)
+    * Try to acquire an object from the set of available objects in the pool, removing it from the
+    * available set. If no objects are available, {@code null} is returned.
     */
-   public int size();
+   public PooledObject<T> tryAcquire();
 
    /**
     * A closeable wrapper around an object belonging to an object pool. A PooledObject is implicitly

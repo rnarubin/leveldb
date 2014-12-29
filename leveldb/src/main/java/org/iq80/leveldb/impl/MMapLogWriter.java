@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class MMapLogWriter
         extends LogWriter
 {
-    private static final int PAGE_SIZE = 10 * 1024 * 1024;
+    private static final int PAGE_SIZE = 1024 * 1024;
     private final FileChannel fileChannel;
     private final ConcurrentMMapWriter writer;
 
@@ -104,12 +104,7 @@ public class MMapLogWriter
                 //CAS success
                 if(length > PAGE_SIZE)
                 {
-                   //incoming write is huge
-                   //do people use leveldb for key/values > 1MB?
-                   //this might require some hard decisions with the thread safe design
-                   //compromise memory usage, fragment buffers?
-                   //allocate non-standard size mmap?
-                   //defer
+                   //TODO: fragment buffers
                    throw new UnsupportedOperationException(String.format("requested allocation of this size (%d > %d max) is not yet supported with memory mapping (turn off mmap)", length, PAGE_SIZE));
                 }
                 if(offset <= current.limit && offset + length > current.limit)
