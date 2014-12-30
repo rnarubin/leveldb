@@ -20,7 +20,6 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.Closeables;
@@ -40,7 +39,6 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Callable;

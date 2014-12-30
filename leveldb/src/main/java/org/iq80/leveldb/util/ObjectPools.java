@@ -5,6 +5,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 
 import org.iq80.leveldb.util.ObjectPool.PooledObject;
@@ -86,7 +87,7 @@ public abstract class ObjectPools
       @Override
       public PooledObject<T> acquire()
       {
-         PooledObject<T> ret = super.acquire();
+         PooledObject<T> ret = super.tryAcquire();
          return ret != null ? ret : new SimplePooledObject<T>(allocator.get());
       }
    }
@@ -108,7 +109,7 @@ public abstract class ObjectPools
          // potential to miss a released object based on the initial probe position
          // the looping will terminate, however, because the semaphore ensures a caller could only
          // reach this position if at least one object is available
-         while((ret = super.acquire()) == null);
+         while((ret = super.tryAcquire()) == null);
          return ret;
       }
       
@@ -118,7 +119,7 @@ public abstract class ObjectPools
          if(sem.tryAcquire())
          {
             PooledObject<T> ret;
-            while((ret = super.acquire()) == null);
+            while((ret = super.tryAcquire()) == null);
             return ret;
          }
          return null;
@@ -146,7 +147,7 @@ public abstract class ObjectPools
       }
    }
    
-   private static class FixedBitSetPool<T> implements ObjectPool<T>
+   private abstract static class FixedBitSetPool<T> implements ObjectPool<T>
    {
       private final AtomicIntegerArray bitSet;
       private final IndexedPooledObject pool[];
@@ -165,9 +166,10 @@ public abstract class ObjectPools
             throw new IllegalArgumentException("Fixed object pool must be given initial objects");
 
          this.pool = poolAsList.toArray((IndexedPooledObject[])Array.newInstance(IndexedPooledObject.class, poolAsList.size()));
-         final int[] backing = new int[pool.length / bitsPerSegment + 1];
-         Arrays.fill(backing, (1 << bitsPerSegment) - 1);
-         backing[backing.length-1] = (1 << (pool.length % bitsPerSegment)) - 1;
+         final int[] backing = new int[(pool.length / bitsPerSegment) + ((pool.length%bitsPerSegment)==0?0:1)];
+         Arrays.fill(backing, (int)((1L << bitsPerSegment) - 1));
+         if(pool.length%bitsPerSegment!=0)
+            backing[backing.length-1] = (int)((1L << (pool.length % bitsPerSegment)) - 1);
          this.bitSet = new AtomicIntegerArray(backing);
       }
       
@@ -181,16 +183,18 @@ public abstract class ObjectPools
          if(bitSet.length() == 1) {
             return 0;
          }
-         return Thread.currentThread().hashCode() % bitSet.length();
+         return ThreadLocalRandom.current().nextInt(bitSet.length());
       }
       
+      public abstract PooledObject<T> acquire();
+      
       @Override
-      public PooledObject<T> acquire()
+      public PooledObject<T> tryAcquire()
       {
          final int len = bitSet.length();
          int bitIndex = 0;
          int bitSetIndex = probeIndex() - 1;
-         for(int i = 0; i < len; i++){
+         segments: for(int i = 0; i < len; i++){
             bitSetIndex = (bitSetIndex + 1) % len;
             int state;
             do {
@@ -198,21 +202,14 @@ public abstract class ObjectPools
                if((bitIndex = Integer.lowestOneBit(state)) == 0) {
                   //no objects found in this segment
                   //break from CAS
-                  break;
+                  continue segments;
                }
             } while(!bitSet.compareAndSet(bitSetIndex, state, state & (~bitIndex)));
+            //CAS success
+            return pool[bitSetIndex*bitsPerSegment + Integer.numberOfTrailingZeros(bitIndex)];
          }
-         if(bitIndex == 0) {
-            //no objects found in any segment
-            return null;
-         }
-         return pool[bitSetIndex*bitsPerSegment + Integer.numberOfTrailingZeros(bitIndex)];
-      }
-      
-      @Override
-      public PooledObject<T> tryAcquire()
-      {
-         return acquire();
+         //no objects found in any segment
+         return null;
       }
       
       protected void release(IndexedPooledObject pooledObject)

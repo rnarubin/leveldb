@@ -38,10 +38,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
@@ -52,6 +55,7 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
@@ -61,6 +65,7 @@ import org.testng.annotations.Test;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
@@ -871,22 +876,70 @@ public class DbImplTest
 
         assertFalse(seekingIterator.hasNext());
     }
+    
+    @Test
+    public void testConcurrentPuts() throws Exception
+    {
+       DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(1024), databaseDir);
+
+       Random rand = new Random(0);
+       List<Entry<String, String>> entries = new ArrayList<>();
+       for(int i = 0; i < 1_000; i++){
+          //append i to key to ensure unique keys so that iteration doesn't have to handle key shadowing
+          //this isn't really a test for iteration, so it's not an issue
+          entries.add(Maps.immutableEntry(randomString(rand, rand.nextInt(50)+5)+i, randomString(rand, rand.nextInt(1500)+5)));
+       }
+       Collections.sort(entries, new Comparator<Entry<String, String>>(){
+          @Override
+          public int compare(Entry<String, String> a, Entry<String, String> b)
+          {
+            return a.getKey().compareTo(b.getKey());
+          }
+       });
+       testDb(db, entries, 8);
+    }
 
     private void testDb(DbStringWrapper db, Entry<String, String>... entries)
-            throws IOException
+            throws IOException, InterruptedException, ExecutionException
     {
         testDb(db, asList(entries));
     }
-
+    
     private void testDb(DbStringWrapper db, List<Entry<String, String>> entries)
-            throws IOException
+          throws IOException, InterruptedException, ExecutionException
+    {
+        testDb(db, entries, 1);
+    }
+
+    private void testDb(final DbStringWrapper db, List<Entry<String, String>> entries, final int threadCount)
+            throws IOException, InterruptedException, ExecutionException
     {
        
        List<Entry<String, String>> reverseEntries = newArrayList(entries);
        Collections.reverse(reverseEntries);
 
-        for (Entry<String, String> entry : entries) {
-            db.put(entry.getKey(), entry.getValue());
+        if(threadCount == 1) {
+           for (Entry<String, String> entry : entries) {
+               db.put(entry.getKey(), entry.getValue());
+           }
+        }
+        else {
+           List<Callable<Void>> work = new ArrayList<>(threadCount);
+           for(final List<Entry<String, String>> sublist : Lists.partition(entries, entries.size()/threadCount)) {
+              work.add(new Callable<Void>(){
+                 @Override
+                 public Void call()
+                 {
+                    for(Entry<String, String> entry : sublist)
+                    {
+                        db.put(entry.getKey(), entry.getValue());
+                    }
+                    
+                    return null;
+                 }
+              });
+           }
+           new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
         }
 
         for (Entry<String, String> entry : entries) {

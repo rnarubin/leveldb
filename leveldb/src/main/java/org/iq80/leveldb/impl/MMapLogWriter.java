@@ -57,7 +57,7 @@ public class MMapLogWriter
    @Override
    void sync() throws IOException
    {
-      //TODO: sync
+      fileChannel.force(false);
    }
    
    @Override
