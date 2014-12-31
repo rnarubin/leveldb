@@ -107,7 +107,6 @@ public class MMapLogWriter
                 if(offset <= current.limit && offset + length > current.limit) {
                    //this is the first write which does not fit into the currently mapped region
                    if(length > PAGE_SIZE) {
-                      //TODO: fragment buffers
                       MultiMappedRegion newRegion = new MultiMappedRegion(offset, length, current);
                       region = newRegion.tail;
                       return newRegion.slice();
