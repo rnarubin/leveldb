@@ -161,6 +161,21 @@ public abstract class LogTest
     }
     
     @Test
+    public void testManyHugeRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    {
+       //larger than page size to test mmap edges
+       Random rand = new Random(0);
+       List<Slice> records = new ArrayList<>();
+       for(int i = 0; i < 100; i++) {
+          byte[] b = new byte[rand.nextInt(20)+5];
+          rand.nextBytes(b);
+          records.add(toSlice(new String(b, StandardCharsets.UTF_8), 200000));
+       }
+       
+       testConcurrentLog(records, true, 8);
+    }
+    
+    @Test
     public void testReadWithoutProperClose()
             throws Exception
     {

@@ -21,17 +21,15 @@ import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.LongToIntFunction;
-import org.iq80.leveldb.util.SizeOf;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
 
 import com.google.common.base.Preconditions;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
@@ -157,7 +155,7 @@ public abstract class LogWriter
         }
     }
 
-    private static int appendChunk(CloseableByteBuffer buffer, LogChunkType type, Slice slice)
+    private static int appendChunk(CloseableLogBuffer buffer, LogChunkType type, Slice slice) throws IOException
     {
         final int length = slice.length();
         Preconditions.checkArgument(length <= 0xffff, "length %s is larger than two bytes", length);
@@ -231,5 +229,16 @@ public abstract class LogWriter
           super();
           this.lastEndPosition = startPosition;
        }
+
+       @Override
+       public abstract CloseableByteBuffer put(byte b) throws IOException;
+       @Override
+       public abstract CloseableByteBuffer put(byte[] b) throws IOException;
+       @Override
+       public abstract CloseableByteBuffer put(ByteBuffer b) throws IOException;
+       @Override
+       public abstract CloseableByteBuffer putInt(int b) throws IOException;
+       @Override
+       public abstract void close() throws IOException;
     }
 }

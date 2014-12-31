@@ -31,7 +31,6 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -95,7 +94,6 @@ public class FileChannelLogWriter
 
       private class CloseableFileLogBuffer extends CloseableLogBuffer
       {
-         private IOException encounteredException = null;
          private long position;
          private final long limit;
          //use scratch space and a minimum flush size to improve small write performance
@@ -109,21 +107,21 @@ public class FileChannelLogWriter
          }
 
          @Override
-         public CloseableByteBuffer put(byte b)
+         public CloseableByteBuffer put(byte b) throws IOException
          {
             checkCapacity(SizeOf.SIZE_OF_BYTE);
             buffer.put(b);
             return this;
          }
          @Override
-         public CloseableByteBuffer putInt(int b)
+         public CloseableByteBuffer putInt(int b) throws IOException
          {
             checkCapacity(SizeOf.SIZE_OF_INT);
             buffer.putInt(b);
             return this;
          }
          
-         private void checkCapacity(int size)
+         private void checkCapacity(int size) throws IOException
          {
             if(size > buffer.remaining())
             {
@@ -134,7 +132,7 @@ public class FileChannelLogWriter
          }
 
          @Override
-         public CloseableByteBuffer put(byte[] b)
+         public CloseableByteBuffer put(byte[] b) throws IOException
          {
             checkCapacity(b.length);
             if(b.length > buffer.remaining())
@@ -149,7 +147,7 @@ public class FileChannelLogWriter
          }
 
          @Override
-         public CloseableByteBuffer put(ByteBuffer b)
+         public CloseableByteBuffer put(ByteBuffer b) throws IOException
          {
             checkCapacity(b.remaining());
             if(b.remaining() > buffer.remaining() || b.isDirect())
@@ -163,23 +161,15 @@ public class FileChannelLogWriter
             return this;
          }
          
-         private void write(ByteBuffer b)
+         private void write(ByteBuffer b) throws IOException
          {
-            try
-            {
-               if(position + b.remaining() > limit)
-                  throw new BufferOverflowException();
+            if(position + b.remaining() > limit)
+               throw new BufferOverflowException();
 
-               while(b.remaining() > 0)
-               {
-                  position += fileChannel.write(b, position);
-               }
-            }
-            catch (IOException e)
+            while(b.remaining() > 0)
             {
-               encounteredException = e;
+               position += fileChannel.write(b, position);
             }
-            
          }
 
          @Override
@@ -189,10 +179,6 @@ public class FileChannelLogWriter
             write(buffer);
             buffer = null;
             scratch.close();
-            if(encounteredException != null)
-            {
-               throw encounteredException;
-            }
          }
       }
        

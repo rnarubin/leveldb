@@ -18,13 +18,16 @@
 package org.iq80.leveldb.impl;
 
 
+import org.iq80.leveldb.util.ByteBufferSupport;
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.util.SizeOf;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
@@ -99,24 +102,24 @@ public class MMapLogWriter
           do {
              current = region;
              offset = current.offset.get();
-             if(current.offset.compareAndSet(offset, offset + (length = getLength.applyAsInt(offset))))
-             {
+             if(current.offset.compareAndSet(offset, offset + (length = getLength.applyAsInt(offset)))) {
                 //CAS success
-                if(length > PAGE_SIZE)
-                {
-                   //TODO: fragment buffers
-                   throw new UnsupportedOperationException(String.format("requested allocation of this size (%d > %d max) is not yet supported with memory mapping (turn off mmap)", length, PAGE_SIZE));
-                }
-                if(offset <= current.limit && offset + length > current.limit)
-                {
+                if(offset <= current.limit && offset + length > current.limit) {
                    //this is the first write which does not fit into the currently mapped region
-                   MappedRegion newRegion = new MappedRegion(offset);
-                   newRegion.offset.addAndGet(length);
-                   region = newRegion;
-                   return newRegion.slice(offset, length);
+                   if(length > PAGE_SIZE) {
+                      //TODO: fragment buffers
+                      MultiMappedRegion newRegion = new MultiMappedRegion(offset, length, current);
+                      region = newRegion.tail;
+                      return newRegion.slice();
+                   }
+                   else {
+                      MappedRegion newRegion = new MappedRegion(offset);
+                      newRegion.offset.addAndGet(length);
+                      region = newRegion;
+                      return newRegion.slice(offset, length);
+                   }
                 }
-                else if(offset < current.limit)
-                {
+                else if(offset < current.limit) {
                    //write fits in current region
                    return current.slice(offset, length);
                 }
@@ -128,6 +131,20 @@ public class MMapLogWriter
           } while(true);
        }
        
+       /*
+        * 0: ready for writing
+        * /: reserved by someone else
+        * 
+        * data: ------------- /////00000///// -------
+        *       filePosition ^               ^ limit
+        *            buffer offset^     ^buffer limit
+        *                          |___|
+        *                      length, slice
+        *                     |_____________|
+        *                        PAGE_SIZE
+        *                     |_____________|
+        *                         mmapped     
+        */
        private class MappedRegion
        {
           public final long filePosition;
@@ -136,11 +153,10 @@ public class MMapLogWriter
           private final MappedByteBuffer mmap;
           MappedRegion(long position) throws IOException
           {
-             final int size = PAGE_SIZE;
              this.filePosition = position;
              this.offset = new AtomicLong(filePosition);
-             this.limit = filePosition + size;
-             this.mmap = fileChannel.map(MapMode.READ_WRITE, filePosition, size);
+             this.limit = filePosition + PAGE_SIZE;
+             this.mmap = fileChannel.map(MapMode.READ_WRITE, filePosition, PAGE_SIZE);
           }
           
           public CloseableMMapLogBuffer slice(long offset, int length)
@@ -197,6 +213,134 @@ public class MMapLogWriter
                 //so this is only a true concern when operating in a memory constrained environment
                 //but in those cases you could turn off leveldb's mmapping (and if memory was really a strict concern you'd probably not use Java)
              }
+          }
+       }
+       
+       /*
+        * 0: ready for writing
+        * +: reserved for writing
+        * /: reserved by someone else
+        * 
+        *      ------------- /////0000000 +++++++++++  +++++++++++  ...  +++++++++++  +++++++++++  00000////// ---------
+        * head.filePosition ^           ^ head.limit                             tail.filePosition ^
+        *                  offset^                                                                     ^ limit (implicit)
+        *                        |_________________________________ ... _______________________________|
+        *                                                      length, slice
+        *                   |___________||___________||___________| ... |___________||___________||___________|
+        *                     PAGE_SIZE    PAGE_SIZE    PAGE_SIZE         PAGE_SIZE    PAGE_SIZE    PAGE_SIZE
+        *                   |___________||_________________________ ... _________________________||___________|
+        *                         |                       mmap and unmap as we go                       |
+        *               mmapped already, head                                               mmap for the next guy, tail
+        */
+       private class MultiMappedRegion
+       {
+          public final long offset;
+          private final long tailPosition;
+          private final long headPosition;
+          private ByteBuffer currentSlice;
+          private final ByteBuffer tailSlice;
+          private MappedRegion tail;
+          
+          MultiMappedRegion(long offset, int length, MappedRegion head) throws IOException
+          {
+             this.offset = offset;
+
+             final int remainingInHead = (int)(head.limit - offset);
+             this.headPosition = head.filePosition;
+             this.currentSlice = head.slice(offset, remainingInHead).slice;
+
+             final int usedInTail = (length - remainingInHead)%PAGE_SIZE;
+             this.tailPosition = offset + length - usedInTail;
+
+             this.tail = new MappedRegion(tailPosition);
+             this.tailSlice = tail.slice(tailPosition, usedInTail).slice;
+             tail.offset.addAndGet(usedInTail);
+          }
+          
+          public CloseableMultiMMapLogBuffer slice()
+          {
+             return new CloseableMultiMMapLogBuffer();
+          }
+          
+          private class CloseableMultiMMapLogBuffer extends CloseableLogBuffer
+          {
+
+            private long mmapPosition;
+            protected CloseableMultiMMapLogBuffer()
+            {
+               super(offset);
+               this.mmapPosition = headPosition;
+            }
+
+            @Override
+            public CloseableByteBuffer put(byte b) throws IOException
+            {
+               if(SizeOf.SIZE_OF_BYTE > currentSlice.remaining()) {
+                  currentSlice = mapNext();
+               }
+               currentSlice.put(b);
+               return this;
+            }
+            @Override
+            public CloseableByteBuffer put(byte[] b) throws IOException
+            {
+               if(b.length > currentSlice.remaining()) {
+                  return put(ByteBuffer.wrap(b));
+               }
+
+               currentSlice.put(b);
+               return this;
+            }
+            @Override
+            public CloseableByteBuffer putInt(int b) throws IOException
+            {
+               if(SizeOf.SIZE_OF_INT > currentSlice.remaining()) {
+                  return put((ByteBuffer)ByteBuffer.allocate(SizeOf.SIZE_OF_INT).order(ByteOrder.LITTLE_ENDIAN).putInt(b).flip());
+               }
+                  
+               currentSlice.putInt(b);
+               return this;
+            }
+            @Override
+            public CloseableByteBuffer put(ByteBuffer b) throws IOException
+            {
+               int rem;
+               if(b.remaining() > (rem = currentSlice.remaining())) {
+                  final int oldLimit = b.limit();
+                  b.limit(b.position() + rem);
+                  currentSlice.put(b);
+                  currentSlice = mapNext();
+                  b.limit(oldLimit);
+                  return put(b);
+               }
+               
+               currentSlice.put(b);
+               return this;
+            }
+            @Override
+            public void close() throws IOException
+            {
+            }
+            
+            private ByteBuffer mapNext() throws IOException
+            {
+               assert mmapPosition % PAGE_SIZE == 0;
+               if(mmapPosition != headPosition) {
+                  ByteBufferSupport.unmap((MappedByteBuffer)currentSlice);
+               }
+
+               mmapPosition += PAGE_SIZE;
+
+               if(mmapPosition == tailPosition) {
+                  return tailSlice;
+               }
+               
+               if(mmapPosition > tailPosition) {
+                  throw new BufferOverflowException();
+               }
+               
+               return fileChannel.map(MapMode.READ_WRITE, mmapPosition, PAGE_SIZE).order(ByteOrder.LITTLE_ENDIAN);
+            }
           }
        }
     }
