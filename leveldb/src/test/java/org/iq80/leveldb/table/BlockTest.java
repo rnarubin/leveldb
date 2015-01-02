@@ -145,6 +145,9 @@ public class BlockTest
         }
         BlockHelper.assertSequence(blockIterator, entries);
 
+        blockIterator.seekToEnd();
+        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+
         for (BlockEntry entry : entries) {
             List<BlockEntry> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
             List<BlockEntry> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());

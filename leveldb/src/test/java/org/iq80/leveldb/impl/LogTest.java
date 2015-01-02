@@ -17,11 +17,17 @@
  */
 package org.iq80.leveldb.impl;
 
+import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Multiset;
+
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -30,7 +36,12 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static java.util.Arrays.asList;
@@ -38,8 +49,14 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
 import static org.testng.FileAssert.fail;
 
-public class LogTest
+public abstract class LogTest
 {
+
+    protected LogTest(Options options)
+    {
+        this.options = options;
+    }
+
     private static final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
     {
         @Override
@@ -56,6 +73,7 @@ public class LogTest
     };
 
     private LogWriter writer;
+    private Options options;
 
     @Test
     public void testEmptyBlock()
@@ -84,6 +102,8 @@ public class LogTest
                 toSlice("Lagavulin"));
 
         testLog(records);
+
+        testConcurrentLog(records, true, 3);
     }
 
     @Test
@@ -106,6 +126,54 @@ public class LogTest
                 toSlice("Lagavulin", 4000));
 
         testLog(records);
+
+        testConcurrentLog(records, true, 3);
+    }
+
+    @Test
+    public void testManySmallRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
+    {
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 1_000_000; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8)));
+        }
+
+        testConcurrentLog(records, true, 8);
+    }
+
+    @Test
+    public void testManyLargeRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
+    {
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 10_000; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 4000));
+        }
+
+        testConcurrentLog(records, true, 8);
+    }
+
+    @Test
+    public void testManyHugeRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
+    {
+        //larger than page size to test mmap edges
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 200000));
+        }
+
+        testConcurrentLog(records, true, 8);
     }
 
     @Test
@@ -131,7 +199,7 @@ public class LogTest
             throws IOException
     {
         for (Slice entry : records) {
-            writer.addRecord(entry, false);
+            writer.addRecord(entry, true);
         }
 
         if (closeWriter) {
@@ -153,11 +221,51 @@ public class LogTest
         }
     }
 
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter)
+            throws InterruptedException, ExecutionException, IOException
+    {
+        testConcurrentLog(record, closeWriter, Runtime.getRuntime().availableProcessors());
+    }
+
+    @SuppressWarnings("resource")
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter, int threads)
+            throws InterruptedException, ExecutionException, IOException
+    {
+        Multiset<Slice> recordBag = HashMultiset.create();
+        List<Callable<Void>> work = new ArrayList<>(record.size());
+        for (final Slice s : record) {
+            work.add(new Callable<Void>()
+            {
+                @Override
+                public Void call()
+                        throws IOException
+                {
+                    writer.addRecord(s, false);
+                    return null;
+                }
+            });
+            recordBag.add(s);
+        }
+        new ConcurrencyHelper<Void>(threads).submitAll(work).close();
+
+        if (closeWriter) {
+            writer.close();
+        }
+
+        try (FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel()) {
+            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
+            for (Slice actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
+                Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
+            }
+            Assert.assertEquals(recordBag.size(), 0, "Not all added slices found in log");
+        }
+    }
+
     @BeforeMethod
     public void setUp()
             throws Exception
     {
-        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42);
+        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, options);
     }
 
     @AfterMethod
@@ -183,5 +291,23 @@ public class LogTest
             sliceOutput.writeBytes(bytes);
         }
         return slice;
+    }
+
+    public static class FileLogTest
+            extends LogTest
+    {
+        public FileLogTest()
+        {
+            super(new Options().useMMap(false));
+        }
+    }
+
+    public static class MMapLogTest
+            extends LogTest
+    {
+        public MMapLogTest()
+        {
+            super(new Options().useMMap(true));
+        }
     }
 }

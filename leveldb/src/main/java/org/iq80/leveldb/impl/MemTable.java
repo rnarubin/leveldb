@@ -45,6 +45,11 @@ public class MemTable
         table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
     }
 
+    public void clear()
+    {
+        table.clear();
+    }
+
     public boolean isEmpty()
     {
         return table.isEmpty();
@@ -55,6 +60,11 @@ public class MemTable
         return approximateMemoryUsage.get();
     }
 
+    protected long getAndAddApproximateMemoryUsage(long delta)
+    {
+        return approximateMemoryUsage.getAndAdd(delta);
+    }
+
     public void add(long sequenceNumber, ValueType valueType, Slice key, Slice value)
     {
         Preconditions.checkNotNull(valueType, "valueType is null");
@@ -63,8 +73,6 @@ public class MemTable
 
         InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType);
         table.put(internalKey, value);
-
-        approximateMemoryUsage.addAndGet(key.length() + SIZE_OF_LONG + value.length());
     }
 
     public LookupResult get(LookupKey key)

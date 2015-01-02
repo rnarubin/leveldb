@@ -17,26 +17,242 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.util.CloseableByteBuffer;
+import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.SliceInput;
 
+import com.google.common.base.Preconditions;
+
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-public interface LogWriter
+import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
+import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
+
+public abstract class LogWriter
+        implements Closeable
 {
-    boolean isClosed();
+    private final File file;
+    private final long fileNumber;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
-    void close()
+    protected LogWriter(File file, long fileNumber)
+    {
+        Preconditions.checkNotNull(file, "file is null");
+        Preconditions.checkArgument(fileNumber >= 0, "fileNumber is negative");
+
+        this.file = file;
+        this.fileNumber = fileNumber;
+    }
+
+    public boolean isClosed()
+    {
+        return closed.get();
+    }
+
+    public void close()
+            throws IOException
+    {
+        closed.set(true);
+    }
+
+    public void delete()
+    {
+        Closeables.closeQuietly(this);
+        // try to delete the file
+        getFile().delete();
+    }
+
+    public File getFile()
+    {
+        return file;
+    }
+
+    public long getFileNumber()
+    {
+        return fileNumber;
+    }
+
+    protected void buildRecord(final SliceInput sliceInput)
+            throws IOException
+    {
+        // Fragment the record into chunks as necessary and write it.  Note that if record
+        // is empty, we still want to iterate once to write a single
+        // zero-length chunk.
+
+        try (CloseableLogBuffer buffer = getWriter().requestSpace(new LongToIntFunction()
+        {
+            @Override
+            public int applyAsInt(long previousWrite)
+            {
+                return calculateWriteSize(previousWrite, sliceInput);
+            }
+        })) {
+            // used to track first, middle and last blocks
+            boolean begin = true;
+            int blockOffset = (int) (buffer.lastEndPosition % BLOCK_SIZE);
+            do {
+                int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
+                Preconditions.checkState(bytesRemainingInBlock >= 0);
+
+                // Switch to a new block if necessary
+                if (bytesRemainingInBlock < HEADER_SIZE) {
+                    if (bytesRemainingInBlock > 0) {
+                        // Fill the rest of the block with zeros
+                        // todo lame... need a better way to write zeros
+                        buffer.put(new byte[bytesRemainingInBlock]);
+                    }
+                    blockOffset = 0;
+                    bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
+                }
+
+                // Invariant: we never leave less than HEADER_SIZE bytes available in a block
+                int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE;
+                Preconditions.checkState(bytesAvailableInBlock >= 0);
+
+                // if there are more bytes in the record then there are available in the block,
+                // fragment the record; otherwise write to the end of the record
+                boolean end;
+                int fragmentLength;
+                if (sliceInput.available() > bytesAvailableInBlock) {
+                    end = false;
+                    fragmentLength = bytesAvailableInBlock;
+                }
+                else {
+                    end = true;
+                    fragmentLength = sliceInput.available();
+                }
+
+                // determine block type
+                LogChunkType type;
+                if (begin && end) {
+                    type = LogChunkType.FULL;
+                }
+                else if (begin) {
+                    type = LogChunkType.FIRST;
+                }
+                else if (end) {
+                    type = LogChunkType.LAST;
+                }
+                else {
+                    type = LogChunkType.MIDDLE;
+                }
+
+                // write the chunk
+                Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
+                blockOffset += appendChunk(buffer, type, sliceInput.readSlice(fragmentLength));
+
+                // we are no longer on the first chunk
+                begin = false;
+            }
+            while (sliceInput.isReadable());
+        }
+    }
+
+    private static int appendChunk(CloseableLogBuffer buffer, LogChunkType type, Slice slice)
+            throws IOException
+    {
+        final int length = slice.length();
+        Preconditions.checkArgument(length <= 0xffff, "length %s is larger than two bytes", length);
+
+        int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
+
+        // Format the header
+        buffer.putInt(crc);
+        buffer.put((byte) (length & 0xff));
+        buffer.put((byte) (length >>> 8));
+        buffer.put((byte) (type.getPersistentId()));
+
+        buffer.put(slice.toByteBuffer());
+
+        return HEADER_SIZE + slice.length();
+    }
+
+    public void addRecord(Slice record, boolean sync)
+            throws IOException
+    {
+        Preconditions.checkState(!isClosed(), "Log is closed");
+
+        buildRecord(record.input());
+
+        if (sync) {
+            sync();
+        }
+    }
+
+    abstract ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter();
+
+    abstract void sync()
             throws IOException;
 
-    void delete()
-            throws IOException;
+    /**
+     * calculates the size of this write's data within the log file given the previous writes position,
+     * taking into account new headers and padding around block boundaries
+     *
+     * @param previousWrite end position of the last record submitted for writing
+     * @param newData slice with new data to be written
+     * @return this write's size in bytes
+     */
+    public static int calculateWriteSize(long previousWrite, SliceInput newData)
+    {
+        int firstBlockWrite;
+        int dataRemaining = newData.available();
+        int remainingInBlock = BLOCK_SIZE - (int) (previousWrite % BLOCK_SIZE);
+        if (remainingInBlock < HEADER_SIZE) {
+            //zero fill
+            firstBlockWrite = remainingInBlock;
+        }
+        else {
+            remainingInBlock -= (firstBlockWrite = HEADER_SIZE);
+            if (remainingInBlock >= dataRemaining) {
+                //everything fits into the first block
+                return firstBlockWrite + dataRemaining;
+            }
+            firstBlockWrite += remainingInBlock;
+            dataRemaining -= remainingInBlock;
+        }
+        //all subsequent data goes into new blocks
+        final int headerCount = dataRemaining / (BLOCK_SIZE - HEADER_SIZE) + 1;
+        final int newBlockWrite = dataRemaining + (headerCount * HEADER_SIZE);
 
-    File getFile();
+        return newBlockWrite + firstBlockWrite;
+    }
 
-    long getFileNumber();
+    protected abstract static class CloseableLogBuffer
+            implements CloseableByteBuffer
+    {
+        private final long lastEndPosition;
 
-    // Writes a stream of chunks such that no chunk is split across a block boundary
-    void addRecord(Slice record, boolean force)
-            throws IOException;
+        protected CloseableLogBuffer(long startPosition)
+        {
+            super();
+            this.lastEndPosition = startPosition;
+        }
+
+        @Override
+        public abstract CloseableByteBuffer put(byte b)
+                throws IOException;
+
+        @Override
+        public abstract CloseableByteBuffer put(byte[] b)
+                throws IOException;
+
+        @Override
+        public abstract CloseableByteBuffer put(ByteBuffer b)
+                throws IOException;
+
+        @Override
+        public abstract CloseableByteBuffer putInt(int b)
+                throws IOException;
+
+        @Override
+        public abstract void close()
+                throws IOException;
+    }
 }

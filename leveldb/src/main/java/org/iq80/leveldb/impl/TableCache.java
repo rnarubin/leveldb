@@ -23,17 +23,19 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
+
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.table.FileChannelTable;
 import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Finalizer;
 import org.iq80.leveldb.util.InternalTableIterator;
 import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.ExecutionException;
@@ -43,7 +45,7 @@ public class TableCache
     private final LoadingCache<Long, TableAndFile> cache;
     private final Finalizer<Table> finalizer = new Finalizer<>(1);
 
-    public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums)
+    public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums, final boolean useMMap)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
 
@@ -64,7 +66,7 @@ public class TableCache
                     public TableAndFile load(Long fileNumber)
                             throws IOException
                     {
-                        return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums);
+                        return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums, useMMap);
                     }
                 });
     }
@@ -114,16 +116,32 @@ public class TableCache
     private static final class TableAndFile
     {
         private final Table table;
-        private final FileChannel fileChannel;
+        private FileChannel fileChannel;
 
-        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, boolean verifyChecksums)
+        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, boolean verifyChecksums, boolean useMMap)
                 throws IOException
         {
             String tableFileName = Filename.tableFileName(fileNumber);
             File tableFile = new File(databaseDir, tableFileName);
-            fileChannel = new FileInputStream(tableFile).getChannel();
+
             try {
-                if (Iq80DBFactory.USE_MMAP) {
+                fileChannel = new FileInputStream(tableFile).getChannel();
+            }
+            catch (FileNotFoundException ldbNotFound) {
+                try {
+                    // attempt to open older .sst extension
+                    tableFileName = Filename.sstTableFileName(fileNumber);
+                    tableFile = new File(databaseDir, tableFileName);
+                    fileChannel = new FileInputStream(tableFile).getChannel();
+                }
+                catch (FileNotFoundException sstNotFound) {
+                    throw new FileNotFoundException("Neither " + Filename.tableFileName(fileNumber)
+                            + " nor " + tableFileName + " could be found");
+                }
+            }
+
+            try {
+                if (useMMap) {
                     table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
                 }
                 else {

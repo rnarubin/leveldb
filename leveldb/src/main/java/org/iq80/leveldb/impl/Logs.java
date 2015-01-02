@@ -17,6 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.PureJavaCrc32C;
 import org.iq80.leveldb.util.Slice;
 
@@ -29,10 +30,10 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(File file, long fileNumber)
+    public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
-        if (Iq80DBFactory.USE_MMAP) {
+        if (options.useMMap()) {
             return new MMapLogWriter(file, fileNumber);
         }
         else {

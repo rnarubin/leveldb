@@ -26,6 +26,9 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
+
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
@@ -68,7 +71,7 @@ public class VersionSet
     private final AtomicLong nextFileNumber = new AtomicLong(2);
     private long manifestFileNumber = 1;
     private Version current;
-    private long lastSequence;
+    private AtomicLong lastSequence = new AtomicLong(0);
     private long logNumber;
     private long prevLogNumber;
 
@@ -76,16 +79,18 @@ public class VersionSet
     private final File databaseDir;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
+    private final Options options;
 
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator)
+    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, Options options)
             throws IOException
     {
         this.databaseDir = databaseDir;
         this.tableCache = tableCache;
         this.internalKeyComparator = internalKeyComparator;
+        this.options = options;
         appendVersion(new Version(this));
 
         initializeIfNeeded();
@@ -101,15 +106,15 @@ public class VersionSet
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
             edit.setNextFileNumber(nextFileNumber.get());
-            edit.setLastSequenceNumber(lastSequence);
+            edit.setLastSequenceNumber(lastSequence.get());
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber);
+            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
             try {
                 writeSnapshot(log);
-                log.addRecord(edit.encode(), false);
+                log.addRecord(edit.encode(), true);
             }
             finally {
-                log.close();
+               log.close();
             }
 
             Filename.setCurrentFile(databaseDir, log.getFileNumber());
@@ -239,13 +244,18 @@ public class VersionSet
 
     public long getLastSequence()
     {
-        return lastSequence;
+        return lastSequence.get();
+    }
+
+    public long getAndAddLastSequence(long delta)
+    {
+        return lastSequence.getAndAdd(delta);
     }
 
     public void setLastSequence(long newLastSequence)
     {
-        Preconditions.checkArgument(newLastSequence >= lastSequence, "Expected newLastSequence to be greater than or equal to current lastSequence");
-        this.lastSequence = newLastSequence;
+        Preconditions.checkArgument(newLastSequence >= lastSequence.get(), "Expected newLastSequence to be greater than or equal to current lastSequence");
+        this.lastSequence.set(newLastSequence);
     }
 
     public void logAndApply(VersionEdit edit)
@@ -264,7 +274,7 @@ public class VersionSet
         }
 
         edit.setNextFileNumber(nextFileNumber.get());
-        edit.setLastSequenceNumber(lastSequence);
+        edit.setLastSequenceNumber(lastSequence.get());
 
         Version version = new Version(this);
         Builder builder = new Builder(this, current);
@@ -279,7 +289,7 @@ public class VersionSet
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber);
+                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
@@ -298,8 +308,7 @@ public class VersionSet
             // New manifest file was not installed, so clean up state and delete the file
             if (createdNewManifest) {
                 descriptorLog.close();
-                // todo add delete method to LogWriter
-                new File(databaseDir, Filename.logFileName(descriptorLog.getFileNumber())).delete();
+                descriptorLog.delete();
                 descriptorLog = null;
             }
             throw e;
@@ -325,12 +334,13 @@ public class VersionSet
         edit.addFiles(current.getFiles());
 
         Slice record = edit.encode();
-        log.addRecord(record, false);
+        log.addRecord(record, true);
     }
 
     public void recover()
             throws IOException
     {
+
         // Read "CURRENT" file, which contains a pointer to the current manifest file
         File currentFile = new File(databaseDir, Filename.currentFileName());
         Preconditions.checkState(currentFile.exists(), "CURRENT file does not exist");
@@ -343,6 +353,7 @@ public class VersionSet
 
         // open file channel
         try (FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
+
             // read log edit log
             Long nextFileNumber = null;
             Long lastSequence = null;
@@ -399,7 +410,7 @@ public class VersionSet
             appendVersion(newVersion);
             manifestFileNumber = nextFileNumber;
             this.nextFileNumber.set(nextFileNumber + 1);
-            this.lastSequence = lastSequence;
+            this.lastSequence.set(lastSequence);
             this.logNumber = logNumber;
             this.prevLogNumber = prevLogNumber;
         }
@@ -564,6 +575,7 @@ public class VersionSet
         // See if we can grow the number of inputs in "level" without
         // changing the number of "level+1" files we pick up.
         if (!levelUpInputs.isEmpty()) {
+
             List<FileMetaData> expanded0 = getOverlappingInputs(level, allStart, allLimit);
 
             if (expanded0.size() > levelInputs.size()) {
@@ -754,6 +766,7 @@ public class VersionSet
         {
             FileMetaDataBySmallestKey cmp = new FileMetaDataBySmallestKey(versionSet.internalKeyComparator);
             for (int level = 0; level < baseVersion.numberOfLevels(); level++) {
+
                 // Merge the set of added files with the set of pre-existing files.
                 // Drop any deleted files.  Store the result in *v.
 

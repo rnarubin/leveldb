@@ -17,195 +17,177 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.CloseableByteBuffer;
+import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
+import org.iq80.leveldb.util.ObjectPools;
+import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.util.ObjectPool;
+import org.iq80.leveldb.util.ObjectPool.PooledObject;
+import org.iq80.leveldb.util.SizeOf;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
-import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class FileChannelLogWriter
-        implements LogWriter
+        extends LogWriter
 {
-    private final File file;
-    private final long fileNumber;
+
     private final FileChannel fileChannel;
-    private final AtomicBoolean closed = new AtomicBoolean();
+    private final ConcurrentFileWriter writer;
 
-    /**
-     * Current offset in the current block
-     */
-    private int blockOffset;
-
+    @SuppressWarnings("resource")
     public FileChannelLogWriter(File file, long fileNumber)
-            throws FileNotFoundException
-    {
-        Preconditions.checkNotNull(file, "file is null");
-        Preconditions.checkArgument(fileNumber >= 0, "fileNumber is negative");
-
-        this.file = file;
-        this.fileNumber = fileNumber;
-        this.fileChannel = new FileOutputStream(file).getChannel();
-    }
-
-    @Override
-    public boolean isClosed()
-    {
-        return closed.get();
-    }
-
-    @Override
-    public synchronized void close()
-    {
-        closed.set(true);
-
-        // try to forces the log to disk
-        try {
-            fileChannel.force(true);
-        }
-        catch (IOException ignored) {
-        }
-
-        // close the channel
-        Closeables.closeQuietly(fileChannel);
-    }
-
-    @Override
-    public synchronized void delete()
-    {
-        closed.set(true);
-
-        // close the channel
-        Closeables.closeQuietly(fileChannel);
-
-        // try to delete the file
-        file.delete();
-    }
-
-    @Override
-    public File getFile()
-    {
-        return file;
-    }
-
-    @Override
-    public long getFileNumber()
-    {
-        return fileNumber;
-    }
-
-    // Writes a stream of chunks such that no chunk is split across a block boundary
-    @Override
-    public synchronized void addRecord(Slice record, boolean force)
             throws IOException
     {
-        Preconditions.checkState(!closed.get(), "Log has been closed");
+        super(file, fileNumber);
+        this.fileChannel = new FileOutputStream(file, false).getChannel();
+        this.writer = new ConcurrentFileWriter();
+    }
 
-        SliceInput sliceInput = record.input();
+    protected ConcurrentFileWriter getWriter()
+    {
+        return this.writer;
+    }
 
-        // used to track first, middle and last blocks
-        boolean begin = true;
+    @Override
+    protected void sync()
+            throws IOException
+    {
+        fileChannel.force(false);
+    }
 
-        // Fragment the record int chunks as necessary and write it.  Note that if record
-        // is empty, we still want to iterate once to write a single
-        // zero-length chunk.
-        do {
-            int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
-            Preconditions.checkState(bytesRemainingInBlock >= 0);
+    @Override
+    public void close()
+            throws IOException
+    {
+        super.close();
+        fileChannel.close();
+    }
 
-            // Switch to a new block if necessary
-            if (bytesRemainingInBlock < HEADER_SIZE) {
-                if (bytesRemainingInBlock > 0) {
-                    // Fill the rest of the block with zeros
-                    // todo lame... need a better way to write zeros
-                    fileChannel.write(ByteBuffer.allocate(bytesRemainingInBlock));
+    private class ConcurrentFileWriter
+            implements ConcurrentNonCopyWriter<CloseableLogBuffer>
+    {
+        private final AtomicLong filePosition = new AtomicLong(0);
+        private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(64, 1024);
+
+        @Override
+        public CloseableLogBuffer requestSpace(int length)
+        {
+            return new CloseableFileLogBuffer(filePosition.getAndAdd(length), length);
+        }
+
+        @Override
+        public CloseableLogBuffer requestSpace(LongToIntFunction getLength)
+        {
+            long state;
+            int length;
+            do {
+                state = filePosition.get();
+            }
+            while (!filePosition.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
+
+            return new CloseableFileLogBuffer(state, length);
+        }
+
+        private class CloseableFileLogBuffer
+                extends CloseableLogBuffer
+        {
+            private long position;
+            private final long limit;
+            //use scratch space and a minimum flush size to improve small write performance
+            private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
+            private ByteBuffer buffer = scratch.get().order(ByteOrder.LITTLE_ENDIAN);
+
+            protected CloseableFileLogBuffer(final long startPosition, final int length)
+            {
+                super(startPosition);
+                this.position = startPosition;
+                this.limit = startPosition + length;
+            }
+
+            @Override
+            public CloseableByteBuffer put(byte b)
+                    throws IOException
+            {
+                checkCapacity(SizeOf.SIZE_OF_BYTE);
+                buffer.put(b);
+                return this;
+            }
+
+            @Override
+            public CloseableByteBuffer putInt(int b)
+                    throws IOException
+            {
+                checkCapacity(SizeOf.SIZE_OF_INT);
+                buffer.putInt(b);
+                return this;
+            }
+
+            private void checkCapacity(int size)
+                    throws IOException
+            {
+                if (size > buffer.remaining()) {
+                    buffer.flip();
+                    write(buffer);
+                    buffer.clear();
                 }
-                blockOffset = 0;
-                bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
             }
 
-            // Invariant: we never leave less than HEADER_SIZE bytes available in a block
-            int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE;
-            Preconditions.checkState(bytesAvailableInBlock >= 0);
-
-            // if there are more bytes in the record then there are available in the block,
-            // fragment the record; otherwise write to the end of the record
-            boolean end;
-            int fragmentLength;
-            if (sliceInput.available() > bytesAvailableInBlock) {
-                end = false;
-                fragmentLength = bytesAvailableInBlock;
-            }
-            else {
-                end = true;
-                fragmentLength = sliceInput.available();
+            @Override
+            public CloseableByteBuffer put(byte[] b)
+                    throws IOException
+            {
+                checkCapacity(b.length);
+                if (b.length > buffer.remaining()) {
+                    write(ByteBuffer.wrap(b));
+                }
+                else {
+                    buffer.put(b);
+                }
+                return this;
             }
 
-            // determine block type
-            LogChunkType type;
-            if (begin && end) {
-                type = LogChunkType.FULL;
-            }
-            else if (begin) {
-                type = LogChunkType.FIRST;
-            }
-            else if (end) {
-                type = LogChunkType.LAST;
-            }
-            else {
-                type = LogChunkType.MIDDLE;
+            @Override
+            public CloseableByteBuffer put(ByteBuffer b)
+                    throws IOException
+            {
+                checkCapacity(b.remaining());
+                if (b.remaining() > buffer.remaining() || b.isDirect()) {
+                    write(b);
+                }
+                else {
+                    buffer.put(b);
+                }
+                return this;
             }
 
-            // write the chunk
-            writeChunk(type, sliceInput.readSlice(fragmentLength));
+            private void write(ByteBuffer b)
+                    throws IOException
+            {
+                if (position + b.remaining() > limit) {
+                    throw new BufferOverflowException();
+                }
 
-            // we are no longer on the first chunk
-            begin = false;
-        } while (sliceInput.isReadable());
+                while (b.remaining() > 0) {
+                    position += fileChannel.write(b, position);
+                }
+            }
 
-        if (force) {
-            fileChannel.force(false);
+            @Override
+            public void close()
+                    throws IOException
+            {
+                buffer.flip();
+                write(buffer);
+                buffer = null;
+                scratch.close();
+            }
         }
-    }
-
-    private void writeChunk(LogChunkType type, Slice slice)
-            throws IOException
-    {
-        Preconditions.checkArgument(slice.length() <= 0xffff, "length %s is larger than two bytes", slice.length());
-        Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
-
-        // create header
-        Slice header = newLogRecordHeader(type, slice, slice.length());
-
-        // write the header and the payload
-        header.getBytes(0, fileChannel, header.length());
-        slice.getBytes(0, fileChannel, slice.length());
-
-        blockOffset += HEADER_SIZE + slice.length();
-    }
-
-    private Slice newLogRecordHeader(LogChunkType type, Slice slice, int length)
-    {
-        int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
-
-        // Format the header
-        SliceOutput header = Slices.allocate(HEADER_SIZE).output();
-        header.writeInt(crc);
-        header.writeByte((byte) (length & 0xff));
-        header.writeByte((byte) (length >>> 8));
-        header.writeByte((byte) (type.getPersistentId()));
-
-        return header.slice();
     }
 }

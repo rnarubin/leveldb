@@ -54,6 +54,7 @@ import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.table.BlockHelper;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -599,10 +600,29 @@ public class DBIteratorTest
         assertEquals(expected, items);
     }
 
-    private static void putAll(DB db, Iterable<Entry<String, String>> entries)
+    private static void putAll(final DB db, final List<Entry<String, String>> entries)
     {
-        for (Entry<String, String> e : entries) {
-            put(db, e.getKey(), e.getValue());
+       final int threadCount = 8;
+       List<Callable<Void>> work = new ArrayList<>(threadCount);
+       for (final List<Entry<String, String>> subset : Lists.partition(entries, entries.size() / threadCount)) {
+           work.add(new Callable<Void>()
+           {
+               @Override
+               public Void call()
+                       throws Exception
+               {
+                   for (Entry<String, String> e : subset) {
+                       put(db, e.getKey(), e.getValue());
+                   }
+                   return null;
+               }
+           });
+       }
+       try {
+           new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
+       }
+       catch (InterruptedException | ExecutionException e) {
+           Assert.fail("failed to insert into db", e);
         }
     }
 
