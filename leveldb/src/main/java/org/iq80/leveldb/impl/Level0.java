@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -35,15 +35,18 @@ import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.ValueType.VALUE;
 
 // todo this class should be immutable
-public class Level0 implements SeekingIterable<InternalKey, Slice>
+public class Level0
+        implements SeekingIterable<InternalKey, Slice>
 {
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
     private final List<FileMetaData> files;
 
-    public static final Comparator<FileMetaData> NEWEST_FIRST = new Comparator<FileMetaData>() {
+    public static final Comparator<FileMetaData> NEWEST_FIRST = new Comparator<FileMetaData>()
+    {
         @Override
-        public int compare(FileMetaData fileMetaData, FileMetaData fileMetaData1) {
+        public int compare(FileMetaData fileMetaData, FileMetaData fileMetaData1)
+        {
             return (int) (fileMetaData1.getNumber() - fileMetaData.getNumber());
         }
     };
@@ -138,7 +141,7 @@ public class Level0 implements SeekingIterable<InternalKey, Slice>
 
     private int findFile(InternalKey targetKey)
     {
-        if (files.size() == 0) {
+        if (files.isEmpty()) {
             return files.size();
         }
 

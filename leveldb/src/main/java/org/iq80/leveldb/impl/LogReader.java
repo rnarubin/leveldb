@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -20,8 +20,8 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.util.DynamicSliceOutput;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.SliceOutput;
+import org.iq80.leveldb.util.Slices;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;

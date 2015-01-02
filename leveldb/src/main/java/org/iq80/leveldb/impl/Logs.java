@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -18,8 +18,8 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.PureJavaCrc32C;
+import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,9 +33,10 @@ public final class Logs
     public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
-        if(options.useMMap()) {
+        if (options.useMMap()) {
             return new MMapLogWriter(file, fileNumber);
-        } else {
+        }
+        else {
             return new FileChannelLogWriter(file, fileNumber);
         }
     }
@@ -53,5 +54,4 @@ public final class Logs
         crc32C.update(buffer, offset, length);
         return crc32C.getMaskedValue();
     }
-    
 }

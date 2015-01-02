@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,8 +22,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
-
 import org.iq80.leveldb.util.DynamicSliceOutput;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -39,8 +37,8 @@ public class VersionEdit
     private Long previousLogNumber;
     private Long lastSequenceNumber;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
-    private final Multimap<Integer, FileMetaData> newFiles = Multimaps.synchronizedMultimap(ArrayListMultimap.<Integer, FileMetaData>create());
-    private final Multimap<Integer, Long> deletedFiles = Multimaps.synchronizedMultimap(ArrayListMultimap.<Integer, Long>create());
+    private final Multimap<Integer, FileMetaData> newFiles = ArrayListMultimap.create();
+    private final Multimap<Integer, Long> deletedFiles = ArrayListMultimap.create();
 
     public VersionEdit()
     {
@@ -49,7 +47,7 @@ public class VersionEdit
     public VersionEdit(Slice slice)
     {
         SliceInput sliceInput = slice.input();
-        while(sliceInput.isReadable()) {
+        while (sliceInput.isReadable()) {
             int i = VariableLengthQuantity.readVariableLengthInt(sliceInput);
             VersionEditTag tag = VersionEditTag.getValueTypeByPersistentId(i);
             tag.readValue(sliceInput, this);
@@ -134,7 +132,6 @@ public class VersionEdit
             InternalKey smallest,
             InternalKey largest)
     {
-
         FileMetaData fileMetaData = new FileMetaData(fileNumber, fileSize, smallest, largest);
         addFile(level, fileMetaData);
     }
@@ -148,7 +145,6 @@ public class VersionEdit
     {
         newFiles.putAll(files);
     }
-
 
     public Multimap<Integer, Long> getDeletedFiles()
     {
@@ -173,7 +169,7 @@ public class VersionEdit
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("VersionEdit");
         sb.append("{comparatorName='").append(comparatorName).append('\'');
         sb.append(", logNumber=").append(logNumber);

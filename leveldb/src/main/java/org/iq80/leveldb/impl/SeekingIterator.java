@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -21,7 +21,8 @@ import com.google.common.collect.PeekingIterator;
 
 import java.util.Map.Entry;
 
-public interface SeekingIterator<K,V> extends PeekingIterator<Entry<K, V>>
+public interface SeekingIterator<K, V>
+        extends PeekingIterator<Entry<K, V>>
 {
     /**
      * Repositions the iterator so the beginning of this block.

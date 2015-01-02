@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -90,7 +90,9 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 import static org.iq80.leveldb.util.Slices.readLengthPrefixedBytes;
 import static org.iq80.leveldb.util.Slices.writeLengthPrefixedBytes;
 
-public class DbImpl implements DB
+@SuppressWarnings("AccessingNonPublicFieldOfAnotherObject")
+public class DbImpl
+        implements DB
 {
     private final Options options;
     private final File databaseDir;
@@ -121,7 +123,7 @@ public class DbImpl implements DB
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.options = options;
 
-        if( this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available() ) {
+        if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.
             this.options.compressionType(CompressionType.NONE);
         }
@@ -133,7 +135,8 @@ public class DbImpl implements DB
         UserComparator userComparator;
         if (comparator != null) {
             userComparator = new CustomUserComparator(comparator);
-        }else{
+        }
+        else {
             userComparator = new BytewiseComparator();
         }
         internalKeyComparator = new InternalKeyComparator(userComparator);
@@ -219,8 +222,8 @@ public class DbImpl implements DB
             long logFileNumber = versions.getNextFileNumber();
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)), logFileNumber, options);
             this.memTables = new MemTables(
-                  new MemTableAndLog(new MemTable(internalKeyComparator), log),
-                  null);
+                    new MemTableAndLog(new MemTable(internalKeyComparator), log),
+                    null);
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -237,7 +240,9 @@ public class DbImpl implements DB
         }
     }
 
-    public void close() {
+    @Override
+    public void close()
+    {
         if (shuttingDown.getAndSet(true)) {
             return;
         }
@@ -247,7 +252,8 @@ public class DbImpl implements DB
             while (backgroundCompaction != null) {
                 backgroundCondition.awaitUninterruptibly();
             }
-        } finally {
+        }
+        finally {
             mutex.unlock();
         }
 
@@ -289,8 +295,9 @@ public class DbImpl implements DB
 
         for (File file : Filename.listFiles(databaseDir)) {
             FileInfo fileInfo = Filename.parseFileName(file);
-            if (fileInfo == null)
-              continue;
+            if (fileInfo == null) {
+                continue;
+            }
             long number = fileInfo.getFileNumber();
             boolean keep = true;
             switch (fileInfo.getFileType()) {
@@ -330,12 +337,13 @@ public class DbImpl implements DB
             }
         }
     }
+
     public void flushMemTable()
     {
         makeRoomForWrite(options.writeBufferSize()).release();
 
         // todo bg_error code
-        while(memTables.immutableExists()) {
+        while (memTables.immutableExists()) {
             memTables.waitForImmutableCompaction();
         }
     }
@@ -364,7 +372,6 @@ public class DbImpl implements DB
         finally {
             mutex.unlock();
         }
-
     }
 
     private void maybeScheduleCompaction()
@@ -391,7 +398,8 @@ public class DbImpl implements DB
                         backgroundCall();
                     }
                     catch (DatabaseShutdownException ignored) {
-                    } catch (Throwable e) {
+                    }
+                    catch (Throwable e) {
                         backgroundException = e;
                     }
                     return null;
@@ -400,9 +408,10 @@ public class DbImpl implements DB
         }
     }
 
-    public void checkBackgroundException() {
+    public void checkBackgroundException()
+    {
         Throwable e = backgroundException;
-        if(e!=null) {
+        if (e != null) {
             throw new BackgroundProcessingException(e);
         }
     }
@@ -454,13 +463,15 @@ public class DbImpl implements DB
             compaction = versions.compactRange(manualCompaction.level,
                     new InternalKey(manualCompaction.begin, MAX_SEQUENCE_NUMBER, ValueType.VALUE),
                     new InternalKey(manualCompaction.end, 0, ValueType.DELETION));
-        } else {
+        }
+        else {
             compaction = versions.pickCompaction();
         }
 
         if (compaction == null) {
             // no compaction
-        } else if (manualCompaction == null && compaction.isTrivialMove()) {
+        }
+        else if (manualCompaction == null && compaction.isTrivialMove()) {
             // Move file to next level
             Preconditions.checkState(compaction.getLevelInputs().size() == 1);
             FileMetaData fileMetaData = compaction.getLevelInputs().get(0);
@@ -468,7 +479,8 @@ public class DbImpl implements DB
             compaction.getEdit().addFile(compaction.getLevel() + 1, fileMetaData);
             versions.logAndApply(compaction.getEdit());
             // log
-        } else {
+        }
+        else {
             CompactionState compactionState = new CompactionState(compaction);
             doCompactionWork(compactionState);
             cleanupCompaction(compactionState);
@@ -486,7 +498,8 @@ public class DbImpl implements DB
 
         if (compactionState.builder != null) {
             compactionState.builder.abandon();
-        } else {
+        }
+        else {
             Preconditions.checkArgument(compactionState.outfile == null);
         }
 
@@ -500,9 +513,7 @@ public class DbImpl implements DB
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
         File file = new File(databaseDir, Filename.logFileName(fileNumber));
-        @SuppressWarnings("resource")
-        FileChannel channel = new FileInputStream(file).getChannel();
-        try {
+        try (FileChannel channel = new FileInputStream(file).getChannel()) {
             LogMonitor logMonitor = LogMonitors.logMonitor();
             LogReader logReader = new LogReader(channel, logMonitor, true, 0);
 
@@ -550,8 +561,6 @@ public class DbImpl implements DB
             }
 
             return maxSequence;
-        } finally {
-        	channel.close();
         }
     }
 
@@ -587,10 +596,10 @@ public class DbImpl implements DB
                 lookupResult = tables.immutable.memTable.get(lookupKey);
                 if (lookupResult != null) {
                     Slice value = lookupResult.getValue();
-					if (value == null) {
-						return null;
-					}
-					return value.getBytes();
+                    if (value == null) {
+                        return null;
+                    }
+                    return value.getBytes();
                 }
             }
         }
@@ -620,7 +629,7 @@ public class DbImpl implements DB
         }
         return null;
     }
-    
+
     @Override
     public void put(byte[] key, byte[] value)
             throws DBException
@@ -632,7 +641,7 @@ public class DbImpl implements DB
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
     {
-       return writeInternal(new WriteBatchImpl().put(key, value), options);
+        return writeInternal(new WriteBatchImpl().put(key, value), options);
     }
 
     @SuppressWarnings("resource")
@@ -668,19 +677,19 @@ public class DbImpl implements DB
     public Snapshot writeInternal(WriteBatchImpl updates, WriteOptions options)
             throws DBException
     {
-         checkBackgroundException();
-         long sequenceEnd;
-         if (updates.size() != 0) {
+        checkBackgroundException();
+        long sequenceEnd;
+        if (updates.size() != 0) {
 
-             throttleWritesIfNecessary();
+            throttleWritesIfNecessary();
 
-             MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
+            MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
-             try{
+            try {
                 // Get sequence numbers for this change set
                 final long sequenceDelta = updates.size();
-                final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta)+1;
-                sequenceEnd = sequenceBegin + sequenceDelta-1;
+                final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta) + 1;
+                sequenceEnd = sequenceBegin + sequenceDelta - 1;
 
                 // Log write
                 Slice record = writeWriteBatch(updates, sequenceBegin);
@@ -693,20 +702,21 @@ public class DbImpl implements DB
 
                 // Update memtable
                 updates.forEach(new InsertIntoHandler(memlog.memTable, sequenceBegin));
-             }
-             finally
-             {
+            }
+            finally {
                 memlog.release();
-             }
-         } else {
-             sequenceEnd = versions.getLastSequence();
-         }
+            }
+        }
+        else {
+            sequenceEnd = versions.getLastSequence();
+        }
 
-         if(options.snapshot()) {
-             return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
-         } else {
-             return null;
-         }
+        if (options.snapshot()) {
+            return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
+        }
+        else {
+            return null;
+        }
     }
 
     @Override
@@ -728,7 +738,6 @@ public class DbImpl implements DB
         mutex.lock();
         try {
             DbIterator rawIterator = internalIterator();
-
 
             // filter any entries not visible in our snapshot
             SnapshotImpl snapshot = getSnapshot(options);
@@ -797,106 +806,99 @@ public class DbImpl implements DB
 
     private void throttleWritesIfNecessary()
     {
-       if(!this.options.throttleLevel0())
-       {
-          return;
-       }
-       boolean allowDelay = true;
-       while(true)
-       {
-          if(allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) {
-             // We are getting close to hitting a hard limit on the number of
-             // L0 files.  Rather than delaying a single write by several
-             // seconds when we hit the hard limit, start delaying each
-             // individual write by 1ms to reduce latency variance.  Also,
-             // this delay hands over some CPU to the compaction thread in
-             // case it is sharing the same core as the writer.
-             try {
-                 Thread.sleep(1);
-             }
-             catch (InterruptedException e) {
-                 Thread.currentThread().interrupt();
-                 throw new RuntimeException(e);
-             }
-             allowDelay = false;
-          }
-          if(versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
-             try{
-                mutex.lock();
-                backgroundCondition.awaitUninterruptibly();
-             }
-             finally{
-                mutex.unlock();
-             }
-          }
-          else {
-             break;
-          }
-       }
+        if (!this.options.throttleLevel0()) {
+            return;
+        }
+        boolean allowDelay = true;
+        while (true) {
+            if (allowDelay && versions.numberOfFilesInLevel(0) > L0_SLOWDOWN_WRITES_TRIGGER) {
+                // We are getting close to hitting a hard limit on the number of
+                // L0 files.  Rather than delaying a single write by several
+                // seconds when we hit the hard limit, start delaying each
+                // individual write by 1ms to reduce latency variance.  Also,
+                // this delay hands over some CPU to the compaction thread in
+                // case it is sharing the same core as the writer.
+                try {
+                    Thread.sleep(1);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+                allowDelay = false;
+            }
+            if (versions.numberOfFilesInLevel(0) >= L0_STOP_WRITES_TRIGGER) {
+                try {
+                    mutex.lock();
+                    backgroundCondition.awaitUninterruptibly();
+                }
+                finally {
+                    mutex.unlock();
+                }
+            }
+            else {
+                break;
+            }
+        }
     }
 
     private MemTableAndLog makeRoomForWrite(int writeUsageSize)
     {
         int memtableMax = options.writeBufferSize();
         MemTableAndLog current;
-        do{
-           current = this.memTables.mutable.acquire();
-           long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
-           if(previousUsage <= memtableMax && previousUsage + writeUsageSize > memtableMax)
-           {
-              //this condition can only be true for one writer
-              //this writer is the one which exceeded the memtable buffer limit first
-              //so here we swap the memtables
+        do {
+            current = this.memTables.mutable.acquire();
+            long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
+            if (previousUsage <= memtableMax && previousUsage + writeUsageSize > memtableMax) {
+                //this condition can only be true for one writer
+                //this writer is the one which exceeded the memtable buffer limit first
+                //so here we swap the memtables
 
-              //if the previous memtable hasn't been flushed yet, we must wait
-              while(this.memTables.immutableExists())
-              {
-                 current.release();
-                 current.acquireAll(); //block other writers that might be spinning in wait for a new memtable
-                 try{
-                    this.memTables.waitForImmutableCompaction();
-                 }
-                 finally{
-                    current.releaseAll();
-                 }
-                 current.acquire();
-              }
+                //if the previous memtable hasn't been flushed yet, we must wait
+                while (this.memTables.immutableExists()) {
+                    current.release();
+                    current.acquireAll(); //block other writers that might be spinning in wait for a new memtable
+                    try {
+                        this.memTables.waitForImmutableCompaction();
+                    }
+                    finally {
+                        current.releaseAll();
+                    }
+                    current.acquire();
+                }
 
-              long logNumber = versions.getNextFileNumber();
-              try
-              {
-                 this.memTables = new MemTables(
-                       new MemTableAndLog(new MemTable(internalKeyComparator), Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options)),
-                       current);
-              }
-              catch (IOException e)
-              {
-                 //we've failed to create a new memtable and update mutable/immutable
-                 //other writers trying to acquire it (those spinning in this loop, or new writers) should be fail
-                 backgroundException = e;
-                 current.release();
-                 throw new DBException(e);
-              }
+                long logNumber = versions.getNextFileNumber();
+                try {
+                    this.memTables = new MemTables(
+                            new MemTableAndLog(new MemTable(internalKeyComparator), Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options)),
+                            current);
+                }
+                catch (IOException e) {
+                    //we've failed to create a new memtable and update mutable/immutable
+                    //other writers trying to acquire it (those spinning in this loop, or new writers) should be fail
+                    backgroundException = e;
+                    current.release();
+                    throw new DBException(e);
+                }
 
-              maybeScheduleCompaction();
-              break;
-           }
-           else if (previousUsage < memtableMax)
-           {
-              //this write can fit into the memtable
-              break;
-           }
-           else
-           {
-              //the write exceeds the memtable usage limit, but it was not the first to do so
-              //loop back and acquire the new memtable.
-              //incidentally, this means that the memtable's memory usage was incremented superfluously
-              //it won't receive any further writes, however, and the usage changes are only relevant to this function
+                maybeScheduleCompaction();
+                break;
+            }
+            else if (previousUsage < memtableMax) {
+                //this write can fit into the memtable
+                break;
+            }
+            else {
+                //the write exceeds the memtable usage limit, but it was not the first to do so
+                //loop back and acquire the new memtable.
+                //incidentally, this means that the memtable's memory usage was incremented superfluously
+                //it won't receive any further writes, however, and the usage changes are only relevant to this function
 
-              current.release();
-              checkBackgroundException();
-           }
-        } while(true);
+                current.release();
+                checkBackgroundException();
+            }
+        }
+        while (true);
 
         return current;
     }
@@ -904,7 +906,7 @@ public class DbImpl implements DB
     public void compactMemTable()
             throws IOException
     {
-         compactMemTableInternal();
+        compactMemTableInternal();
     }
 
     private void compactMemTableInternal()
@@ -971,16 +973,14 @@ public class DbImpl implements DB
 
     private FileMetaData buildTable(SeekingIterable<InternalKey, Slice> data, long fileNumber)
             throws IOException
-            {
+    {
         File file = new File(databaseDir, Filename.tableFileName(fileNumber));
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
-            @SuppressWarnings("resource")
             FileChannel channel = new FileOutputStream(file).getChannel();
             try {
                 TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalUserComparator(internalKeyComparator));
-
 
                 for (Entry<InternalKey, Slice> entry : data) {
                     // update keys
@@ -994,11 +994,13 @@ public class DbImpl implements DB
                 }
 
                 tableBuilder.finish();
-            } finally {
+            }
+            finally {
                 try {
-                    channel.force(true);
-                } finally {
-                    channel.close();
+                   channel.force(true);
+                }
+                finally {
+                   channel.close();
                 }
             }
 
@@ -1013,13 +1015,12 @@ public class DbImpl implements DB
             pendingOutputs.remove(fileNumber);
 
             return fileMetaData;
-
         }
         catch (IOException e) {
             file.delete();
             throw e;
         }
-            }
+    }
 
     private void doCompactionWork(CompactionState compactionState)
             throws IOException
@@ -1043,7 +1044,7 @@ public class DbImpl implements DB
             long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
             while (iterator.hasNext() && !shuttingDown.get()) {
                 // always give priority to compacting the current mem table
-                 compactMemTableInternal();
+                compactMemTableInternal();
 
                 InternalKey key = iterator.peek().getKey();
                 if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
@@ -1125,7 +1126,7 @@ public class DbImpl implements DB
     }
 
     @SuppressWarnings("resource")
-   private void openCompactionOutputFile(CompactionState compactionState)
+    private void openCompactionOutputFile(CompactionState compactionState)
             throws FileNotFoundException
     {
         Preconditions.checkNotNull(compactionState, "compactionState is null");
@@ -1305,10 +1306,12 @@ public class DbImpl implements DB
                 Slice key = readLengthPrefixedBytes(record);
                 Slice value = readLengthPrefixedBytes(record);
                 writeBatch.put(key, value);
-            } else if (valueType == DELETION) {
+            }
+            else if (valueType == DELETION) {
                 Slice key = readLengthPrefixedBytes(record);
                 writeBatch.delete(key);
-            } else {
+            }
+            else {
                 throw new IllegalStateException("Unexpected value type " + valueType);
             }
         }
@@ -1346,7 +1349,8 @@ public class DbImpl implements DB
         return record.slice(0, sliceOutput.size());
     }
 
-    private static class InsertIntoHandler implements Handler
+    private static class InsertIntoHandler
+            implements Handler
     {
         private long sequence;
         private final MemTable memTable;
@@ -1370,7 +1374,9 @@ public class DbImpl implements DB
         }
     }
 
-    public static class DatabaseShutdownException extends DBException {
+    public static class DatabaseShutdownException
+            extends DBException
+    {
         public DatabaseShutdownException()
         {
         }
@@ -1381,7 +1387,9 @@ public class DbImpl implements DB
         }
     }
 
-    public static class BackgroundProcessingException extends DBException {
+    public static class BackgroundProcessingException
+            extends DBException
+    {
         public BackgroundProcessingException(Throwable cause)
         {
             super(cause);
@@ -1389,120 +1397,124 @@ public class DbImpl implements DB
     }
 
     private Object suspensionMutex = new Object();
-    private int suspensionCounter=0;
+    private int suspensionCounter = 0;
 
     @Override
-    public void suspendCompactions() throws InterruptedException {
-        compactionExecutor.execute(new Runnable() {
+    public void suspendCompactions()
+            throws InterruptedException
+    {
+        compactionExecutor.execute(new Runnable()
+        {
             @Override
-            public void run() {
+            public void run()
+            {
                 try {
                     synchronized (suspensionMutex) {
-                        suspensionCounter ++;
+                        suspensionCounter++;
                         suspensionMutex.notifyAll();
-                        while( suspensionCounter > 0 && !compactionExecutor.isShutdown()) {
+                        while (suspensionCounter > 0 && !compactionExecutor.isShutdown()) {
                             suspensionMutex.wait(500);
                         }
                     }
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                 }
             }
         });
         synchronized (suspensionMutex) {
-            while(suspensionCounter < 1) {
+            while (suspensionCounter < 1) {
                 suspensionMutex.wait();
             }
         }
     }
 
     @Override
-    public void resumeCompactions() {
+    public void resumeCompactions()
+    {
         synchronized (suspensionMutex) {
-            suspensionCounter --;
+            suspensionCounter--;
             suspensionMutex.notifyAll();
         }
     }
 
     @Override
-    public void compactRange(byte[] begin, byte[] end) throws DBException {
+    public void compactRange(byte[] begin, byte[] end)
+            throws DBException
+    {
         throw new UnsupportedOperationException("Not yet implemented");
     }
 
     private static class MemTableAndLog
     {
-       //group the memtable and its accompanying log so that concurrent writes
-       //can't be split between structures and subsequently lost in crash
-       public final MemTable memTable;
-       public final LogWriter log;
+        //group the memtable and its accompanying log so that concurrent writes
+        //can't be split between structures and subsequently lost in crash
+        public final MemTable memTable;
+        public final LogWriter log;
 
-       private final ReadWriteLock lock = new SimpleReadWriteLock(true);
+        private final ReadWriteLock lock = new SimpleReadWriteLock(true);
 
-       public MemTableAndLog(MemTable memTable, LogWriter log)
-       {
-          this.memTable = memTable;
-          this.log = log;
-       }
+        public MemTableAndLog(MemTable memTable, LogWriter log)
+        {
+            this.memTable = memTable;
+            this.log = log;
+        }
 
-       public MemTableAndLog acquire()
-       {
-          lock.readLock().lock();
-          return this;
-       }
+        public MemTableAndLog acquire()
+        {
+            lock.readLock().lock();
+            return this;
+        }
 
-       public void release()
-       {
-          lock.readLock().unlock();
-       }
+        public void release()
+        {
+            lock.readLock().unlock();
+        }
 
-       public MemTableAndLog acquireAll()
-       {
-          lock.writeLock().lock();
-          return this;
-       }
+        public MemTableAndLog acquireAll()
+        {
+            lock.writeLock().lock();
+            return this;
+        }
 
-       public void releaseAll()
-       {
-          lock.writeLock().unlock();
-       }
-
+        public void releaseAll()
+        {
+            lock.writeLock().unlock();
+        }
     }
 
     private static class MemTables
     {
-       final MemTableAndLog mutable, immutable;
-       private final SettableFuture<?> immutableIsCompacting;
-       public MemTables(final MemTableAndLog mutable, MemTableAndLog immutable)
-       {
-          this.mutable = mutable;
-          this.immutable = immutable;
-          this.immutableIsCompacting = SettableFuture.<Void>create();
-          if(immutable == null)
-          {
-             finishCompaction();
-          }
-       }
+        final MemTableAndLog mutable, immutable;
+        private final SettableFuture<?> immutableIsCompacting;
 
-       void finishCompaction()
-       {
-          this.immutableIsCompacting.set(null);
-       }
+        public MemTables(final MemTableAndLog mutable, MemTableAndLog immutable)
+        {
+            this.mutable = mutable;
+            this.immutable = immutable;
+            this.immutableIsCompacting = SettableFuture.<Void>create();
+            if (immutable == null) {
+                finishCompaction();
+            }
+        }
 
-       boolean immutableExists()
-       {
-          return !this.immutableIsCompacting.isDone();
-       }
+        void finishCompaction()
+        {
+            this.immutableIsCompacting.set(null);
+        }
 
-       void waitForImmutableCompaction()
-       {
-          try
-         {
-            this.immutableIsCompacting.get();
-         }
-         catch (InterruptedException | ExecutionException e)
-         {
-            throw new DBException(e);
-         }
-       }
+        boolean immutableExists()
+        {
+            return !this.immutableIsCompacting.isDone();
+        }
+
+        void waitForImmutableCompaction()
+        {
+            try {
+                this.immutableIsCompacting.get();
+            }
+            catch (InterruptedException | ExecutionException e) {
+                throw new DBException(e);
+            }
+        }
     }
-
 }

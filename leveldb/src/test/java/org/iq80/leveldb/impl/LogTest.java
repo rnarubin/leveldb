@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -38,7 +38,6 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Callable;
@@ -52,13 +51,13 @@ import static org.testng.FileAssert.fail;
 
 public abstract class LogTest
 {
-   
-   protected LogTest(Options options)
-   {
-      this.options = options;
-   }
 
-    private final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
+    protected LogTest(Options options)
+    {
+        this.options = options;
+    }
+
+    private static final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
     {
         @Override
         public void corruption(long bytes, String reason)
@@ -90,12 +89,11 @@ public abstract class LogTest
         testLog(toSlice("dain sundstrom"));
     }
 
-
     @Test
     public void testMultipleSmallRecords()
             throws Exception
     {
-        List<Slice> records = Arrays.asList(
+        List<Slice> records = asList(
                 toSlice("Lagunitas  Little Sumpin’ Sumpin’"),
                 toSlice("Lagunitas IPA"),
                 toSlice("Lagunitas Imperial Stout"),
@@ -119,7 +117,7 @@ public abstract class LogTest
     public void testMultipleLargeRecords()
             throws Exception
     {
-        List<Slice> records = Arrays.asList(
+        List<Slice> records = asList(
                 toSlice("Lagunitas  Little Sumpin’ Sumpin’", 4000),
                 toSlice("Lagunitas IPA", 4000),
                 toSlice("Lagunitas Imperial Stout", 4000),
@@ -128,53 +126,56 @@ public abstract class LogTest
                 toSlice("Lagavulin", 4000));
 
         testLog(records);
-        
+
         testConcurrentLog(records, true, 3);
     }
-    
+
     @Test
-    public void testManySmallRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    public void testManySmallRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
     {
-       Random rand = new Random(0);
-       List<Slice> records = new ArrayList<>();
-       for(int i = 0; i < 1_000_000; i++) {
-          byte[] b = new byte[rand.nextInt(20)+5];
-          rand.nextBytes(b);
-          records.add(toSlice(new String(b, StandardCharsets.UTF_8)));
-       }
-       
-       testConcurrentLog(records, true, 8);
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 1_000_000; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8)));
+        }
+
+        testConcurrentLog(records, true, 8);
     }
-    
+
     @Test
-    public void testManyLargeRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    public void testManyLargeRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
     {
-       Random rand = new Random(0);
-       List<Slice> records = new ArrayList<>();
-       for(int i = 0; i < 10_000; i++) {
-          byte[] b = new byte[rand.nextInt(20)+5];
-          rand.nextBytes(b);
-          records.add(toSlice(new String(b, StandardCharsets.UTF_8), 4000));
-       }
-       
-       testConcurrentLog(records, true, 8);
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 10_000; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 4000));
+        }
+
+        testConcurrentLog(records, true, 8);
     }
-    
+
     @Test
-    public void testManyHugeRecordsConcurrently() throws InterruptedException, ExecutionException, IOException
+    public void testManyHugeRecordsConcurrently()
+            throws InterruptedException, ExecutionException, IOException
     {
-       //larger than page size to test mmap edges
-       Random rand = new Random(0);
-       List<Slice> records = new ArrayList<>();
-       for(int i = 0; i < 100; i++) {
-          byte[] b = new byte[rand.nextInt(20)+5];
-          rand.nextBytes(b);
-          records.add(toSlice(new String(b, StandardCharsets.UTF_8), 200000));
-       }
-       
-       testConcurrentLog(records, true, 8);
+        //larger than page size to test mmap edges
+        Random rand = new Random(0);
+        List<Slice> records = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            byte[] b = new byte[rand.nextInt(20) + 5];
+            rand.nextBytes(b);
+            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 200000));
+        }
+
+        testConcurrentLog(records, true, 8);
     }
-    
+
     @Test
     public void testReadWithoutProperClose()
             throws Exception
@@ -219,39 +220,42 @@ public abstract class LogTest
             Closeables.closeQuietly(fileChannel);
         }
     }
-    
-    private void testConcurrentLog(List<Slice> record, boolean closeWriter) throws InterruptedException, ExecutionException, IOException
-    {
-       testConcurrentLog(record, closeWriter, Runtime.getRuntime().availableProcessors());
-    }
-    
-    @SuppressWarnings("resource")
-    private void testConcurrentLog(List<Slice> record, boolean closeWriter, int threads) throws InterruptedException, ExecutionException, IOException
-    {
-       Multiset<Slice> recordBag = HashMultiset.create();
-       List<Callable<Void>> work = new ArrayList<>(record.size());
-       for(final Slice s:record) {
-          work.add(new Callable<Void>(){
-            @Override
-            public Void call() throws IOException
-            {
-               writer.addRecord(s, false);
-               return null;
-            }
-          });
-          recordBag.add(s);
-       }
-       new ConcurrencyHelper<Void>(threads).submitAll(work).close();
 
-       if(closeWriter) {
-          writer.close();
-       }
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter)
+            throws InterruptedException, ExecutionException, IOException
+    {
+        testConcurrentLog(record, closeWriter, Runtime.getRuntime().availableProcessors());
+    }
+
+    @SuppressWarnings("resource")
+    private void testConcurrentLog(List<Slice> record, boolean closeWriter, int threads)
+            throws InterruptedException, ExecutionException, IOException
+    {
+        Multiset<Slice> recordBag = HashMultiset.create();
+        List<Callable<Void>> work = new ArrayList<>(record.size());
+        for (final Slice s : record) {
+            work.add(new Callable<Void>()
+            {
+                @Override
+                public Void call()
+                        throws IOException
+                {
+                    writer.addRecord(s, false);
+                    return null;
+                }
+            });
+            recordBag.add(s);
+        }
+        new ConcurrencyHelper<Void>(threads).submitAll(work).close();
+
+        if (closeWriter) {
+            writer.close();
+        }
 
         try (FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel()) {
             LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
-            for(Slice actual = reader.readRecord(); actual != null; actual = reader.readRecord())
-            {
-               Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
+            for (Slice actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
+                Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
             }
             Assert.assertEquals(recordBag.size(), 0, "Not all added slices found in log");
         }
@@ -288,20 +292,22 @@ public abstract class LogTest
         }
         return slice;
     }
-    
-    public static class FileLogTest extends LogTest
+
+    public static class FileLogTest
+            extends LogTest
     {
-      public FileLogTest()
-      {
-         super(new Options().useMMap(false));
-      }
+        public FileLogTest()
+        {
+            super(new Options().useMMap(false));
+        }
     }
-    
-    public static class MMapLogTest extends LogTest
+
+    public static class MMapLogTest
+            extends LogTest
     {
-       public MMapLogTest()
-       {
-          super(new Options().useMMap(true));
-       }
+        public MMapLogTest()
+        {
+            super(new Options().useMMap(true));
+        }
     }
 }

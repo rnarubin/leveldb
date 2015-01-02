@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -28,9 +28,10 @@ import java.util.Map.Entry;
 
 import static com.google.common.collect.Lists.newArrayList;
 
-public class WriteBatchImpl implements WriteBatch
+public class WriteBatchImpl
+        implements WriteBatch
 {
-    private List<Entry<Slice, Slice>> batch = newArrayList();
+    private final List<Entry<Slice, Slice>> batch = newArrayList();
     private int approximateSize;
 
     public int getApproximateSize()
@@ -98,11 +99,10 @@ public class WriteBatchImpl implements WriteBatch
         }
     }
 
-    public static interface Handler
+    public interface Handler
     {
         void put(Slice key, Slice value);
 
         void delete(Slice key);
     }
-
 }

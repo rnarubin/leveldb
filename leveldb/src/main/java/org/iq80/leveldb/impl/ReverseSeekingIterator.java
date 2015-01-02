@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,8 +19,10 @@ package org.iq80.leveldb.impl;
 
 import java.util.Map.Entry;
 
-public interface ReverseSeekingIterator<K,V> extends SeekingIterator<K, V>, ReversePeekingIterator<Entry<K,V>>
+public interface ReverseSeekingIterator<K, V>
+        extends SeekingIterator<K, V>, ReversePeekingIterator<Entry<K, V>>
 {
     void seekToLast(); // next() will be the last element
+
     void seekToEnd();  // hasNext() will be false, prev() will be the last element
 }

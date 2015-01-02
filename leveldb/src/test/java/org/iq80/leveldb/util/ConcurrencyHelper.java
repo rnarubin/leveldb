@@ -10,46 +10,47 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-public class ConcurrencyHelper<T> implements AutoCloseable
+public class ConcurrencyHelper<T>
+        implements AutoCloseable
 {
-   ExecutorService threadPool;
-   List<Future<T>> pendingWork;
+    ExecutorService threadPool;
+    List<Future<T>> pendingWork;
 
-   public ConcurrencyHelper()
-   {
-      this(Runtime.getRuntime().availableProcessors());
-   }
+    public ConcurrencyHelper()
+    {
+        this(Runtime.getRuntime().availableProcessors());
+    }
 
-   public ConcurrencyHelper(int threads)
-   {
-      threadPool = Executors.newFixedThreadPool(threads);
-      pendingWork = new ArrayList<>();
-   }
-   
-   public ConcurrencyHelper<T> submitAll(Collection<Callable<T>> callables)
-   {
-      for(Callable<T> c:callables)
-      {
-         pendingWork.add(threadPool.submit(c));
-      }
-      return this;
-   }
-   
-   public List<T> waitForFinish() throws InterruptedException, ExecutionException
-   {
-      List<T> ret = new ArrayList<>(pendingWork.size());
-      for(Future<T> f:pendingWork)
-      {
-         ret.add(f.get());
-      }
-      pendingWork.clear();
-      return ret;
-   }
+    public ConcurrencyHelper(int threads)
+    {
+        threadPool = Executors.newFixedThreadPool(threads);
+        pendingWork = new ArrayList<>();
+    }
 
-   @Override
-   public void close() throws InterruptedException, ExecutionException
-   {
-      threadPool.shutdown();
-      threadPool.awaitTermination(1, TimeUnit.DAYS);
-   }
+    public ConcurrencyHelper<T> submitAll(Collection<Callable<T>> callables)
+    {
+        for (Callable<T> c : callables) {
+            pendingWork.add(threadPool.submit(c));
+        }
+        return this;
+    }
+
+    public List<T> waitForFinish()
+            throws InterruptedException, ExecutionException
+    {
+        List<T> ret = new ArrayList<>(pendingWork.size());
+        for (Future<T> f : pendingWork) {
+            ret.add(f.get());
+        }
+        pendingWork.clear();
+        return ret;
+    }
+
+    @Override
+    public void close()
+            throws InterruptedException, ExecutionException
+    {
+        threadPool.shutdown();
+        threadPool.awaitTermination(1, TimeUnit.DAYS);
+    }
 }

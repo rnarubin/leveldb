@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -25,16 +25,20 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
 
-public class FileUtils
+public final class FileUtils
 {
     private static final int TEMP_DIR_ATTEMPTS = 10000;
+
+    private FileUtils()
+    {
+    }
 
     public static boolean isSymbolicLink(File file)
     {
         try {
-            final File canonicalFile = file.getCanonicalFile();
-            final File absoluteFile = file.getAbsoluteFile();
-            final File parentFile = file.getParentFile();
+            File canonicalFile = file.getCanonicalFile();
+            File absoluteFile = file.getAbsoluteFile();
+            File parentFile = file.getParentFile();
             // a symbolic link has a different name between the canonical and absolute path
             return !canonicalFile.getName().equals(absoluteFile.getName()) ||
                     // or the canonical parent path is not the same as the file's parent path,

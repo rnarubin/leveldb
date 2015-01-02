@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -43,7 +43,7 @@ import java.util.concurrent.ExecutionException;
 public class TableCache
 {
     private final LoadingCache<Long, TableAndFile> cache;
-    private final Finalizer<Table> finalizer = new Finalizer<Table>(1);
+    private final Finalizer<Table> finalizer = new Finalizer<>(1);
 
     public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums, final boolean useMMap)
     {
@@ -51,15 +51,21 @@ public class TableCache
 
         cache = CacheBuilder.newBuilder()
                 .maximumSize(tableCacheSize)
-                .removalListener(new RemovalListener<Long, TableAndFile>() {
-                    public void onRemoval(RemovalNotification<Long, TableAndFile> notification) {
+                .removalListener(new RemovalListener<Long, TableAndFile>()
+                {
+                    @Override
+                    public void onRemoval(RemovalNotification<Long, TableAndFile> notification)
+                    {
                         Table table = notification.getValue().getTable();
                         finalizer.addCleanup(table, table.closer());
                     }
                 })
-                .build(new CacheLoader<Long, TableAndFile>() {
+                .build(new CacheLoader<Long, TableAndFile>()
+                {
+                    @Override
                     public TableAndFile load(Long fileNumber)
-                            throws IOException {
+                            throws IOException
+                    {
                         return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums, useMMap);
                     }
                 });
@@ -75,7 +81,8 @@ public class TableCache
         return new InternalTableIterator(getTable(number).iterator());
     }
 
-    public long getApproximateOffsetOf(FileMetaData file, Slice key) {
+    public long getApproximateOffsetOf(FileMetaData file, Slice key)
+    {
         return getTable(file.getNumber()).getApproximateOffsetOf(key);
     }
 
@@ -95,7 +102,8 @@ public class TableCache
         return table;
     }
 
-    public void close() {
+    public void close()
+    {
         cache.invalidateAll();
         finalizer.destroy();
     }
@@ -116,26 +124,27 @@ public class TableCache
             String tableFileName = Filename.tableFileName(fileNumber);
             File tableFile = new File(databaseDir, tableFileName);
 
-            try{
-               fileChannel = new FileInputStream(tableFile).getChannel();
+            try {
+                fileChannel = new FileInputStream(tableFile).getChannel();
             }
-            catch(FileNotFoundException ldbNotFound){
-               try{
-                  // attempt to open older .sst extension
-                  tableFileName = Filename.sstTableFileName(fileNumber);
-                  tableFile = new File(databaseDir, tableFileName);
-                  fileChannel = new FileInputStream(tableFile).getChannel();
-               }
-               catch(FileNotFoundException sstNotFound){
-                  throw new FileNotFoundException("Neither " + Filename.tableFileName(fileNumber)
-                        + " nor " + tableFileName + " could be found");
-               }
+            catch (FileNotFoundException ldbNotFound) {
+                try {
+                    // attempt to open older .sst extension
+                    tableFileName = Filename.sstTableFileName(fileNumber);
+                    tableFile = new File(databaseDir, tableFileName);
+                    fileChannel = new FileInputStream(tableFile).getChannel();
+                }
+                catch (FileNotFoundException sstNotFound) {
+                    throw new FileNotFoundException("Neither " + Filename.tableFileName(fileNumber)
+                            + " nor " + tableFileName + " could be found");
+                }
             }
 
             try {
                 if (useMMap) {
                     table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
-                } else {
+                }
+                else {
                     table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
                 }
             }
@@ -150,5 +159,4 @@ public class TableCache
             return table;
         }
     }
-
 }

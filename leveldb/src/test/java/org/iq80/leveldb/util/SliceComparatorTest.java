@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -35,13 +35,13 @@ public class SliceComparatorTest
                 > 0);
 
         assertTrue(SLICE_COMPARATOR.compare(
-                Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
-                Slices.wrappedBuffer(new byte[]{(byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00}))
+                Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
+                Slices.wrappedBuffer(new byte[] {(byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00}))
                 > 0);
 
         assertTrue(SLICE_COMPARATOR.compare(
-                Slices.wrappedBuffer(new byte[]{(byte) 0xFF}),
-                Slices.wrappedBuffer(new byte[]{(byte) 0x00}))
+                Slices.wrappedBuffer(new byte[] {(byte) 0xFF}),
+                Slices.wrappedBuffer(new byte[] {(byte) 0x00}))
                 > 0);
 
         assertAllEqual(Slices.copiedBuffer("abcdefghijklmnopqrstuvwxyz", Charsets.UTF_8),
@@ -63,5 +63,4 @@ public class SliceComparatorTest
             assertTrue(SLICE_COMPARATOR.compare(slice, left.slice(0, i)) > 0);
         }
     }
-
 }

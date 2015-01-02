@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,7 +22,8 @@ public enum ValueType
     DELETION(0x00),
     VALUE(0x01);
 
-    public static ValueType getValueTypeByPersistentId(int persistentId) {
+    public static ValueType getValueTypeByPersistentId(int persistentId)
+    {
         switch (persistentId) {
             case 0:
                 return DELETION;

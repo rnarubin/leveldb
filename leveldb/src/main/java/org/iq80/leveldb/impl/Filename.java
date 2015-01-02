@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -26,8 +26,12 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.List;
 
-public class Filename
+public final class Filename
 {
+    private Filename()
+    {
+    }
+
     public enum FileType
     {
         LOG,
@@ -161,6 +165,7 @@ public class Filename
     /**
      * Make the CURRENT file point to the descriptor file with the
      * specified number.
+     *
      * @return true if successful; false otherwise
      */
     public static boolean setCurrentFile(File databaseDir, long descriptorNumber)
@@ -180,19 +185,18 @@ public class Filename
         }
         return ok;
     }
-    
-    private static void writeStringToFileSync(String str, File file) throws IOException
+
+    private static void writeStringToFileSync(String str, File file)
+            throws IOException
     {
         FileOutputStream stream = new FileOutputStream(file);
-        try
-        {
-           stream.write(str.getBytes(Charsets.UTF_8));
-           stream.flush();
-           stream.getFD().sync();
+        try {
+            stream.write(str.getBytes(Charsets.UTF_8));
+            stream.flush();
+            stream.getFD().sync();
         }
-        finally
-        {
-           stream.close();
+        finally {
+            stream.close();
         }
     }
 
@@ -224,8 +228,8 @@ public class Filename
 
     public static class FileInfo
     {
-        private FileType fileType;
-        private long fileNumber;
+        private final FileType fileType;
+        private final long fileNumber;
 
         public FileInfo(FileType fileType)
         {

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,11 +19,12 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.util.Slice;
 
-public class BytewiseComparator implements UserComparator
+public class BytewiseComparator
+        implements UserComparator
 {
-
     @Override
-    public String name() {
+    public String name()
+    {
         return "leveldb.BytewiseComparator";
     }
 
@@ -65,7 +66,7 @@ public class BytewiseComparator implements UserComparator
             int b = key.getUnsignedByte(i);
             if (b != 0xff) {
                 Slice result = key.copySlice(0, i + 1);
-                result.setByte(i, b +1);
+                result.setByte(i, b + 1);
                 return result;
             }
         }

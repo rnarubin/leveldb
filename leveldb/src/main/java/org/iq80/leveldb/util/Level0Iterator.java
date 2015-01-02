@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2011 the original author or authors.
+ * See the notice.md file distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.iq80.leveldb.util;
 
 import com.google.common.collect.ImmutableList;
@@ -16,7 +33,9 @@ import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
-public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public final class Level0Iterator
+        extends AbstractSeekingIterator<InternalKey, Slice>
+        implements InternalIterator
 {
     private final List<InternalTableIterator> inputs;
     private final PriorityQueue<ComparableIterator> priorityQueue;
@@ -31,7 +50,7 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
         this.inputs = builder.build();
         this.comparator = comparator;
 
-        this.priorityQueue = new PriorityQueue<ComparableIterator>(Iterables.size(inputs) + 1);
+        this.priorityQueue = new PriorityQueue<>(Iterables.size(inputs) + 1);
         resetPriorityQueue(comparator);
     }
 
@@ -40,7 +59,7 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
         this.inputs = inputs;
         this.comparator = comparator;
 
-        this.priorityQueue = new PriorityQueue<ComparableIterator>(Iterables.size(inputs));
+        this.priorityQueue = new PriorityQueue<>(Iterables.size(inputs));
         resetPriorityQueue(comparator);
     }
 
@@ -89,7 +108,7 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("MergingIterator");
         sb.append("{inputs=").append(Iterables.toString(inputs));
         sb.append(", comparator=").append(comparator);
@@ -97,11 +116,13 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
         return sb.toString();
     }
 
-    private static class ComparableIterator implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator> {
+    private static class ComparableIterator
+            implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
+    {
         private final SeekingIterator<InternalKey, Slice> iterator;
         private final Comparator<InternalKey> comparator;
         private final int ordinal;
-        private Entry<InternalKey,Slice> nextElement;
+        private Entry<InternalKey, Slice> nextElement;
 
         private ComparableIterator(SeekingIterator<InternalKey, Slice> iterator, Comparator<InternalKey> comparator, int ordinal, Entry<InternalKey, Slice> nextElement)
         {
@@ -117,6 +138,7 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
             return nextElement != null;
         }
 
+        @Override
         public Entry<InternalKey, Slice> next()
         {
             if (nextElement == null) {
@@ -126,7 +148,8 @@ public final class Level0Iterator extends AbstractSeekingIterator<InternalKey, S
             Entry<InternalKey, Slice> result = nextElement;
             if (iterator.hasNext()) {
                 nextElement = iterator.next();
-            } else {
+            }
+            else {
                 nextElement = null;
             }
             return result;

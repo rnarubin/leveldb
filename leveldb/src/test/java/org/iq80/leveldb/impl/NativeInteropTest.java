@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -17,89 +17,124 @@
  */
 package org.iq80.leveldb.impl;
 
-import junit.framework.TestCase;
-import org.iq80.leveldb.*;
+import org.iq80.leveldb.DB;
+import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.DBFactory;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.ReadOptions;
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.FileUtils;
+import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public class NativeInteropTest extends TestCase {
+public class NativeInteropTest
+{
+    private static final AtomicInteger NEXT_ID = new AtomicInteger();
 
-    File databaseDir = FileUtils.createTempDir("leveldb");
-    
-    public static byte[] bytes(String value) {
-        if( value == null) {
+    private final File databaseDir = FileUtils.createTempDir("leveldb");
+
+    public static byte[] bytes(String value)
+    {
+        if (value == null) {
             return null;
         }
         try {
             return value.getBytes("UTF-8");
-        } catch (UnsupportedEncodingException e) {
+        }
+        catch (UnsupportedEncodingException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static String asString(byte value[]) {
-        if( value == null) {
+    public static String asString(byte[] value)
+    {
+        if (value == null) {
             return null;
         }
         try {
             return new String(value, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
+        }
+        catch (UnsupportedEncodingException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public void assertEquals(byte[] arg1, byte[] arg2) {
-        assertTrue(asString(arg1)+" != "+asString(arg2), Arrays.equals(arg1, arg2));
+    public static void assertEquals(byte[] arg1, byte[] arg2)
+    {
+        assertTrue(Arrays.equals(arg1, arg2), asString(arg1) + " != " + asString(arg2));
     }
 
-    DBFactory iq80factory = Iq80DBFactory.factory;
-    DBFactory jnifactory = Iq80DBFactory.factory;
+    private final DBFactory iq80factory = Iq80DBFactory.factory;
+    private final DBFactory jnifactory;
 
-    public NativeInteropTest() {
+    public NativeInteropTest()
+    {
+        DBFactory jnifactory = Iq80DBFactory.factory;
         try {
             ClassLoader cl = NativeInteropTest.class.getClassLoader();
             jnifactory = (DBFactory) cl.loadClass("org.fusesource.leveldbjni.JniDBFactory").newInstance();
-        } catch (Throwable e) {
+        }
+        catch (Throwable e) {
             // We cannot create a JniDBFactory on windows :( so just use a Iq80DBFactory for both
             // to avoid test failures.
         }
+        this.jnifactory = jnifactory;
     }
 
-    File getTestDirectory(String name) throws IOException {
+    File getTestDirectory(String name)
+            throws IOException
+    {
         File rc = new File(databaseDir, name);
         iq80factory.destroy(rc, new Options().createIfMissing(true));
         rc.mkdirs();
         return rc;
     }
 
-    public void testCRUDviaIQ80() throws IOException, DBException {
+    @Test
+    public void testCRUDviaIQ80()
+            throws IOException, DBException
+    {
         crud(iq80factory, iq80factory);
     }
 
-    public void testCRUDviaJNI() throws IOException, DBException {
+    @Test
+    public void testCRUDviaJNI()
+            throws IOException, DBException
+    {
         crud(jnifactory, jnifactory);
     }
 
-    public void testCRUDviaIQ80thenJNI() throws IOException, DBException {
+    @Test
+    public void testCRUDviaIQ80thenJNI()
+            throws IOException, DBException
+    {
         crud(iq80factory, jnifactory);
     }
 
-    public void testCRUDviaJNIthenIQ80() throws IOException, DBException {
+    @Test
+    public void testCRUDviaJNIthenIQ80()
+            throws IOException, DBException
+    {
         crud(jnifactory, iq80factory);
     }
 
-    public void crud(DBFactory firstFactory, DBFactory secondFactory) throws IOException, DBException {
-
+    public void crud(DBFactory firstFactory, DBFactory secondFactory)
+            throws IOException, DBException
+    {
         Options options = new Options().createIfMissing(true);
 
-        File path = getTestDirectory(getName());
+        File path = getTestDirectory(getClass().getName() + "_" + NEXT_ID.incrementAndGet());
         DB db = firstFactory.open(path, options);
 
         WriteOptions wo = new WriteOptions().sync(false);
@@ -130,5 +165,4 @@ public class NativeInteropTest extends TestCase {
 
         db.close();
     }
-
 }

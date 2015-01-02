@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -89,12 +89,11 @@ public class DbImplTest
         options.createIfMissing(true);
         DbImpl db = new DbImpl(options, this.databaseDir);
         Random random = new Random(301);
-        for(int i=0; i < 200000*STRESS_FACTOR; i++)
-        {
-            db.put(randomString(random, 64).getBytes(), new byte[]{0x01}, new WriteOptions().sync(false));
+        for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+            db.put(randomString(random, 64).getBytes(), new byte[] {0x01}, new WriteOptions().sync(false));
             db.get(randomString(random, 64).getBytes());
-            if ((i%50000)==0 && i!=0 ) {
-                System.out.println(i+" rows written");
+            if ((i % 50000) == 0 && i != 0) {
+                System.out.println(i + " rows written");
             }
         }
     }
@@ -268,7 +267,6 @@ public class DbImplTest
         assertEquals(db.get("a"), "va");
         assertEquals(db.get("f"), "vf");
         assertEquals(db.get("x"), "vx");
-
     }
 
     @Test
@@ -345,7 +343,6 @@ public class DbImplTest
         assertEquals(db.get("foo"), "v4");
         assertEquals(db.get("bar"), "v2");
         assertEquals(db.get("baz"), "v5");
-
     }
 
     @Test
@@ -379,7 +376,6 @@ public class DbImplTest
         assertEquals(db.get("bar"), "v2");
         assertEquals(db.get("big1"), longString(10000000, 'x'));
         assertEquals(db.get("big2"), longString(1000, 'y'));
-
     }
 
     @Test
@@ -409,7 +405,6 @@ public class DbImplTest
         for (int i = 0; i < n; i++) {
             assertEquals(db.get(key(i)), key(i) + longString(1000, 'v'));
         }
-
     }
 
     @Test
@@ -444,7 +439,7 @@ public class DbImplTest
         Random random = new Random(301);
         List<String> values = newArrayList();
         for (int i = 0; i < 80; i++) {
-            String value = randomString(random, 100*1024);
+            String value = randomString(random, 100 * 1024);
             db.put(key(i), value);
             values.add(value);
         }
@@ -786,7 +781,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 immutableEntry("beer/ipa", "Lagunitas IPA"),
                 immutableEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -803,7 +798,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 immutableEntry("beer/ipa", "Lagunitas IPA"),
                 immutableEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -812,24 +807,24 @@ public class DbImplTest
                 immutableEntry("scotch/strong", "Lagavulin"));
 
         for (int i = 1; i < entries.size(); i++) {
-           List<Entry<String, String>> incrementalEntries = new ArrayList<Entry<String, String>>();
-           for(Entry<String, String> e:entries){
-              incrementalEntries.add(immutableEntry(e.getKey(), "v"+i+":"+e.getValue()));
-           }
+            List<Entry<String, String>> incrementalEntries = new ArrayList<Entry<String, String>>();
+            for (Entry<String, String> e : entries) {
+                incrementalEntries.add(immutableEntry(e.getKey(), "v" + i + ":" + e.getValue()));
+            }
             testDb(db, incrementalEntries);
         }
     }
 
-    @Test (expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
     public void testCantCreateDirectoryReturnMessage()
-        throws Exception
+            throws Exception
     {
         new DbStringWrapper(new Options(), new File(DOES_NOT_EXIST_FILENAME));
     }
 
-    @Test (expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
     public void testDBDirectoryIsFileRetrunMessage()
-        throws Exception
+            throws Exception
     {
         File databaseFile = new File(databaseDir + "/imafile");
         assertTrue(databaseFile.createNewFile());
@@ -854,7 +849,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options().comparator(new ReverseDBComparator()), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("scotch/strong", "Lagavulin"),
                 immutableEntry("scotch/medium", "Highland Park"),
                 immutableEntry("scotch/light", "Oban 14"),
@@ -876,37 +871,40 @@ public class DbImplTest
 
         assertFalse(seekingIterator.hasNext());
     }
-    
-    @Test
-    public void testConcurrentPuts() throws Exception
-    {
-       DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(1024), databaseDir);
 
-       Random rand = new Random(0);
-       List<Entry<String, String>> entries = new ArrayList<>();
-       for(int i = 0; i < 1_000; i++){
-          //append i to key to ensure unique keys so that iteration doesn't have to handle key shadowing
-          //this isn't really a test for iteration, so it's not an issue
-          entries.add(Maps.immutableEntry(randomString(rand, rand.nextInt(50)+5)+i, randomString(rand, rand.nextInt(1500)+5)));
-       }
-       Collections.sort(entries, new Comparator<Entry<String, String>>(){
-          @Override
-          public int compare(Entry<String, String> a, Entry<String, String> b)
-          {
-            return a.getKey().compareTo(b.getKey());
-          }
-       });
-       testDb(db, entries, 8);
+    @Test
+    public void testConcurrentPuts()
+            throws Exception
+    {
+        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(1024), databaseDir);
+
+        Random rand = new Random(0);
+        List<Entry<String, String>> entries = new ArrayList<>();
+        for (int i = 0; i < 1_000; i++) {
+            //append i to key to ensure unique keys so that iteration doesn't have to handle key shadowing
+            //this isn't really a test for iteration, so it's not an issue
+            entries.add(Maps.immutableEntry(randomString(rand, rand.nextInt(50) + 5) + i, randomString(rand, rand.nextInt(1500) + 5)));
+        }
+        Collections.sort(entries, new Comparator<Entry<String, String>>()
+        {
+            @Override
+            public int compare(Entry<String, String> a, Entry<String, String> b)
+            {
+                return a.getKey().compareTo(b.getKey());
+            }
+        });
+        testDb(db, entries, 8);
     }
 
-    private void testDb(DbStringWrapper db, Entry<String, String>... entries)
+    @SafeVarargs
+    private final void testDb(DbStringWrapper db, Entry<String, String>... entries)
             throws IOException, InterruptedException, ExecutionException
     {
         testDb(db, asList(entries));
     }
-    
+
     private void testDb(DbStringWrapper db, List<Entry<String, String>> entries)
-          throws IOException, InterruptedException, ExecutionException
+            throws IOException, InterruptedException, ExecutionException
     {
         testDb(db, entries, 1);
     }
@@ -914,32 +912,32 @@ public class DbImplTest
     private void testDb(final DbStringWrapper db, List<Entry<String, String>> entries, final int threadCount)
             throws IOException, InterruptedException, ExecutionException
     {
-       
-       List<Entry<String, String>> reverseEntries = newArrayList(entries);
-       Collections.reverse(reverseEntries);
 
-        if(threadCount == 1) {
-           for (Entry<String, String> entry : entries) {
-               db.put(entry.getKey(), entry.getValue());
-           }
+        List<Entry<String, String>> reverseEntries = newArrayList(entries);
+        Collections.reverse(reverseEntries);
+
+        if (threadCount == 1) {
+            for (Entry<String, String> entry : entries) {
+                db.put(entry.getKey(), entry.getValue());
+            }
         }
         else {
-           List<Callable<Void>> work = new ArrayList<>(threadCount);
-           for(final List<Entry<String, String>> sublist : Lists.partition(entries, entries.size()/threadCount)) {
-              work.add(new Callable<Void>(){
-                 @Override
-                 public Void call()
-                 {
-                    for(Entry<String, String> entry : sublist)
+            List<Callable<Void>> work = new ArrayList<>(threadCount);
+            for (final List<Entry<String, String>> sublist : Lists.partition(entries, entries.size() / threadCount)) {
+                work.add(new Callable<Void>()
+                {
+                    @Override
+                    public Void call()
                     {
-                        db.put(entry.getKey(), entry.getValue());
+                        for (Entry<String, String> entry : sublist) {
+                            db.put(entry.getKey(), entry.getValue());
+                        }
+
+                        return null;
                     }
-                    
-                    return null;
-                 }
-              });
-           }
-           new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
+                });
+            }
+            new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
         }
 
         for (Entry<String, String> entry : entries) {
@@ -958,10 +956,10 @@ public class DbImplTest
         assertReverseSequence(seekingIterator, reverseEntries);
 
         seekingIterator.seekToLast();
-        if(reverseEntries.size() > 0){
-           assertSequence(seekingIterator, reverseEntries.get(0));
-           seekingIterator.seekToLast();
-           assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+        if (reverseEntries.size() > 0) {
+            assertSequence(seekingIterator, reverseEntries.get(0));
+            seekingIterator.seekToLast();
+            assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
         }
         assertSequence(seekingIterator, entries);
 
@@ -987,8 +985,8 @@ public class DbImplTest
             assertReverseSequence(seekingIterator, prevEntries);
         }
 
-        Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
-        seekingIterator.seek(endKey.toString(Charsets.UTF_8));
+        Slice endKey = Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
+        seekingIterator.seek(endKey.toString(UTF_8));
         assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
         assertReverseSequence(seekingIterator, reverseEntries);
     }
@@ -1040,15 +1038,13 @@ public class DbImplTest
         return value.getBytes(UTF_8);
     }
 
-
     private static String randomString(Random random, int length)
     {
         char[] chars = new char[length];
         for (int i = 0; i < chars.length; i++) {
-            chars[i] = (char) (' ' + random.nextInt(95));
+            chars[i] = (char) ((int) ' ' + random.nextInt(95));
         }
         return new String(chars);
-
     }
 
     private static String longString(int length, char character)
@@ -1077,7 +1073,7 @@ public class DbImplTest
         }
     }
 
-    ArrayList<DbStringWrapper> opened = new ArrayList<DbStringWrapper>();
+    private final ArrayList<DbStringWrapper> opened = new ArrayList<>();
 
     private static class ReverseDBComparator
             implements DBComparator
@@ -1162,12 +1158,13 @@ public class DbImplTest
             this.db = new DbImpl(options, databaseDir);
             opened.add(this);
         }
-        
-        private DbStringWrapper(){
-           //crash and burn
-           options = null;
-           databaseDir = null;
-           db = null;
+
+        private DbStringWrapper()
+        {
+            //crash and burn
+            options = null;
+            databaseDir = null;
+            db = null;
         }
 
         public String get(String key)
@@ -1185,7 +1182,7 @@ public class DbImplTest
             if (slice == null) {
                 return null;
             }
-            return new String(slice, Charsets.UTF_8);
+            return new String(slice, UTF_8);
         }
 
         public void put(String key, String value)
@@ -1235,7 +1232,6 @@ public class DbImplTest
             for (int level = 0; level < maxLevelWithFiles; level++) {
                 db.compactRange(level, Slices.copiedBuffer("", UTF_8), Slices.copiedBuffer("~", UTF_8));
             }
-
         }
 
         public int numberOfFilesInLevel(int level)
@@ -1291,12 +1287,12 @@ public class DbImplTest
             }
             return result.build();
         }
-
     }
 
-    private static class StringDbIterator implements ReverseSeekingIterator<String, String>
+    private static class StringDbIterator
+            implements ReverseSeekingIterator<String, String>
     {
-        private DBIterator iterator;
+        private final DBIterator iterator;
 
         private StringDbIterator(DBIterator iterator)
         {
@@ -1344,36 +1340,36 @@ public class DbImplTest
             return Maps.immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
         }
 
-      @Override
-      public Entry<String, String> peekPrev()
-      {
-         return adapt(iterator.peekPrev());
-      }
+        @Override
+        public Entry<String, String> peekPrev()
+        {
+            return adapt(iterator.peekPrev());
+        }
 
-      @Override
-      public Entry<String, String> prev()
-      {
-         return adapt(iterator.prev());
-      }
+        @Override
+        public Entry<String, String> prev()
+        {
+            return adapt(iterator.prev());
+        }
 
-      @Override
-      public boolean hasPrev()
-      {
-         return iterator.hasPrev();
-      }
+        @Override
+        public boolean hasPrev()
+        {
+            return iterator.hasPrev();
+        }
 
-      @Override
-      public void seekToLast()
-      {
-         iterator.seekToLast();
-      }
+        @Override
+        public void seekToLast()
+        {
+            iterator.seekToLast();
+        }
 
-      @Override
-      public void seekToEnd()
-      {
-         // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
-         // testing as of yet
-         throw new UnsupportedOperationException();
-      }
+        @Override
+        public void seekToEnd()
+        {
+            // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
+            // testing as of yet
+            throw new UnsupportedOperationException();
+        }
     }
 }

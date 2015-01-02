@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,10 +19,10 @@ package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
 import org.iq80.leveldb.CompressionType;
-import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
+import org.iq80.leveldb.util.Slices;
 
 public class BlockTrailer
 {
@@ -82,7 +82,7 @@ public class BlockTrailer
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("BlockTrailer");
         sb.append("{compressionType=").append(compressionType);
         sb.append(", crc32c=0x").append(Integer.toHexString(crc32c));

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,9 +19,9 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
+import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.VariableLengthQuantity;
-import org.iq80.leveldb.util.SliceOutput;
 
 public class BlockHandle
 {
@@ -46,7 +46,8 @@ public class BlockHandle
         return dataSize;
     }
 
-    public int getFullBlockSize() {
+    public int getFullBlockSize()
+    {
         return dataSize + BlockTrailer.ENCODED_LENGTH;
     }
 
@@ -62,10 +63,10 @@ public class BlockHandle
 
         BlockHandle that = (BlockHandle) o;
 
-        if (offset != that.offset) {
+        if (dataSize != that.dataSize) {
             return false;
         }
-        if (dataSize != that.dataSize) {
+        if (offset != that.offset) {
             return false;
         }
 
@@ -76,14 +77,14 @@ public class BlockHandle
     public int hashCode()
     {
         int result = (int) (offset ^ (offset >>> 32));
-        result = 31 * result + (int) (dataSize ^ (dataSize >>> 32));
+        result = 31 * result + dataSize;
         return result;
     }
 
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("BlockHandle");
         sb.append("{offset=").append(offset);
         sb.append(", dataSize=").append(dataSize);
@@ -110,6 +111,7 @@ public class BlockHandle
         writeBlockHandleTo(blockHandle, sliceOutput);
         return slice.slice();
     }
+
     public static void writeBlockHandleTo(BlockHandle blockHandle, SliceOutput sliceOutput)
     {
         VariableLengthQuantity.writeVariableLengthLong(blockHandle.offset, sliceOutput);

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,7 +19,8 @@ package org.iq80.leveldb.impl;
 
 public final class LogMonitors
 {
-    public static LogMonitor throwExceptionMonitor() {
+    public static LogMonitor throwExceptionMonitor()
+    {
         return new LogMonitor()
         {
             @Override
@@ -37,7 +38,8 @@ public final class LogMonitors
     }
 
     // todo implement real logging
-    public static LogMonitor logMonitor() {
+    public static LogMonitor logMonitor()
+    {
         return new LogMonitor()
         {
             @Override

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -57,7 +57,8 @@ import static com.google.common.collect.Lists.newArrayListWithCapacity;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
 
-public class VersionSet implements SeekingIterable<InternalKey, Slice>
+public class VersionSet
+        implements SeekingIterable<InternalKey, Slice>
 {
     private static final int L0_COMPACTION_TRIGGER = 4;
 
@@ -66,7 +67,6 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
     // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
     // stop building a single file in a level.level+1 compaction.
     public static final long MAX_GRAND_PARENT_OVERLAP_BYTES = 10 * TARGET_FILE_SIZE;
-
 
     private final AtomicLong nextFileNumber = new AtomicLong(2);
     private long manifestFileNumber = 1;
@@ -112,8 +112,9 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             try {
                 writeSnapshot(log);
                 log.addRecord(edit.encode(), true);
-            } finally {
-                log.close();
+            }
+            finally {
+               log.close();
             }
 
             Filename.setCurrentFile(databaseDir, log.getFileNumber());
@@ -127,9 +128,9 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             descriptorLog.close();
             descriptorLog = null;
         }
-        
+
         Version t = current;
-        if( t!=null ) {
+        if (t != null) {
             current = null;
             t.release();
         }
@@ -146,23 +147,26 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         Version previous = current;
         current = version;
         activeVersions.put(version, new Object());
-        if(previous!=null) {
+        if (previous != null) {
             previous.release();
         }
     }
 
-    public void removeVersion(Version version) {
+    public void removeVersion(Version version)
+    {
         Preconditions.checkNotNull(version, "version is null");
         Preconditions.checkArgument(version != current, "version is the current version");
-        boolean removed = activeVersions.remove(version)!=null;
+        boolean removed = activeVersions.remove(version) != null;
         assert removed : "Expected the version to still be in the active set";
     }
 
-    public InternalKeyComparator getInternalKeyComparator() {
+    public InternalKeyComparator getInternalKeyComparator()
+    {
         return internalKeyComparator;
     }
 
-    public TableCache getTableCache() {
+    public TableCache getTableCache()
+    {
         return tableCache;
     }
 
@@ -204,15 +208,16 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         // TODO(opt): use concatenating iterator for level-0 if there is no overlap
         List<InternalIterator> list = newArrayList();
         for (int which = 0; which < 2; which++) {
-          if (!c.getInputs()[which].isEmpty()) {
-            if (c.getLevel() + which == 0) {
-                List<FileMetaData> files = c.getInputs()[which];
-                list.add(new Level0Iterator(tableCache, files, internalKeyComparator));
-            } else {
-              // Create concatenating iterator for the files from this level
-              list.add(Level.createLevelConcatIterator(tableCache, c.getInputs()[which], internalKeyComparator));
+            if (!c.getInputs()[which].isEmpty()) {
+                if (c.getLevel() + which == 0) {
+                    List<FileMetaData> files = c.getInputs()[which];
+                    list.add(new Level0Iterator(tableCache, files, internalKeyComparator));
+                }
+                else {
+                    // Create concatenating iterator for the files from this level
+                    list.add(Level.createLevelConcatIterator(tableCache, c.getInputs()[which], internalKeyComparator));
+                }
             }
-          }
         }
         return new MergingIterator(list, internalKeyComparator);
     }
@@ -241,10 +246,10 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
     {
         return lastSequence.get();
     }
-    
+
     public long getAndAddLastSequence(long delta)
     {
-       return lastSequence.getAndAdd(delta);
+        return lastSequence.getAndAdd(delta);
     }
 
     public void setLastSequence(long newLastSequence)
@@ -347,70 +352,67 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel();
-        try {
-	
-	        // read log edit log
-	        Long nextFileNumber = null;
-	        Long lastSequence = null;
-	        Long logNumber = null;
-	        Long prevLogNumber = null;
-	        Builder builder = new Builder(this, current);
-	
-	        LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0);
-	        for (Slice record = reader.readRecord(); record != null; record = reader.readRecord()) {
-	            // read version edit
-	            VersionEdit edit = new VersionEdit(record);
-	
-	            // verify comparator
-	            // todo implement user comparator
-	            String editComparator = edit.getComparatorName();
-	            String userComparator = internalKeyComparator.name();
-	            Preconditions.checkArgument(editComparator == null || editComparator.equals(userComparator),
-	                    "Expected user comparator %s to match existing database comparator ", userComparator, editComparator);
-	
-	            // apply edit
-	            builder.apply(edit);
-	
-	            // save edit values for verification below
-	            logNumber = coalesce(edit.getLogNumber(), logNumber);
-	            prevLogNumber = coalesce(edit.getPreviousLogNumber(), prevLogNumber);
-	            nextFileNumber = coalesce(edit.getNextFileNumber(), nextFileNumber);
-	            lastSequence = coalesce(edit.getLastSequenceNumber(), lastSequence);
-	        }
-	
-	        List<String> problems = newArrayList();
-	        if (nextFileNumber == null) {
-	            problems.add("Descriptor does not contain a meta-nextfile entry");
-	        }
-	        if (logNumber == null) {
-	            problems.add("Descriptor does not contain a meta-lognumber entry");
-	        }
-	        if (lastSequence == null) {
-	            problems.add("Descriptor does not contain a last-sequence-number entry");
-	        }
-	        if (!problems.isEmpty()) {
-	            throw new RuntimeException("Corruption: \n\t" + Joiner.on("\n\t").join(problems));
-	        }
-	
-	        if (prevLogNumber == null) {
-	            prevLogNumber = 0L;
-	        }
-	
-	        Version newVersion = new Version(this);
-	        builder.saveTo(newVersion);
-	
-	        // Install recovered version
-	        finalizeVersion(newVersion);
-	
-	        appendVersion(newVersion);
-	        manifestFileNumber = nextFileNumber;
-	        this.nextFileNumber.set(nextFileNumber + 1);
-	        this.lastSequence.set(lastSequence);
-	        this.logNumber = logNumber;
-	        this.prevLogNumber = prevLogNumber;
-        } finally {
-        	fileChannel.close();
+        try (FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
+
+            // read log edit log
+            Long nextFileNumber = null;
+            Long lastSequence = null;
+            Long logNumber = null;
+            Long prevLogNumber = null;
+            Builder builder = new Builder(this, current);
+
+            LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0);
+            for (Slice record = reader.readRecord(); record != null; record = reader.readRecord()) {
+                // read version edit
+                VersionEdit edit = new VersionEdit(record);
+
+                // verify comparator
+                // todo implement user comparator
+                String editComparator = edit.getComparatorName();
+                String userComparator = internalKeyComparator.name();
+                Preconditions.checkArgument(editComparator == null || editComparator.equals(userComparator),
+                        "Expected user comparator %s to match existing database comparator ", userComparator, editComparator);
+
+                // apply edit
+                builder.apply(edit);
+
+                // save edit values for verification below
+                logNumber = coalesce(edit.getLogNumber(), logNumber);
+                prevLogNumber = coalesce(edit.getPreviousLogNumber(), prevLogNumber);
+                nextFileNumber = coalesce(edit.getNextFileNumber(), nextFileNumber);
+                lastSequence = coalesce(edit.getLastSequenceNumber(), lastSequence);
+            }
+
+            List<String> problems = newArrayList();
+            if (nextFileNumber == null) {
+                problems.add("Descriptor does not contain a meta-nextfile entry");
+            }
+            if (logNumber == null) {
+                problems.add("Descriptor does not contain a meta-lognumber entry");
+            }
+            if (lastSequence == null) {
+                problems.add("Descriptor does not contain a last-sequence-number entry");
+            }
+            if (!problems.isEmpty()) {
+                throw new RuntimeException("Corruption: \n\t" + Joiner.on("\n\t").join(problems));
+            }
+
+            if (prevLogNumber == null) {
+                prevLogNumber = 0L;
+            }
+
+            Version newVersion = new Version(this);
+            builder.saveTo(newVersion);
+
+            // Install recovered version
+            finalizeVersion(newVersion);
+
+            appendVersion(newVersion);
+            manifestFileNumber = nextFileNumber;
+            this.nextFileNumber.set(nextFileNumber + 1);
+            this.lastSequence.set(lastSequence);
+            this.logNumber = logNumber;
+            this.prevLogNumber = prevLogNumber;
         }
     }
 
@@ -473,7 +475,6 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
         }
         return builder.build();
     }
-
 
     private static double maxBytesForLevel(int level)
     {
@@ -599,7 +600,6 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
                     range = getRange(levelInputs, levelUpInputs);
                     allStart = range.getKey();
                     allLimit = range.getValue();
-
                 }
             }
         }
@@ -806,7 +806,7 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
                 List<FileMetaData> files = version.getFiles(level);
                 if (level > 0 && !files.isEmpty()) {
                     // Must not overlap
-                    boolean filesOverlap = versionSet.internalKeyComparator.compare(files.get(files.size() - 1).getLargest(), fileMetaData.getSmallest())  >= 0;
+                    boolean filesOverlap = versionSet.internalKeyComparator.compare(files.get(files.size() - 1).getLargest(), fileMetaData.getSmallest()) >= 0;
                     if (filesOverlap) {
                         // A memory compaction, while this compaction was running, resulted in a a database state that is
                         // incompatible with the compaction.  This is rare and expensive to detect while the compaction is
@@ -820,7 +820,8 @@ public class VersionSet implements SeekingIterable<InternalKey, Slice>
             }
         }
 
-        private static class FileMetaDataBySmallestKey implements Comparator<FileMetaData>
+        private static class FileMetaDataBySmallestKey
+                implements Comparator<FileMetaData>
         {
             private final InternalKeyComparator internalKeyComparator;
 

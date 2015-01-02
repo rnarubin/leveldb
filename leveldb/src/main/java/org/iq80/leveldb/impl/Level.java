@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -36,7 +36,8 @@ import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.ValueType.VALUE;
 
 // todo this class should be immutable
-public class Level implements SeekingIterable<InternalKey, Slice>
+public class Level
+        implements SeekingIterable<InternalKey, Slice>
 {
     private final int levelNumber;
     private final TableCache tableCache;
@@ -116,8 +117,7 @@ public class Level implements SeekingIterable<InternalKey, Slice>
         int lastFileReadLevel = -1;
         readStats.clear();
         for (FileMetaData fileMetaData : fileMetaDataList) {
-
-            if (lastFileRead!=null && readStats.getSeekFile() == null) {
+            if (lastFileRead != null && readStats.getSeekFile() == null) {
                 // We have had more than one seek for this read.  Charge the first file.
                 readStats.setSeekFile(lastFileRead);
                 readStats.setSeekFileLevel(lastFileReadLevel);
@@ -148,7 +148,6 @@ public class Level implements SeekingIterable<InternalKey, Slice>
                     }
                 }
             }
-
         }
 
         return null;
@@ -175,7 +174,7 @@ public class Level implements SeekingIterable<InternalKey, Slice>
 
     private int findFile(InternalKey targetKey)
     {
-        if (files.size() == 0) {
+        if (files.isEmpty()) {
             return files.size();
         }
 
@@ -210,7 +209,7 @@ public class Level implements SeekingIterable<InternalKey, Slice>
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("Level");
         sb.append("{levelNumber=").append(levelNumber);
         sb.append(", files=").append(files);

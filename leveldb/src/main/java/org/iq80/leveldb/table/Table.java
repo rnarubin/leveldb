@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -32,7 +32,8 @@ import java.nio.channels.FileChannel;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 
-abstract public class Table implements SeekingIterable<Slice, Slice>
+public abstract class Table
+        implements SeekingIterable<Slice, Slice>
 {
     protected final String name;
     protected final FileChannel fileChannel;
@@ -61,7 +62,8 @@ abstract public class Table implements SeekingIterable<Slice, Slice>
         metaindexBlockHandle = footer.getMetaindexBlockHandle();
     }
 
-    abstract protected Footer init() throws IOException;
+    protected abstract Footer init()
+            throws IOException;
 
     @Override
     public TableIterator iterator()
@@ -84,7 +86,7 @@ abstract public class Table implements SeekingIterable<Slice, Slice>
 
     protected static ByteBuffer uncompressedScratch = ByteBuffer.allocateDirect(4 * 1024 * 1024);
 
-    abstract protected Block readBlock(BlockHandle blockHandle)
+    protected abstract Block readBlock(BlockHandle blockHandle)
             throws IOException;
 
     protected int uncompressedLength(ByteBuffer data)
@@ -117,11 +119,10 @@ abstract public class Table implements SeekingIterable<Slice, Slice>
         return metaindexBlockHandle.getOffset();
     }
 
-
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("Table");
         sb.append("{name='").append(name).append('\'');
         sb.append(", comparator=").append(comparator);
@@ -130,11 +131,13 @@ abstract public class Table implements SeekingIterable<Slice, Slice>
         return sb.toString();
     }
 
-    public Callable<?> closer() {
+    public Callable<?> closer()
+    {
         return new Closer(fileChannel);
     }
 
-    private static class Closer implements Callable<Void>
+    private static class Closer
+            implements Callable<Void>
     {
         private final Closeable closeable;
 
@@ -143,11 +146,11 @@ abstract public class Table implements SeekingIterable<Slice, Slice>
             this.closeable = closeable;
         }
 
+        @Override
         public Void call()
         {
             Closeables.closeQuietly(closeable);
             return null;
         }
     }
-
 }

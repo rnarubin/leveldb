@@ -16,83 +16,89 @@ import java.util.concurrent.locks.ReadWriteLock;
  * <br>
  * it does, however, support a fairness policy
  */
-public class SimpleReadWriteLock implements ReadWriteLock
+public class SimpleReadWriteLock
+        implements ReadWriteLock
 {
-   private final Semaphore semaphore;
-   private final int maxPermits;
-   private final Lock readLock, writeLock;
-   
-   public SimpleReadWriteLock()
-   {
-      this(false);
-   }
-   
-   public SimpleReadWriteLock(boolean fair)
-   {
-      this(fair, Integer.MAX_VALUE);
-   }
+    private final Semaphore semaphore;
+    private final int maxPermits;
+    private final Lock readLock, writeLock;
 
-   public SimpleReadWriteLock(boolean fair, int maxReaders)
-   {
-      this.maxPermits = maxReaders;
-      this.semaphore = new Semaphore(maxPermits, fair);
-      this.readLock = new AcquireLock(1);
-      this.writeLock = new AcquireLock(maxPermits);
-   }
+    public SimpleReadWriteLock()
+    {
+        this(false);
+    }
 
-   @Override
-   public Lock readLock()
-   {
-      return readLock;
-   }
+    public SimpleReadWriteLock(boolean fair)
+    {
+        this(fair, Integer.MAX_VALUE);
+    }
 
-   @Override
-   public Lock writeLock()
-   {
-      return writeLock;
-   }
-   
-   private class AcquireLock implements Lock
-   {
-      private final int permits;
-      public AcquireLock(int permits)
-      {
-         this.permits = permits;
-      }
-      @Override
-      public void lock()
-      {
-         SimpleReadWriteLock.this.semaphore.acquireUninterruptibly(permits);
-      }
+    public SimpleReadWriteLock(boolean fair, int maxReaders)
+    {
+        this.maxPermits = maxReaders;
+        this.semaphore = new Semaphore(maxPermits, fair);
+        this.readLock = new AcquireLock(1);
+        this.writeLock = new AcquireLock(maxPermits);
+    }
 
-      @Override
-      public void lockInterruptibly() throws InterruptedException
-      {
-         SimpleReadWriteLock.this.semaphore.acquire(permits);
-      }
+    @Override
+    public Lock readLock()
+    {
+        return readLock;
+    }
 
-      @Override
-      public boolean tryLock()
-      {
-         return SimpleReadWriteLock.this.semaphore.tryAcquire(permits);
-      }
+    @Override
+    public Lock writeLock()
+    {
+        return writeLock;
+    }
 
-      @Override
-      public boolean tryLock(long time, TimeUnit unit) throws InterruptedException
-      {
-         return SimpleReadWriteLock.this.semaphore.tryAcquire(permits, time, unit);
-      }
+    private class AcquireLock
+            implements Lock
+    {
+        private final int permits;
 
-      @Override
-      public void unlock()
-      {
-         SimpleReadWriteLock.this.semaphore.release(permits);
-      }
+        public AcquireLock(int permits)
+        {
+            this.permits = permits;
+        }
 
-      @Override
-      public Condition newCondition()
-      {
-         throw new UnsupportedOperationException();
-      }
-   }
+        @Override
+        public void lock()
+        {
+            SimpleReadWriteLock.this.semaphore.acquireUninterruptibly(permits);
+        }
+
+        @Override
+        public void lockInterruptibly()
+                throws InterruptedException
+        {
+            SimpleReadWriteLock.this.semaphore.acquire(permits);
+        }
+
+        @Override
+        public boolean tryLock()
+        {
+            return SimpleReadWriteLock.this.semaphore.tryAcquire(permits);
+        }
+
+        @Override
+        public boolean tryLock(long time, TimeUnit unit)
+                throws InterruptedException
+        {
+            return SimpleReadWriteLock.this.semaphore.tryAcquire(permits, time, unit);
+        }
+
+        @Override
+        public void unlock()
+        {
+            SimpleReadWriteLock.this.semaphore.release(permits);
+        }
+
+        @Override
+        public Condition newCondition()
+        {
+            throw new UnsupportedOperationException();
+        }
+    }
 }
