@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -23,60 +23,76 @@ import java.util.Map;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public interface DB extends Iterable<Map.Entry<byte[], byte[]>>, Closeable {
+public interface DB
+        extends Iterable<Map.Entry<byte[], byte[]>>, Closeable
+{
+    byte[] get(byte[] key)
+            throws DBException;
 
-    public byte[] get(byte[] key) throws DBException;
-    public byte[] get(byte[] key, ReadOptions options) throws DBException;
+    byte[] get(byte[] key, ReadOptions options)
+            throws DBException;
 
-    public DBIterator iterator();
-    public DBIterator iterator(ReadOptions options);
+    @Override
+    DBIterator iterator();
 
-    public void put(byte[] key, byte[] value) throws DBException;
-    public void delete(byte[] key) throws DBException;
-    public void write(WriteBatch updates) throws DBException;
+    DBIterator iterator(ReadOptions options);
 
-    public WriteBatch createWriteBatch();
+    void put(byte[] key, byte[] value)
+            throws DBException;
+
+    void delete(byte[] key)
+            throws DBException;
+
+    void write(WriteBatch updates)
+            throws DBException;
+
+    WriteBatch createWriteBatch();
 
     /**
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
-     *         of the DB after this operation.
+     * of the DB after this operation.
      */
-    public Snapshot put(byte[] key, byte[] value, WriteOptions options) throws DBException;
+    Snapshot put(byte[] key, byte[] value, WriteOptions options)
+            throws DBException;
 
     /**
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
-     *         of the DB after this operation.
+     * of the DB after this operation.
      */
-    public Snapshot delete(byte[] key, WriteOptions options) throws DBException;
+    Snapshot delete(byte[] key, WriteOptions options)
+            throws DBException;
 
     /**
      * @return null if options.isSnapshot()==false otherwise returns a snapshot
-     *         of the DB after this operation.
+     * of the DB after this operation.
      */
-    public Snapshot write(WriteBatch updates, WriteOptions options) throws DBException;
+    Snapshot write(WriteBatch updates, WriteOptions options)
+            throws DBException;
 
-    public Snapshot getSnapshot();
+    Snapshot getSnapshot();
 
-    public long[] getApproximateSizes(Range ... ranges);
-    public String getProperty(String name);
+    long[] getApproximateSizes(Range... ranges);
+
+    String getProperty(String name);
 
     /**
      * Suspends any background compaction threads.  This methods
      * returns once the background compactions are suspended.
      */
-    public void suspendCompactions() throws InterruptedException;
+    void suspendCompactions()
+            throws InterruptedException;
 
     /**
      * Resumes the background compaction threads.
      */
-    public void resumeCompactions();
+    void resumeCompactions();
 
     /**
      * Force a compaction of the specified key range.
      *
      * @param begin if null then compaction start from the first key
      * @param end if null then compaction ends at the last key
-     * @throws DBException
      */
-    public void compactRange(byte[] begin, byte[] end) throws DBException;
+    void compactRange(byte[] begin, byte[] end)
+            throws DBException;
 }

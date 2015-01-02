@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,26 +22,20 @@ import java.util.Comparator;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public interface DBComparator extends Comparator<byte[]>{
-
-    public String name();
+public interface DBComparator
+        extends Comparator<byte[]>
+{
+    String name();
 
     /**
      * If <code>start < limit</code>, returns a short key in [start,limit).
      * Simple comparator implementations should return start unchanged,
-     *
-     * @param start
-     * @param limit
-     * @return
      */
     byte[] findShortestSeparator(byte[] start, byte[] limit);
 
     /**
      * returns a 'short key' where the 'short key' >= key.
      * Simple comparator implementations should return key unchanged,
-     *
-     * @param key
      */
     byte[] findShortSuccessor(byte[] key);
-
 }

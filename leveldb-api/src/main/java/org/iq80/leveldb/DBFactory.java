@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -23,12 +23,14 @@ import java.io.IOException;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public interface DBFactory {
+public interface DBFactory
+{
+    DB open(File path, Options options)
+            throws IOException;
 
-    public DB open(File path, Options options) throws IOException;
+    void destroy(File path, Options options)
+            throws IOException;
 
-    public void destroy(File path, Options options) throws IOException;
-
-    public void repair(File path, Options options) throws IOException;
-
+    void repair(File path, Options options)
+            throws IOException;
 }
