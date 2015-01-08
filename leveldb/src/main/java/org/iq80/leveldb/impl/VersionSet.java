@@ -34,6 +34,8 @@ import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.Slice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -60,6 +62,8 @@ import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
 public class VersionSet
         implements SeekingIterable<InternalKey, Slice>
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(VersionSet.class);
+
     private static final int L0_COMPACTION_TRIGGER = 4;
 
     public static final int TARGET_FILE_SIZE = 2 * 1048576;
@@ -136,8 +140,8 @@ public class VersionSet
         }
 
         Set<Version> versions = activeVersions.keySet();
-        // TODO:
-        // log("DB closed with "+versions.size()+" open snapshots. This could mean your application has a resource leak.");
+        LOGGER.warn("DB closed with " + versions.size()
+                + " open snapshots. This could mean your application has a resource leak.");
     }
 
     private void appendVersion(Version version)
@@ -585,13 +589,8 @@ public class VersionSet
 
                 List<FileMetaData> expanded1 = getOverlappingInputs(level + 1, newStart, newLimit);
                 if (expanded1.size() == levelUpInputs.size()) {
-//              Log(options_->info_log,
-//                  "Expanding@%d %d+%d to %d+%d\n",
-//                  level,
-//                  int(c->inputs_[0].size()),
-//                  int(c->inputs_[1].size()),
-//                  int(expanded0.size()),
-//                  int(expanded1.size()));
+                    LOGGER.info("Expanding@{} {}+{} to {}+{}", level, levelInputs.size(), levelUpInputs.size(),
+                            expanded0.size(), expanded1.size());
                     smallest = newStart;
                     largest = newLimit;
                     levelInputs = expanded0;

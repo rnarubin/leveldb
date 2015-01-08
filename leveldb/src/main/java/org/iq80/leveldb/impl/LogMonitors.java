@@ -17,8 +17,13 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public final class LogMonitors
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(LogMonitors.class);
+
     public static LogMonitor throwExceptionMonitor()
     {
         return new LogMonitor()
@@ -37,7 +42,6 @@ public final class LogMonitors
         };
     }
 
-    // todo implement real logging
     public static LogMonitor logMonitor()
     {
         return new LogMonitor()
@@ -45,14 +49,13 @@ public final class LogMonitors
             @Override
             public void corruption(long bytes, String reason)
             {
-                System.out.println(String.format("corruption of %s bytes: %s", bytes, reason));
+                LOGGER.warn("corruption of {} bytes: {}", bytes, reason);
             }
 
             @Override
             public void corruption(long bytes, Throwable reason)
             {
-                System.out.println(String.format("corruption of %s bytes", bytes));
-                reason.printStackTrace();
+                LOGGER.warn("corruption of {} bytes", bytes, reason);
             }
         };
     }
