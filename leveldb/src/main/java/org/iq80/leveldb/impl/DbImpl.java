@@ -328,7 +328,7 @@ public class DbImpl
                 if (fileInfo.getFileType() == FileType.TABLE) {
                     tableCache.evict(number);
                 }
-                LOGGER.info("Delete type={} #{}", fileInfo.getFileType(), number);
+                LOGGER.debug("Delete type={} #{}", fileInfo.getFileType(), number);
                 file.delete();
             }
         }

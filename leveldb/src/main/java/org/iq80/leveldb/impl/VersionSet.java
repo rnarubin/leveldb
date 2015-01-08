@@ -140,8 +140,10 @@ public class VersionSet
         }
 
         Set<Version> versions = activeVersions.keySet();
-        LOGGER.warn("DB closed with " + versions.size()
-                + " open snapshots. This could mean your application has a resource leak.");
+        if (versions.size() > 0) {
+            LOGGER.warn("DB closed with " + versions.size()
+                    + " open snapshots. This could mean your application has a resource leak.");
+        }
     }
 
     private void appendVersion(Version version)
@@ -589,7 +591,7 @@ public class VersionSet
 
                 List<FileMetaData> expanded1 = getOverlappingInputs(level + 1, newStart, newLimit);
                 if (expanded1.size() == levelUpInputs.size()) {
-                    LOGGER.info("Expanding@{} {}+{} to {}+{}", level, levelInputs.size(), levelUpInputs.size(),
+                    LOGGER.debug("Expanding@{} {}+{} to {}+{}", level, levelInputs.size(), levelUpInputs.size(),
                             expanded0.size(), expanded1.size());
                     smallest = newStart;
                     largest = newLimit;
