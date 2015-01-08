@@ -149,8 +149,7 @@ public class DbImpl
                     public void uncaughtException(Thread t, Throwable e)
                     {
                         // todo need a real UncaughtExceptionHandler
-                        System.out.printf("%s%n", t);
-                        e.printStackTrace();
+                        LOGGER.error("error in thread {}", e);
                     }
                 })
                 .build();
