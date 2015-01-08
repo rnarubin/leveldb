@@ -18,7 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Supplier;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.SettableFuture;
@@ -42,17 +41,17 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MergingIterator;
-import org.iq80.leveldb.util.ObjectPool;
-import org.iq80.leveldb.util.ObjectPool.PooledObject;
 import org.iq80.leveldb.util.SimpleReadWriteLock;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.Snappy;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -61,7 +60,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
@@ -94,6 +92,8 @@ import static org.iq80.leveldb.util.Slices.writeLengthPrefixedBytes;
 public class DbImpl
         implements DB
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DbImpl.class);
+
     private final Options options;
     private final File databaseDir;
     private final TableCache tableCache;
@@ -329,10 +329,7 @@ public class DbImpl
                 if (fileInfo.getFileType() == FileType.TABLE) {
                     tableCache.evict(number);
                 }
-                // todo info logging system needed
-//                Log(options_.info_log, "Delete type=%d #%lld\n",
-//                int(type),
-//                        static_cast < unsigned long long>(number));
+                LOGGER.info("Delete type={} #{}", fileInfo.getFileType(), number);
                 file.delete();
             }
         }
@@ -517,7 +514,7 @@ public class DbImpl
             LogMonitor logMonitor = LogMonitors.logMonitor();
             LogReader logReader = new LogReader(channel, logMonitor, true, 0);
 
-            // Log(options_.info_log, "Recovering log #%llu", (unsigned long long) log_number);
+            LOGGER.info("Recovering log #{}", fileNumber);
 
             // Read all the records and add to a memtable
             long maxSequence = 0;

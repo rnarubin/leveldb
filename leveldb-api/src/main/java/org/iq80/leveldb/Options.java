@@ -163,11 +163,19 @@ public class Options
         return this;
     }
 
+    /**
+     * @deprecated use <a href="http://www.slf4j.org/">SLF4J</a> bindings
+     */
+    @Deprecated
     public Logger logger()
     {
         return logger;
     }
 
+    /**
+     * @deprecated use <a href="http://www.slf4j.org/">SLF4J</a> bindings
+     */
+    @Deprecated
     public Options logger(Logger logger)
     {
         this.logger = logger;
