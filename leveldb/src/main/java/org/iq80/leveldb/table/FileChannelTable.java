@@ -23,6 +23,7 @@ import org.iq80.leveldb.util.Snappy;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Comparator;
 
@@ -43,7 +44,7 @@ public class FileChannelTable
     {
         long size = fileChannel.size();
         ByteBuffer footerData = read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
-        return Footer.readFooter(Slices.copiedBuffer(footerData));
+        return Footer.readFooter(Slices.nonCopiedBuffer(footerData));
     }
 
     @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod", "NonPrivateFieldAccessedInSynchronizedContext"})
@@ -53,7 +54,7 @@ public class FileChannelTable
     {
         // read block trailer
         ByteBuffer trailerData = read(blockHandle.getOffset() + blockHandle.getDataSize(), BlockTrailer.ENCODED_LENGTH);
-        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.copiedBuffer(trailerData));
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.nonCopiedBuffer(trailerData));
 
 // todo re-enable crc check when ported to support direct buffers
 //        // only verify check sums if explicitly asked by the user
@@ -83,7 +84,7 @@ public class FileChannelTable
             }
         }
         else {
-            uncompressedData = Slices.copiedBuffer(uncompressedBuffer);
+            uncompressedData = Slices.nonCopiedBuffer(uncompressedBuffer);
         }
 
         return new Block(uncompressedData, comparator);
@@ -92,7 +93,7 @@ public class FileChannelTable
     private ByteBuffer read(long offset, int length)
             throws IOException
     {
-        ByteBuffer uncompressedBuffer = ByteBuffer.allocate(length);
+        ByteBuffer uncompressedBuffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         fileChannel.read(uncompressedBuffer, offset);
         if (uncompressedBuffer.hasRemaining()) {
             throw new IOException("Could not read all the data");
