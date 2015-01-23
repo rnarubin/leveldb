@@ -673,22 +673,7 @@ public final class Slice
      */
     public int compareTo(Slice that)
     {
-        if (this == that) {
-            return 0;
-        }
-        if (this.data == that.data && length == that.length && offset == that.offset) {
-            return 0;
-        }
-
-        int minLength = Math.min(this.length, that.length);
-        for (int i = 0; i < minLength; i++) {
-            int thisByte = 0xFF & this.data[this.offset + i];
-            int thatByte = 0xFF & that.data[that.offset + i];
-            if (thisByte != thatByte) {
-                return (thisByte) - (thatByte);
-            }
-        }
-        return this.length - that.length;
+        return FastByteComparisons.compareTo(this.data, this.offset, this.length, that.data, that.offset, that.length);
     }
 
     /**
