@@ -136,6 +136,7 @@ public class Finalizer<T>
     private class FinalizerQueueProcessor
             implements Runnable
     {
+        @SuppressWarnings("unchecked")
         @Override
         public void run()
         {

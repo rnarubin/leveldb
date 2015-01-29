@@ -23,7 +23,6 @@ import com.google.common.base.Preconditions;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.VariableLengthQuantity;

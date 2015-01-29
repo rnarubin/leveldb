@@ -17,8 +17,6 @@
  */
 package org.iq80.leveldb.table;
 
-import com.google.common.base.Charsets;
-
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.util.Slice;

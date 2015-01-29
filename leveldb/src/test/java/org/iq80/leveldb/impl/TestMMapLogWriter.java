@@ -44,16 +44,18 @@ public class TestMMapLogWriter
 
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
 
-            FileChannel channel = new FileInputStream(file).getChannel();
+            try (@SuppressWarnings("resource")
+            FileChannel channel = new FileInputStream(file).getChannel()) {
 
-            LogReader logReader = new LogReader(channel, logMonitor, true, 0);
+                LogReader logReader = new LogReader(channel, logMonitor, true, 0);
 
-            int count = 0;
-            for (Slice slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
-                assertEquals(slice.length(), recordSize);
-                count++;
+                int count = 0;
+                for (Slice slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
+                    assertEquals(slice.length(), recordSize);
+                    count++;
+                }
+                assertEquals(count, 1);
             }
-            assertEquals(count, 1);
         }
         finally {
             file.delete();

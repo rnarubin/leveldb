@@ -20,6 +20,7 @@ package org.iq80.leveldb;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
+@SuppressWarnings("serial")
 public class DBException
         extends RuntimeException
 {

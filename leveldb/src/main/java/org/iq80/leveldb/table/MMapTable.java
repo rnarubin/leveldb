@@ -65,13 +65,12 @@ public class MMapTable
     private static class Closer
             implements Callable<Void>
     {
-        private final String name;
+        // private final String name;
         private final Closeable closeable;
         private final MappedByteBuffer data;
 
         public Closer(String name, Closeable closeable, MappedByteBuffer data)
         {
-            this.name = name;
             this.closeable = closeable;
             this.data = data;
         }

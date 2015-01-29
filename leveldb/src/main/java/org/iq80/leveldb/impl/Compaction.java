@@ -18,6 +18,7 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.Slice;
 
@@ -61,6 +62,7 @@ public class Compaction
     // all L >= level_ + 2).
     private final int[] levelPointers = new int[NUM_LEVELS];
 
+    @SuppressWarnings("unchecked")
     public Compaction(Version inputVersion, int level, List<FileMetaData> levelInputs, List<FileMetaData> levelUpInputs, List<FileMetaData> grandparents)
     {
         this.inputVersion = inputVersion;

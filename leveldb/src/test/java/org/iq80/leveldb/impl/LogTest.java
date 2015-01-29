@@ -207,6 +207,7 @@ public abstract class LogTest
         }
 
         // test readRecord
+        @SuppressWarnings("resource")
         FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel();
         try {
             LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
@@ -219,12 +220,6 @@ public abstract class LogTest
         finally {
             Closeables.closeQuietly(fileChannel);
         }
-    }
-
-    private void testConcurrentLog(List<Slice> record, boolean closeWriter)
-            throws InterruptedException, ExecutionException, IOException
-    {
-        testConcurrentLog(record, closeWriter, Runtime.getRuntime().availableProcessors());
     }
 
     @SuppressWarnings("resource")

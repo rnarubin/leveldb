@@ -18,11 +18,13 @@
 package org.iq80.leveldb.util;
 
 import com.google.common.base.Throwables;
+
 import sun.nio.ch.FileChannelImpl;
 
 import java.lang.reflect.Method;
 import java.nio.MappedByteBuffer;
 
+@SuppressWarnings("restriction")
 public final class ByteBufferSupport
 {
     private static final Method unmap;
