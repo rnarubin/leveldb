@@ -57,7 +57,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static org.iq80.leveldb.benchmark.DbBenchmark.DBState.EXISTING;
@@ -100,8 +99,8 @@ public class DbBenchmark
     private final int num_;
     private int reads_;
     private final int valueSize;
-    private int heap_counter_;
-    private double last_op_finish_;
+    // private int heap_counter_;
+    // private double last_op_finish_;
     private long bytes_;
     private String message_;
     private String post_message_;
@@ -118,6 +117,7 @@ public class DbBenchmark
 
     final DBFactory factory;
 
+    @SuppressWarnings("unchecked")
     public DbBenchmark(Map<Flag, Object> flags) throws Exception
     {
         ClassLoader cl = DbBenchmark.class.getClassLoader();
@@ -131,7 +131,6 @@ public class DbBenchmark
         useExisting = (Boolean) flags.get(Flag.use_existing_db);
         thread_count = (Integer) flags.get(Flag.thread_count);
         keySize = (Integer) flags.get(Flag.key_size);
-        heap_counter_ = 0;
         bytes_ = 0;
         rand_ = new Random(301);
 
@@ -350,7 +349,7 @@ public class DbBenchmark
         startTime = System.nanoTime();
         bytes_ = 0;
         message_ = null;
-        last_op_finish_ = startTime;
+        // last_op_finish_ = startTime;
         // hist.clear();
         done_ = 0;
         next_report_ = 100;

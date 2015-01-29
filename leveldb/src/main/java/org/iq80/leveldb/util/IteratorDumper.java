@@ -1,7 +1,6 @@
 
 package org.iq80.leveldb.util;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -12,22 +11,13 @@ import org.apache.commons.lang3.builder.ToStringStyle;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBIterator;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.FileMetaData;
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.SeekingIteratorAdapter;
 import org.iq80.leveldb.impl.TableCache;
 
 public class IteratorDumper
 {
-   public static void main(String[] args) throws IOException{
-      DB db = Iq80DBFactory.factory.open(FileUtils.createTempDir("leveldb"), new Options().useMMap(false));
-      DBIterator iter = db.iterator();
-      
-      //System.out.println(dump(db, iter));
-      System.out.println(prettyFormat("[a=123,b=[c=456,d=789],q=qwer,p=[],z={},d=[1,2,3,4],e={1,23,43,53}]"));
-   }
    public static String dump(DB db, DBIterator DBiter){
       StringBuilder sb = new StringBuilder("DBIterator dump:\n");
       if(!(db instanceof org.iq80.leveldb.impl.DbImpl) || !(DBiter instanceof org.iq80.leveldb.impl.SeekingIteratorAdapter))
@@ -52,14 +42,6 @@ public class IteratorDumper
       }
       catch (IllegalAccessException e){}
       return null;
-   }
-
-   private static Object getSubField(Object owner, String vars){
-      for(String var:vars.split("\\."))
-      {
-         owner = getField(owner, var);
-      }
-      return owner;
    }
 
    @SuppressWarnings("serial")
