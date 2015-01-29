@@ -49,7 +49,6 @@ import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.Snappy;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -510,7 +509,9 @@ public class DbImpl
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
         File file = new File(databaseDir, Filename.logFileName(fileNumber));
-        try (FileChannel channel = new FileInputStream(file).getChannel()) {
+        try (@SuppressWarnings("resource")
+        // closing channel closes FD
+        FileChannel channel = new FileInputStream(file).getChannel()) {
             LogMonitor logMonitor = LogMonitors.logMonitor();
             LogReader logReader = new LogReader(channel, logMonitor, true, 0);
 
@@ -634,6 +635,7 @@ public class DbImpl
         put(key, value, new WriteOptions());
     }
 
+    @SuppressWarnings("resource")
     @Override
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
@@ -975,6 +977,8 @@ public class DbImpl
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
+            @SuppressWarnings("resource")
+            // channel is closed
             FileChannel channel = new FileOutputStream(file).getChannel();
             try {
                 TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalUserComparator(internalKeyComparator));
@@ -1051,13 +1055,17 @@ public class DbImpl
                 // Handle key/value, add to state, etc.
                 boolean drop = false;
                 // todo if key doesn't parse (it is corrupted),
-                if (false /*!ParseInternalKey(key, &ikey)*/) {
+                /*
+                if (false
+                //!ParseInternalKey(key, &ikey)) {
                     // do not hide error keys
                     currentUserKey = null;
                     hasCurrentUserKey = false;
                     lastSequenceForKey = MAX_SEQUENCE_NUMBER;
                 }
-                else {
+                else
+                */
+                {
                     if (!hasCurrentUserKey || internalKeyComparator.getUserComparator().compare(key.getUserKey(), currentUserKey) != 0) {
                         // First occurrence of this user key
                         currentUserKey = key.getUserKey();
@@ -1162,7 +1170,7 @@ public class DbImpl
 
         long currentBytes = compactionState.builder.getFileSize();
         compactionState.currentFileSize = currentBytes;
-        compactionState.totalBytes += currentBytes;
+        // compactionState.totalBytes += currentBytes;
 
         FileMetaData currentFileMetaData = new FileMetaData(compactionState.currentFileNumber,
                 compactionState.currentFileSize,
@@ -1263,7 +1271,7 @@ public class DbImpl
         private InternalKey currentSmallest;
         private InternalKey currentLargest;
 
-        private long totalBytes;
+        // private long totalBytes;
 
         private CompactionState(Compaction compaction)
         {
@@ -1371,6 +1379,7 @@ public class DbImpl
         }
     }
 
+    @SuppressWarnings("serial")
     public static class DatabaseShutdownException
             extends DBException
     {
@@ -1384,6 +1393,7 @@ public class DbImpl
         }
     }
 
+    @SuppressWarnings("serial")
     public static class BackgroundProcessingException
             extends DBException
     {

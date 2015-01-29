@@ -32,8 +32,6 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
-
 public class MemTable
         implements SeekingIterable<InternalKey, Slice>
 {

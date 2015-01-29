@@ -63,7 +63,6 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -80,6 +79,7 @@ public class DbImplTest
 
     private File databaseDir;
 
+    @SuppressWarnings("resource")
     @Test
     public void testBackgroundCompaction()
             throws Exception
@@ -98,6 +98,7 @@ public class DbImplTest
         }
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void testCompactionsOnBigDataSet()
             throws Exception
@@ -937,7 +938,9 @@ public class DbImplTest
                     }
                 });
             }
-            new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
+            try (@SuppressWarnings("resource")
+            ConcurrencyHelper<?> c = new ConcurrencyHelper<Void>(threadCount).submitAll(work)) {
+            }
         }
 
         for (Entry<String, String> entry : entries) {

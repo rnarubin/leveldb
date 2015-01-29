@@ -19,6 +19,7 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+
 import org.iq80.leveldb.util.Closeables;
 
 import java.io.File;
@@ -35,6 +36,7 @@ public class DbLock
     private final FileChannel channel;
     private final FileLock lock;
 
+    @SuppressWarnings("resource")
     public DbLock(File lockFile)
             throws IOException
     {

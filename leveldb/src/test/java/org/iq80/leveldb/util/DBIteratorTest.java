@@ -18,7 +18,6 @@
 
 package org.iq80.leveldb.util;
 
-import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
@@ -35,7 +34,6 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.ListIterator;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
@@ -66,7 +64,6 @@ import com.google.common.collect.Ordering;
 import static com.google.common.base.Charsets.UTF_8;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
@@ -626,6 +623,8 @@ public class DBIteratorTest
         }
     }
 
+    @SuppressWarnings("unused")
+    // TODO use when snapshots are fixed
     private static Snapshot putAllSnapshot(DB db, Iterable<Entry<String, String>> entries)
     {
         WriteBatch batch = db.createWriteBatch();

@@ -28,7 +28,6 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
@@ -356,7 +355,8 @@ public class VersionSet
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        try (FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
+        try (@SuppressWarnings("resource")
+        FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
 
             // read log edit log
             Long nextFileNumber = null;
@@ -461,6 +461,7 @@ public class VersionSet
         version.setCompactionScore(bestScore);
     }
 
+    @SafeVarargs
     private static <V> V coalesce(V... values)
     {
         for (V value : values) {
@@ -647,7 +648,8 @@ public class VersionSet
         return files.build();
     }
 
-    private Entry<InternalKey, InternalKey> getRange(List<FileMetaData>... inputLists)
+    @SafeVarargs
+    private final Entry<InternalKey, InternalKey> getRange(List<FileMetaData>... inputLists)
     {
         InternalKey smallest = null;
         InternalKey largest = null;

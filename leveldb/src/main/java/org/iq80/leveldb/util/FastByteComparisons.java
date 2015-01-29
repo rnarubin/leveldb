@@ -19,7 +19,6 @@
 package org.iq80.leveldb.util;
 
 import java.lang.reflect.Field;
-import java.nio.ByteOrder;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 
