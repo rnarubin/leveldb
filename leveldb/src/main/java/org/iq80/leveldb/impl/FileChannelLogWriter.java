@@ -18,7 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
-import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.ObjectPool;
@@ -39,7 +38,8 @@ public class FileChannelLogWriter
 {
 
     private final FileChannel fileChannel;
-    private final ConcurrentFileWriter writer;
+    private final AtomicLong filePosition = new AtomicLong(0);
+    private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(64, 1024);
 
     @SuppressWarnings("resource")
     public FileChannelLogWriter(File file, long fileNumber)
@@ -47,12 +47,6 @@ public class FileChannelLogWriter
     {
         super(file, fileNumber);
         this.fileChannel = new FileOutputStream(file, false).getChannel();
-        this.writer = new ConcurrentFileWriter();
-    }
-
-    protected ConcurrentFileWriter getWriter()
-    {
-        return this.writer;
     }
 
     @Override
@@ -70,124 +64,111 @@ public class FileChannelLogWriter
         fileChannel.close();
     }
 
-    private class ConcurrentFileWriter
-            implements ConcurrentNonCopyWriter<CloseableLogBuffer>
+    @Override
+    public CloseableLogBuffer requestSpace(LongToIntFunction getLength)
     {
-        private final AtomicLong filePosition = new AtomicLong(0);
-        private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(64, 1024);
+        long state;
+        int length;
+        do {
+            state = filePosition.get();
+        }
+        while (!filePosition.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
 
-        @Override
-        public CloseableLogBuffer requestSpace(int length)
+        return new CloseableFileLogBuffer(state, length);
+    }
+
+    private class CloseableFileLogBuffer
+            extends CloseableLogBuffer
+    {
+        private long position;
+        private final long limit;
+        // use scratch space and a minimum flush size to improve small write performance
+        private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
+        private ByteBuffer buffer = scratch.get().order(ByteOrder.LITTLE_ENDIAN);
+
+        protected CloseableFileLogBuffer(final long startPosition, final int length)
         {
-            return new CloseableFileLogBuffer(filePosition.getAndAdd(length), length);
+            super(startPosition);
+            this.position = startPosition;
+            this.limit = startPosition + length;
         }
 
         @Override
-        public CloseableLogBuffer requestSpace(LongToIntFunction getLength)
+        public CloseableByteBuffer put(byte b)
+                throws IOException
         {
-            long state;
-            int length;
-            do {
-                state = filePosition.get();
-            }
-            while (!filePosition.compareAndSet(state, state + (length = getLength.applyAsInt(state))));
-
-            return new CloseableFileLogBuffer(state, length);
+            checkCapacity(SizeOf.SIZE_OF_BYTE);
+            buffer.put(b);
+            return this;
         }
 
-        private class CloseableFileLogBuffer
-                extends CloseableLogBuffer
+        @Override
+        public CloseableByteBuffer putInt(int b)
+                throws IOException
         {
-            private long position;
-            private final long limit;
-            //use scratch space and a minimum flush size to improve small write performance
-            private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
-            private ByteBuffer buffer = scratch.get().order(ByteOrder.LITTLE_ENDIAN);
+            checkCapacity(SizeOf.SIZE_OF_INT);
+            buffer.putInt(b);
+            return this;
+        }
 
-            protected CloseableFileLogBuffer(final long startPosition, final int length)
-            {
-                super(startPosition);
-                this.position = startPosition;
-                this.limit = startPosition + length;
-            }
-
-            @Override
-            public CloseableByteBuffer put(byte b)
-                    throws IOException
-            {
-                checkCapacity(SizeOf.SIZE_OF_BYTE);
-                buffer.put(b);
-                return this;
-            }
-
-            @Override
-            public CloseableByteBuffer putInt(int b)
-                    throws IOException
-            {
-                checkCapacity(SizeOf.SIZE_OF_INT);
-                buffer.putInt(b);
-                return this;
-            }
-
-            private void checkCapacity(int size)
-                    throws IOException
-            {
-                if (size > buffer.remaining()) {
-                    buffer.flip();
-                    write(buffer);
-                    buffer.clear();
-                }
-            }
-
-            @Override
-            public CloseableByteBuffer put(byte[] b)
-                    throws IOException
-            {
-                checkCapacity(b.length);
-                if (b.length > buffer.remaining()) {
-                    write(ByteBuffer.wrap(b));
-                }
-                else {
-                    buffer.put(b);
-                }
-                return this;
-            }
-
-            @Override
-            public CloseableByteBuffer put(ByteBuffer b)
-                    throws IOException
-            {
-                checkCapacity(b.remaining());
-                if (b.remaining() > buffer.remaining() || b.isDirect()) {
-                    write(b);
-                }
-                else {
-                    buffer.put(b);
-                }
-                return this;
-            }
-
-            private void write(ByteBuffer b)
-                    throws IOException
-            {
-                if (position + b.remaining() > limit) {
-                    throw new BufferOverflowException();
-                }
-
-                while (b.remaining() > 0) {
-                    position += fileChannel.write(b, position);
-                }
-            }
-
-            @Override
-            public void close()
-                    throws IOException
-            {
+        private void checkCapacity(int size)
+                throws IOException
+        {
+            if (size > buffer.remaining()) {
                 buffer.flip();
                 write(buffer);
-                buffer = null;
-                scratch.close();
+                buffer.clear();
             }
+        }
+
+        @Override
+        public CloseableByteBuffer put(byte[] b)
+                throws IOException
+        {
+            checkCapacity(b.length);
+            if (b.length > buffer.remaining()) {
+                write(ByteBuffer.wrap(b));
+            }
+            else {
+                buffer.put(b);
+            }
+            return this;
+        }
+
+        @Override
+        public CloseableByteBuffer put(ByteBuffer b)
+                throws IOException
+        {
+            checkCapacity(b.remaining());
+            if (b.remaining() > buffer.remaining() || b.isDirect()) {
+                write(b);
+            }
+            else {
+                buffer.put(b);
+            }
+            return this;
+        }
+
+        private void write(ByteBuffer b)
+                throws IOException
+        {
+            if (position + b.remaining() > limit) {
+                throw new BufferOverflowException();
+            }
+
+            while (b.remaining() > 0) {
+                position += fileChannel.write(b, position);
+            }
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            buffer.flip();
+            write(buffer);
+            buffer = null;
+            scratch.close();
         }
     }
 }

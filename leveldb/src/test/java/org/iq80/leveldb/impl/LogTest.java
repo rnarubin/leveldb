@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multiset;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.Options.LogFileImpl;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.Slice;
@@ -293,7 +294,7 @@ public abstract class LogTest
     {
         public FileLogTest()
         {
-            super(new Options().useMMap(false));
+            super(new Options().logFileImplementation(LogFileImpl.FILE));
         }
     }
 
@@ -302,7 +303,7 @@ public abstract class LogTest
     {
         public MMapLogTest()
         {
-            super(new Options().useMMap(true));
+            super(new Options().logFileImplementation(LogFileImpl.MMAP));
         }
     }
 }

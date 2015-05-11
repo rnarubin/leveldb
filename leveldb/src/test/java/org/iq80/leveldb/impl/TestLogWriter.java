@@ -1,6 +1,7 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.Options.LogFileImpl;
 import org.iq80.leveldb.util.Slice;
 import org.testng.annotations.Test;
 
@@ -75,7 +76,7 @@ public abstract class TestLogWriter
     {
         public TestFileChannel()
         {
-            super(new Options().useMMap(false));
+            super(new Options().logFileImplementation(LogFileImpl.FILE));
         }
     }
 
@@ -84,7 +85,7 @@ public abstract class TestLogWriter
     {
         public TestMMap()
         {
-            super(new Options().useMMap(true));
+            super(new Options().logFileImplementation(LogFileImpl.MMAP));
         }
     }
 }

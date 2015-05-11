@@ -18,11 +18,14 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.CloseableByteBuffer;
+import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.PureJavaCrc32C;
 import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 public final class Logs
 {
@@ -33,11 +36,15 @@ public final class Logs
     public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
-        if (options.useMMap()) {
-            return new MMapLogWriter(file, fileNumber);
-        }
-        else {
-            return new FileChannelLogWriter(file, fileNumber);
+        switch (options.logFileImplementation()) {
+            case MMAP:
+                return new MMapLogWriter(file, fileNumber);
+            case FILE:
+                return new FileChannelLogWriter(file, fileNumber);
+            case NOOP:
+                return new NoopLogger(file, fileNumber);
+            default:
+                throw new IllegalArgumentException("Unknown log file implementation:" + options.logFileImplementation());
         }
     }
 
@@ -53,5 +60,65 @@ public final class Logs
         crc32C.update(chunkTypeId);
         crc32C.update(buffer, offset, length);
         return crc32C.getMaskedValue();
+    }
+
+    private static class NoopLogger
+            extends LogWriter
+    {
+
+        protected NoopLogger(File file, long fileNumber)
+        {
+            super(file, fileNumber);
+        }
+
+        @Override
+        protected CloseableLogBuffer requestSpace(LongToIntFunction len)
+                throws IOException
+        {
+            return new CloseableLogBuffer(0L)
+            {
+
+                @Override
+                public CloseableByteBuffer putInt(int b)
+                        throws IOException
+                {
+                    return this;
+                }
+
+                @Override
+                public CloseableByteBuffer put(ByteBuffer b)
+                        throws IOException
+                {
+                    return this;
+                }
+
+                @Override
+                public CloseableByteBuffer put(byte[] b)
+                        throws IOException
+                {
+                    return this;
+                }
+
+                @Override
+                public CloseableByteBuffer put(byte b)
+                        throws IOException
+                {
+                    return this;
+                }
+
+                @Override
+                public void close()
+                        throws IOException
+                {
+                }
+            };
+        }
+
+        @Override
+        void sync()
+                throws IOException
+        {
+        }
+
     }
 }
