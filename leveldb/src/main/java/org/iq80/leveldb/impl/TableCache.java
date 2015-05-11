@@ -24,6 +24,7 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.table.FileChannelTable;
 import org.iq80.leveldb.table.MMapTable;
@@ -45,7 +46,10 @@ public class TableCache
     private final LoadingCache<Long, TableAndFile> cache;
     private final Finalizer<Table> finalizer = new Finalizer<>(1);
 
-    public TableCache(final File databaseDir, int tableCacheSize, final UserComparator userComparator, final boolean verifyChecksums, final boolean useMMap)
+    public TableCache(final File databaseDir,
+            int tableCacheSize,
+            final UserComparator userComparator,
+            final Options options)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
 
@@ -66,7 +70,7 @@ public class TableCache
                     public TableAndFile load(Long fileNumber)
                             throws IOException
                     {
-                        return new TableAndFile(databaseDir, fileNumber, userComparator, verifyChecksums, useMMap);
+                        return new TableAndFile(databaseDir, fileNumber, userComparator, options);
                     }
                 });
     }
@@ -118,7 +122,7 @@ public class TableCache
         private final Table table;
         private FileChannel fileChannel;
 
-        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, boolean verifyChecksums, boolean useMMap)
+        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, Options options)
                 throws IOException
         {
             String tableFileName = Filename.tableFileName(fileNumber);
@@ -141,11 +145,19 @@ public class TableCache
             }
 
             try {
-                if (useMMap) {
-                    table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
-                }
-                else {
-                    table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator, verifyChecksums);
+                switch (options.ioImplemenation()) {
+                    case MMAP:
+                        table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
+                                options.verifyChecksums());
+                        break;
+                    case FILE:
+                        table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
+                                options.verifyChecksums());
+                        break;
+                    case RAM:
+                        throw new UnsupportedOperationException("fixme");
+                    default:
+                        throw new IllegalArgumentException("Unknown IO implementation:" + options.ioImplemenation());
                 }
             }
             catch (IOException e) {

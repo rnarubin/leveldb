@@ -44,7 +44,9 @@ import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
@@ -55,6 +57,7 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.Slice;
@@ -816,6 +819,41 @@ public class DbImplTest
         }
     }
 
+    @Test
+    public void testTableSwap()
+            throws IOException, InterruptedException, ExecutionException
+    {
+        final int jobs = 10000;
+        final CountDownLatch latch = new CountDownLatch(jobs);
+
+        final DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(100)
+                .maxOpenFiles(10)
+                .throttleLevel0(false)
+                .ioImplementation(IOImpl.RAM), databaseDir);
+        char[] a = new char[50];
+        Arrays.fill(a, 'a');
+        final String sa = new String(a);
+
+        ConcurrencyHelper<Void> ch = new ConcurrencyHelper<Void>(8);
+        ch.submitAllAndWait(Collections.<Callable<Void>> nCopies(jobs, new Callable<Void>()
+        {
+                @Override
+                public Void call()
+                        throws Exception
+                {
+                    db.put(sa, sa);
+                    return null;
+                }
+        }), 3, TimeUnit.MINUTES);
+        ch.shutdown();
+        try {
+            // latch.await(5, TimeUnit.MINUTES);
+        }
+        finally {
+            ch.close();
+        }
+    }
+
     @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
     public void testCantCreateDirectoryReturnMessage()
             throws Exception
@@ -938,8 +976,8 @@ public class DbImplTest
                     }
                 });
             }
-            try (@SuppressWarnings("resource")
-            ConcurrencyHelper<?> c = new ConcurrencyHelper<Void>(threadCount).submitAll(work)) {
+            try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount)) {
+                c.submitAllAndWaitIgnoringResults(work);
             }
         }
 

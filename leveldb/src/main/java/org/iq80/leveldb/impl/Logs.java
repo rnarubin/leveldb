@@ -36,15 +36,16 @@ public final class Logs
     public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
-        switch (options.logFileImplementation()) {
+        switch (options.ioImplemenation()) {
             case MMAP:
                 return new MMapLogWriter(file, fileNumber);
             case FILE:
                 return new FileChannelLogWriter(file, fileNumber);
-            case NOOP:
-                return new NoopLogger(file, fileNumber);
+            case RAM:
+                // FIXME
+                throw new UnsupportedOperationException();
             default:
-                throw new IllegalArgumentException("Unknown log file implementation:" + options.logFileImplementation());
+                throw new IllegalArgumentException("Unknown log file implementation:" + options.ioImplemenation());
         }
     }
 

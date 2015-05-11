@@ -27,23 +27,41 @@ public class ConcurrencyHelper<T>
         pendingWork = new ArrayList<>();
     }
 
-    public ConcurrencyHelper<T> submitAll(Collection<Callable<T>> callables)
+    public List<T> submitAllAndWait(Collection<Callable<T>> callables, long timeOut, TimeUnit timeUnit)
+            throws InterruptedException, ExecutionException
     {
-        for (Callable<T> c : callables) {
-            pendingWork.add(threadPool.submit(c));
+        List<Future<T>> invoke = threadPool.invokeAll(callables, timeOut, timeUnit);
+        List<T> ret = new ArrayList<>(invoke.size());
+        for (Future<T> f : invoke) {
+            ret.add(f.get());
         }
+        return ret;
+    }
+
+    public ConcurrencyHelper<T> submitAllAndWaitIgnoringResults(Collection<Callable<T>> callables)
+            throws InterruptedException
+    {
+        return submitAllAndWaitIgnoringResults(callables, 1, TimeUnit.DAYS);
+    }
+
+    public ConcurrencyHelper<T> submitAllAndWaitIgnoringResults(Collection<Callable<T>> callables,
+            long timeOut,
+            TimeUnit timeUnit)
+            throws InterruptedException
+    {
+        threadPool.invokeAll(callables, timeOut, timeUnit);
         return this;
     }
 
-    public List<T> waitForFinish()
+    public List<T> submitAllAndWait(Collection<Callable<T>> callables)
             throws InterruptedException, ExecutionException
     {
-        List<T> ret = new ArrayList<>(pendingWork.size());
-        for (Future<T> f : pendingWork) {
-            ret.add(f.get());
-        }
-        pendingWork.clear();
-        return ret;
+        return submitAllAndWait(callables, 1, TimeUnit.DAYS);
+    }
+
+    public void shutdown()
+    {
+        threadPool.shutdown();
     }
 
     @Override

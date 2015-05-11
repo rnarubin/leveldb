@@ -22,7 +22,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multiset;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.Options.LogFileImpl;
+import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.Slice;
@@ -242,7 +242,9 @@ public abstract class LogTest
             });
             recordBag.add(s);
         }
-        new ConcurrencyHelper<Void>(threads).submitAll(work).close();
+        try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threads)) {
+            c.submitAllAndWaitIgnoringResults(work);
+        }
 
         if (closeWriter) {
             writer.close();
@@ -294,7 +296,7 @@ public abstract class LogTest
     {
         public FileLogTest()
         {
-            super(new Options().logFileImplementation(LogFileImpl.FILE));
+            super(new Options().ioImplementation(IOImpl.FILE));
         }
     }
 
@@ -303,7 +305,7 @@ public abstract class LogTest
     {
         public MMapLogTest()
         {
-            super(new Options().logFileImplementation(LogFileImpl.MMAP));
+            super(new Options().ioImplementation(IOImpl.MMAP));
         }
     }
 }

@@ -615,8 +615,8 @@ public class DBIteratorTest
                }
            });
        }
-       try {
-           new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
+        try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount)) {
+            c.submitAllAndWaitIgnoringResults(work);
        }
        catch (InterruptedException | ExecutionException e) {
            Assert.fail("failed to insert into db", e);
