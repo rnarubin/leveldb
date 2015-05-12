@@ -823,14 +823,14 @@ public class DbImplTest
     public void testTableSwap()
             throws IOException, InterruptedException, ExecutionException
     {
-        final int jobs = 10000;
+        final int jobs = 1000000;
         final CountDownLatch latch = new CountDownLatch(jobs);
 
-        final DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(100)
+        final DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(4 << 20)
                 .maxOpenFiles(10)
                 .throttleLevel0(false)
-                .ioImplementation(IOImpl.RAM), databaseDir);
-        char[] a = new char[50];
+, databaseDir);
+        char[] a = new char[500];
         Arrays.fill(a, 'a');
         final String sa = new String(a);
 

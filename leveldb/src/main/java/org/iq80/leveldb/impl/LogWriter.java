@@ -231,7 +231,6 @@ public abstract class LogWriter
 
         protected CloseableLogBuffer(long startPosition)
         {
-            super();
             this.lastEndPosition = startPosition;
         }
 

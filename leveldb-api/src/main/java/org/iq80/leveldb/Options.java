@@ -196,7 +196,7 @@ public class Options
     public enum IOImpl
     {
         // could include SMR in the future
-        MMAP, FILE, RAM
+        MMAP, FILE
     }
     
     public Options ioImplementation(IOImpl impl)

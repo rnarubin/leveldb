@@ -154,8 +154,6 @@ public class TableCache
                         table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
                                 options.verifyChecksums());
                         break;
-                    case RAM:
-                        throw new UnsupportedOperationException("fixme");
                     default:
                         throw new IllegalArgumentException("Unknown IO implementation:" + options.ioImplemenation());
                 }
