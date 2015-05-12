@@ -18,7 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
-import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPool.PooledObject;
@@ -39,13 +38,14 @@ public class FileChannelLogWriter
 
     private final FileChannel fileChannel;
     private final AtomicLong filePosition = new AtomicLong(0);
-    private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(64, 1024);
+    private final ObjectPool<ByteBuffer> scratchCache;
 
     @SuppressWarnings("resource")
-    public FileChannelLogWriter(File file, long fileNumber)
+    public FileChannelLogWriter(File file, long fileNumber, ObjectPool<ByteBuffer> scratchCache)
             throws IOException
     {
         super(file, fileNumber);
+        this.scratchCache = scratchCache;
         this.fileChannel = new FileOutputStream(file, false).getChannel();
     }
 

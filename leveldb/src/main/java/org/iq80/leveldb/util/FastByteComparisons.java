@@ -19,6 +19,7 @@
 package org.iq80.leveldb.util;
 
 import java.lang.reflect.Field;
+import java.nio.ByteOrder;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 
@@ -149,8 +150,7 @@ abstract class FastByteComparisons
                 }
             }
 
-            // for the purposes of the Slice class, consider everything littleEndian
-            static final boolean littleEndian = true;
+            static final boolean BIG_ENDIAN = false;// ByteOrder.nativeOrder().equals(ByteOrder.nativeOrder());
 
             /**
              * Returns true if x1 is less than x2, when both values are treated as unsigned.
@@ -199,7 +199,7 @@ abstract class FastByteComparisons
                     long diff = lw ^ rw;
 
                     if (diff != 0) {
-                        if (!littleEndian) {
+                        if (BIG_ENDIAN) {
                             return lessThanUnsigned(lw, rw) ? -1 : 1;
                         }
 
