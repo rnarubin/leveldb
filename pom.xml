@@ -6,7 +6,7 @@
 
 	<groupId>org.iq80.leveldb</groupId>
 	<artifactId>leveldb-project</artifactId>
-	<version>0.8-cs.8.2</version>
+	<version>0.8-cs.8.3</version>
 	<packaging>pom</packaging>
 
 	<name>${project.artifactId}</name>
