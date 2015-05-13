@@ -242,7 +242,7 @@ public abstract class LogTest
             });
             recordBag.add(s);
         }
-        try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threads)) {
+        try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threads, "testConcurrentLog")) {
             c.submitAllAndWaitIgnoringResults(work);
         }
 

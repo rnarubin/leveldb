@@ -10,20 +10,23 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 public class ConcurrencyHelper<T>
         implements AutoCloseable
 {
     ExecutorService threadPool;
     List<Future<T>> pendingWork;
 
-    public ConcurrencyHelper()
+    public ConcurrencyHelper(int threadCount)
     {
-        this(Runtime.getRuntime().availableProcessors());
+        this(threadCount, "unnamed-concurrency-helper");
     }
 
-    public ConcurrencyHelper(int threads)
+    public ConcurrencyHelper(int threads, String threadPrefix)
     {
-        threadPool = Executors.newFixedThreadPool(threads);
+        threadPool = Executors.newFixedThreadPool(threads,
+                new ThreadFactoryBuilder().setNameFormat(threadPrefix + "-%d").build());
         pendingWork = new ArrayList<>();
     }
 

@@ -35,6 +35,7 @@ import static org.testng.Assert.fail;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -44,9 +45,7 @@ import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
@@ -57,7 +56,6 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.Slice;
@@ -82,7 +80,8 @@ public class DbImplTest
 
     private File databaseDir;
 
-    @SuppressWarnings("resource")
+    private String testName;
+
     @Test
     public void testBackgroundCompaction()
             throws Exception
@@ -90,29 +89,32 @@ public class DbImplTest
         Options options = new Options();
         options.maxOpenFiles(100);
         options.createIfMissing(true);
-        DbImpl db = new DbImpl(options, this.databaseDir);
-        Random random = new Random(301);
-        for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-            db.put(randomString(random, 64).getBytes(), new byte[] {0x01}, new WriteOptions().sync(false));
-            db.get(randomString(random, 64).getBytes());
-            if ((i % 50000) == 0 && i != 0) {
-                System.out.println(i + " rows written");
+        try (DbImpl db = new DbImpl(options, this.databaseDir)) {
+            Random random = new Random(301);
+            for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, new WriteOptions().sync(false));
+                db.get(randomString(random, 64).getBytes());
+                if ((i % 50000) == 0 && i != 0) {
+                    System.out.println(i + " rows written");
+                }
             }
         }
     }
 
-    @SuppressWarnings("resource")
     @Test
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
         Options options = new Options();
         options.createIfMissing(true);
-        DbImpl db = new DbImpl(options, databaseDir);
-        for (int index = 0; index < 5000000; index++) {
-            String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
-            String value = "This is element " + index + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
-            db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+        try (DbImpl db = new DbImpl(options, databaseDir)) {
+            for (int index = 0; index < 5000000; index++) {
+                String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
+                String value = "This is element "
+                        + index
+                        + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
+                db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+            }
         }
     }
 
@@ -143,7 +145,7 @@ public class DbImplTest
         db.close();
 
         // reopen db
-        new Iq80DBFactory().open(databaseDir, options);
+        new Iq80DBFactory().open(databaseDir, options).close();
     }
 
     @Test
@@ -819,41 +821,6 @@ public class DbImplTest
         }
     }
 
-    @Test
-    public void testTableSwap()
-            throws IOException, InterruptedException, ExecutionException
-    {
-        final int jobs = 1000000;
-        final CountDownLatch latch = new CountDownLatch(jobs);
-
-        final DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(4 << 20)
-                .maxOpenFiles(10)
-                .throttleLevel0(false)
-, databaseDir);
-        char[] a = new char[500];
-        Arrays.fill(a, 'a');
-        final String sa = new String(a);
-
-        ConcurrencyHelper<Void> ch = new ConcurrencyHelper<Void>(8);
-        ch.submitAllAndWait(Collections.<Callable<Void>> nCopies(jobs, new Callable<Void>()
-        {
-                @Override
-                public Void call()
-                        throws Exception
-                {
-                    db.put(sa, sa);
-                    return null;
-                }
-        }), 3, TimeUnit.MINUTES);
-        ch.shutdown();
-        try {
-            // latch.await(5, TimeUnit.MINUTES);
-        }
-        finally {
-            ch.close();
-        }
-    }
-
     @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
     public void testCantCreateDirectoryReturnMessage()
             throws Exception
@@ -976,7 +943,7 @@ public class DbImplTest
                     }
                 });
             }
-            try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount)) {
+            try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount, testName)) {
                 c.submitAllAndWaitIgnoringResults(work);
             }
         }
@@ -1033,9 +1000,10 @@ public class DbImplTest
     }
 
     @BeforeMethod
-    public void setUp()
+    public void setUp(Method method)
             throws Exception
     {
+        testName = method.getName();
         databaseDir = FileUtils.createTempDir("leveldb");
     }
 

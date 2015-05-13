@@ -150,7 +150,7 @@ abstract class FastByteComparisons
                 }
             }
 
-            static final boolean BIG_ENDIAN = false;// ByteOrder.nativeOrder().equals(ByteOrder.nativeOrder());
+            static final boolean BIG_ENDIAN = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
 
             /**
              * Returns true if x1 is less than x2, when both values are treated as unsigned.

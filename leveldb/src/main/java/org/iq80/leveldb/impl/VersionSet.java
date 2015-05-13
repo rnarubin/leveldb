@@ -140,8 +140,9 @@ public class VersionSet
 
         Set<Version> versions = activeVersions.keySet();
         if (versions.size() > 0) {
-            LOGGER.warn("DB closed with " + versions.size()
-                    + " open snapshots. This could mean your application has a resource leak.");
+            // TODO fix snapshots/versions
+            LOGGER.trace("DB closed with " + versions.size()
+                    + " open versions. This could mean your application has a resource leak.");
         }
     }
 

@@ -163,7 +163,6 @@ public class DbImpl
                 .build();
         compactionExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, backgroundCompaction,
                 compactionThreadFactory);
-        compactionExecutor.prestartAllCoreThreads();
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
@@ -245,6 +244,7 @@ public class DbImpl
 
             // schedule compactions
             maybeScheduleCompaction();
+            compactionExecutor.prestartAllCoreThreads();
         }
         finally {
             mutex.unlock();
@@ -549,11 +549,12 @@ public class DbImpl
         }
     }
 
+    private static final ReadOptions DEFAULT_READ_OPTIONS = new ReadOptions();
     @Override
     public byte[] get(byte[] key)
             throws DBException
     {
-        return get(key, new ReadOptions());
+        return get(key, DEFAULT_READ_OPTIONS);
     }
 
     @Override
@@ -615,11 +616,12 @@ public class DbImpl
         return null;
     }
 
+    private static final WriteOptions DEFAULT_WRITE_OPTIONS = new WriteOptions();
     @Override
     public void put(byte[] key, byte[] value)
             throws DBException
     {
-        put(key, value, new WriteOptions());
+        put(key, value, DEFAULT_WRITE_OPTIONS);
     }
 
     @SuppressWarnings("resource")
@@ -635,7 +637,7 @@ public class DbImpl
     public void delete(byte[] key)
             throws DBException
     {
-        writeInternal(new WriteBatchImpl().delete(key), new WriteOptions());
+        writeInternal(new WriteBatchImpl().delete(key), DEFAULT_WRITE_OPTIONS);
     }
 
     @SuppressWarnings("resource")
@@ -650,7 +652,7 @@ public class DbImpl
     public void write(WriteBatch updates)
             throws DBException
     {
-        writeInternal((WriteBatchImpl) updates, new WriteOptions());
+        writeInternal((WriteBatchImpl) updates, DEFAULT_WRITE_OPTIONS);
     }
 
     @Override
