@@ -20,16 +20,23 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBFactory;
+import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.FileUtils;
+import org.testng.Assert;
 import org.testng.annotations.Test;
+
+import com.google.common.collect.Maps;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.testng.Assert.assertNull;
@@ -150,11 +157,36 @@ public class NativeInteropTest
         assertEquals(db.get(bytes("London"), ro), bytes("red"));
         assertEquals(db.get(bytes("New York"), ro), bytes("blue"));
 
+        try (DBIterator iter = db.iterator(ro)) {
+            iter.seekToFirst();
+            Entry<byte[], byte[]> next = iter.next();
+            assertEquals(next.getKey(), bytes("London"));
+            assertEquals(next.getValue(), bytes("red"));
+            next = iter.next();
+            assertEquals(next.getKey(), bytes("New York"));
+            assertEquals(next.getValue(), bytes("blue"));
+            next = iter.next();
+            assertEquals(next.getKey(), bytes("Tampa"));
+            assertEquals(next.getValue(), bytes("green"));
+            Assert.assertFalse(iter.hasNext());
+        }
+
         db.delete(bytes("New York"), wo);
 
         assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
         assertEquals(db.get(bytes("London"), ro), bytes("red"));
         assertNull(db.get(bytes("New York"), ro));
+
+        try (DBIterator iter = db.iterator(ro)) {
+            iter.seekToFirst();
+            Entry<byte[], byte[]> next = iter.next();
+            assertEquals(next.getKey(), bytes("London"));
+            assertEquals(next.getValue(), bytes("red"));
+            next = iter.next();
+            assertEquals(next.getKey(), bytes("Tampa"));
+            assertEquals(next.getValue(), bytes("green"));
+            Assert.assertFalse(iter.hasNext());
+        }
 
         db.close();
         db = firstFactory.open(path, options);
@@ -162,6 +194,17 @@ public class NativeInteropTest
         assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
         assertEquals(db.get(bytes("London"), ro), bytes("red"));
         assertNull(db.get(bytes("New York"), ro));
+
+        try (DBIterator iter = db.iterator(ro)) {
+            iter.seekToFirst();
+            Entry<byte[], byte[]> next = iter.next();
+            assertEquals(next.getKey(), bytes("London"));
+            assertEquals(next.getValue(), bytes("red"));
+            next = iter.next();
+            assertEquals(next.getKey(), bytes("Tampa"));
+            assertEquals(next.getValue(), bytes("green"));
+            Assert.assertFalse(iter.hasNext());
+        }
 
         db.close();
     }

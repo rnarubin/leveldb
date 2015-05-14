@@ -19,7 +19,6 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.ConcurrentNonCopyWriter;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
@@ -79,6 +78,9 @@ public abstract class LogWriter
         return fileNumber;
     }
 
+    protected abstract CloseableLogBuffer requestSpace(LongToIntFunction len)
+            throws IOException;
+
     protected void buildRecord(final SliceInput sliceInput)
             throws IOException
     {
@@ -86,7 +88,7 @@ public abstract class LogWriter
         // is empty, we still want to iterate once to write a single
         // zero-length chunk.
 
-        try (CloseableLogBuffer buffer = getWriter().requestSpace(new LongToIntFunction()
+        try (CloseableLogBuffer buffer = requestSpace(new LongToIntFunction()
         {
             @Override
             public int applyAsInt(long previousWrite)
@@ -186,8 +188,6 @@ public abstract class LogWriter
         }
     }
 
-    abstract ConcurrentNonCopyWriter<CloseableLogBuffer> getWriter();
-
     abstract void sync()
             throws IOException;
 
@@ -231,7 +231,6 @@ public abstract class LogWriter
 
         protected CloseableLogBuffer(long startPosition)
         {
-            super();
             this.lastEndPosition = startPosition;
         }
 

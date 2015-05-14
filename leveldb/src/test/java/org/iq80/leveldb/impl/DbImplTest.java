@@ -35,6 +35,7 @@ import static org.testng.Assert.fail;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -79,7 +80,8 @@ public class DbImplTest
 
     private File databaseDir;
 
-    @SuppressWarnings("resource")
+    private String testName;
+
     @Test
     public void testBackgroundCompaction()
             throws Exception
@@ -87,29 +89,32 @@ public class DbImplTest
         Options options = new Options();
         options.maxOpenFiles(100);
         options.createIfMissing(true);
-        DbImpl db = new DbImpl(options, this.databaseDir);
-        Random random = new Random(301);
-        for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-            db.put(randomString(random, 64).getBytes(), new byte[] {0x01}, new WriteOptions().sync(false));
-            db.get(randomString(random, 64).getBytes());
-            if ((i % 50000) == 0 && i != 0) {
-                System.out.println(i + " rows written");
+        try (DbImpl db = new DbImpl(options, this.databaseDir)) {
+            Random random = new Random(301);
+            for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, new WriteOptions().sync(false));
+                db.get(randomString(random, 64).getBytes());
+                if ((i % 50000) == 0 && i != 0) {
+                    System.out.println(i + " rows written");
+                }
             }
         }
     }
 
-    @SuppressWarnings("resource")
     @Test
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
         Options options = new Options();
         options.createIfMissing(true);
-        DbImpl db = new DbImpl(options, databaseDir);
-        for (int index = 0; index < 5000000; index++) {
-            String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
-            String value = "This is element " + index + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
-            db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+        try (DbImpl db = new DbImpl(options, databaseDir)) {
+            for (int index = 0; index < 5000000; index++) {
+                String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
+                String value = "This is element "
+                        + index
+                        + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
+                db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+            }
         }
     }
 
@@ -140,7 +145,7 @@ public class DbImplTest
         db.close();
 
         // reopen db
-        new Iq80DBFactory().open(databaseDir, options);
+        new Iq80DBFactory().open(databaseDir, options).close();
     }
 
     @Test
@@ -938,8 +943,8 @@ public class DbImplTest
                     }
                 });
             }
-            try (@SuppressWarnings("resource")
-            ConcurrencyHelper<?> c = new ConcurrencyHelper<Void>(threadCount).submitAll(work)) {
+            try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount, testName)) {
+                c.submitAllAndWaitIgnoringResults(work);
             }
         }
 
@@ -995,9 +1000,10 @@ public class DbImplTest
     }
 
     @BeforeMethod
-    public void setUp()
+    public void setUp(Method method)
             throws Exception
     {
+        testName = method.getName();
         databaseDir = FileUtils.createTempDir("leveldb");
     }
 

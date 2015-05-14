@@ -41,7 +41,7 @@ public class Options
     // into memory.  If you really want to use MMAP anyways, use -Dleveldb.mmap=true
     // or set useMMap(boolean) to true
     public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", "" + (CPU_DATA_MODEL > 32)));
-    private boolean useMMap = USE_MMAP_DEFAULT;
+    private IOImpl io = USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE;
 
     private boolean throttleLevel0 = true;
 
@@ -192,16 +192,22 @@ public class Options
         this.paranoidChecks = paranoidChecks;
         return this;
     }
-
-    public boolean useMMap()
+    
+    public enum IOImpl
     {
-        return useMMap;
+        // could include SMR in the future
+        MMAP, FILE
+    }
+    
+    public Options ioImplementation(IOImpl impl)
+    {
+        this.io = impl;
+        return this;
     }
 
-    public Options useMMap(boolean useMMap)
+    public IOImpl ioImplemenation()
     {
-        this.useMMap = useMMap;
-        return this;
+        return io;
     }
 
     public boolean throttleLevel0()

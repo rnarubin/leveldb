@@ -27,6 +27,7 @@ import org.iq80.leveldb.WriteOptions;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -44,6 +45,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.impl.Iq80DBFactory;
@@ -60,6 +62,7 @@ import org.testng.annotations.Test;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static org.testng.Assert.assertEquals;
@@ -73,6 +76,7 @@ public class DBIteratorTest
     private final Options options = new Options().createIfMissing(true);
     private DB db;
     private File tempDir;
+    private String testName;
 
     static {
         Random rand = new Random(0);
@@ -95,9 +99,10 @@ public class DBIteratorTest
     }
 
     @BeforeMethod
-    protected void setUp()
+    protected void setUp(Method method)
             throws Exception
     {
+        testName = method.getName();
         tempDir = FileUtils.createTempDir("java-leveldb-testing-temp");
         db = Iq80DBFactory.factory.open(tempDir, options);
     }
@@ -191,8 +196,8 @@ public class DBIteratorTest
         final int size = expectedForward.size();
         final int seekCheckDist = (int) (size * seekCheck);
         final int coreNum = Runtime.getRuntime().availableProcessors();
-        ExecutorService pool =
-                Executors.newFixedThreadPool(coreNum);
+        ExecutorService pool = Executors.newFixedThreadPool(coreNum,
+                new ThreadFactoryBuilder().setNameFormat(testName + "-%d").build());
         List<Future<Void>> work = new ArrayList<Future<Void>>();
         Random rand = new Random(0);
 
@@ -223,8 +228,14 @@ public class DBIteratorTest
             i++;
         }
 
-        for (Future<Void> f : work) {
-            f.get();
+        try {
+            for (Future<Void> f : work) {
+                f.get();
+            }
+        }
+        finally {
+            pool.shutdown();
+            pool.awaitTermination(30, TimeUnit.MINUTES);
         }
     }
 
@@ -236,7 +247,8 @@ public class DBIteratorTest
         StringDbIterator actual = new StringDbIterator(db.iterator());
 
         int concurrency = 10;
-        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+        ExecutorService pool = Executors.newFixedThreadPool(concurrency,
+                new ThreadFactoryBuilder().setNameFormat(testName + "-%d").build());
         List<Future<Void>> work = new ArrayList<Future<Void>>();
         for (int i = 0; i < concurrency; i++) {
             final int j = i;
@@ -281,8 +293,14 @@ public class DBIteratorTest
             assertBackwardSame(actual, rOrdered.subList(rOrdered.size() - index, Math.min(rOrdered.size(), rOrdered.size() - index + dist)), false);
         }
 
-        for (Future<Void> job : work) {
-            job.cancel(true);
+        try {
+            for (Future<Void> job : work) {
+                job.cancel(true);
+            }
+        }
+        finally {
+            pool.shutdown();
+            pool.awaitTermination(30, TimeUnit.MINUTES);
         }
     }
 
@@ -597,7 +615,7 @@ public class DBIteratorTest
         assertEquals(expected, items);
     }
 
-    private static void putAll(final DB db, final List<Entry<String, String>> entries)
+    private void putAll(final DB db, final List<Entry<String, String>> entries)
     {
        final int threadCount = 8;
        List<Callable<Void>> work = new ArrayList<>(threadCount);
@@ -615,8 +633,8 @@ public class DBIteratorTest
                }
            });
        }
-       try {
-           new ConcurrencyHelper<Void>(threadCount).submitAll(work).close();
+        try (ConcurrencyHelper<Void> c = new ConcurrencyHelper<Void>(threadCount, testName)) {
+            c.submitAllAndWaitIgnoringResults(work);
        }
        catch (InterruptedException | ExecutionException e) {
            Assert.fail("failed to insert into db", e);

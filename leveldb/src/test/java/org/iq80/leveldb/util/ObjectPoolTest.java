@@ -92,9 +92,9 @@ public class ObjectPoolTest
                     }
                 });
             }
-            try (ConcurrencyHelper<List<PooledObject<DummyClass>>> conc = new ConcurrencyHelper<>(threadCount)) {
-                conc.submitAll(work);
-                List<List<PooledObject<DummyClass>>> results = conc.waitForFinish();
+            try (ConcurrencyHelper<List<PooledObject<DummyClass>>> conc = new ConcurrencyHelper<>(threadCount,
+                    "fixedAllocatingTest")) {
+                List<List<PooledObject<DummyClass>>> results = conc.submitAllAndWait(work);
 
                 Assert.assertNull(pool.tryAcquire());
                 Assert.assertTrue(pool.acquire().get().id > initSize);

@@ -18,11 +18,14 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ObjectPool;
+import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.PureJavaCrc32C;
 import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 public final class Logs
 {
@@ -33,11 +36,22 @@ public final class Logs
     public static LogWriter createLogWriter(File file, long fileNumber, Options options)
             throws IOException
     {
-        if (options.useMMap()) {
-            return new MMapLogWriter(file, fileNumber);
-        }
-        else {
-            return new FileChannelLogWriter(file, fileNumber);
+        return createLogWriter(file, fileNumber, options, ObjectPools.directBufferPool(16, 4096));
+    }
+
+    public static LogWriter createLogWriter(File file,
+            long fileNumber,
+            Options options,
+            ObjectPool<ByteBuffer> scratchCache)
+            throws IOException
+    {
+        switch (options.ioImplemenation()) {
+            case MMAP:
+                return new MMapLogWriter(file, fileNumber);
+            case FILE:
+                return new FileChannelLogWriter(file, fileNumber, scratchCache);
+            default:
+                throw new IllegalArgumentException("Unknown log file implementation:" + options.ioImplemenation());
         }
     }
 

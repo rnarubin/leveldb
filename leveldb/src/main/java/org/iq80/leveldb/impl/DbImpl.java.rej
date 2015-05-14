@@ -1,0 +1,32 @@
+diff a/leveldb/src/main/java/org/iq80/leveldb/impl/DbImpl.java b/leveldb/src/main/java/org/iq80/leveldb/impl/DbImpl.java	(rejected hunks)
+@@ -148,15 +156,18 @@ public class DbImpl
+                     public void uncaughtException(Thread t, Throwable e)
+                     {
+                         // todo need a real UncaughtExceptionHandler
+-                        LOGGER.error("error in thread {}", e);
++                        LOGGER.error("{} error in background thread {}", DbImpl.this, e);
++                        backgroundException = e;
+                     }
+                 })
+                 .build();
+-        compactionExecutor = Executors.newSingleThreadExecutor(compactionThreadFactory);
++        compactionExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, backgroundCompaction,
++                compactionThreadFactory);
+ 
+         // Reserve ten files or so for other uses and give the rest to TableCache.
+         int tableCacheSize = options.maxOpenFiles() - 10;
+-        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator), options.verifyChecksums(), options.useMMap());
++        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator),
++                options);
+ 
+         // create the version set
+ 
+@@ -327,7 +334,7 @@ public class DbImpl
+                 if (fileInfo.getFileType() == FileType.TABLE) {
+                     tableCache.evict(number);
+                 }
+-                LOGGER.debug("Delete type={} #{}", fileInfo.getFileType(), number);
++                LOGGER.debug("{} delete type={} #{}", this, fileInfo.getFileType(), number);
+                 file.delete();
+             }
+         }
