@@ -156,6 +156,10 @@ public class DbBenchmark
     {
         printHeader();
         open();
+        if (Boolean.parseBoolean(System.getProperty("leveldb.benchmark.pause", "false"))) {
+            System.out.println("Press any key to begin");
+            System.in.read();
+        }
 
         for (String benchmark : benchmarks) {
             start();
@@ -936,7 +940,7 @@ public class DbBenchmark
                     }
                 },
         // If running concurrently, how many parallel threads
-        thread_count(20)
+        thread_count(8)
                 {
                    @Override
                    public Object parseValue(String value)
