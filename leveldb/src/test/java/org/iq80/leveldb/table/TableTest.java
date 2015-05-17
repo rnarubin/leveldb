@@ -122,7 +122,7 @@ public abstract class TableTest
         Collections.reverse(reverseEntries);
 
         reopenFile();
-        Options options = new Options().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
+        Options options = Options.make().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
         TableBuilder builder = new TableBuilder(options, fileChannel, new BytewiseComparator());
 
         for (BlockEntry entry : entries) {

@@ -338,7 +338,7 @@ public class DbBenchmark
     static {
         NavigableSet<String> propSet = new TreeSet<String>(System.getProperties().stringPropertyNames());
         String prefix = "leveldb.";
-        Options opt = new Options();
+        Options opt = Options.make();
         for (String prop : propSet.subSet(prefix, true,
                 prefix.substring(0, prefix.length() - 1) + (prefix.charAt(prefix.length() - 1) + 1), false)) {
             String val = System.getProperty(prop);

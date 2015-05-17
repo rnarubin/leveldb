@@ -296,7 +296,7 @@ public abstract class LogTest
     {
         public FileLogTest()
         {
-            super(new Options().ioImplementation(IOImpl.FILE));
+            super(Options.make().ioImplementation(IOImpl.FILE));
         }
     }
 
@@ -305,7 +305,7 @@ public abstract class LogTest
     {
         public MMapLogTest()
         {
-            super(new Options().ioImplementation(IOImpl.MMAP));
+            super(Options.make().ioImplementation(IOImpl.MMAP));
         }
     }
 }

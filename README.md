@@ -23,7 +23,7 @@ Recommended Package imports:
 
 Opening and closing the database.
 
-    Options options = new Options();
+    Options options = Options.make();
     options.createIfMissing(true);
     DB db = factory.open(new File("example"), options);
     try {
@@ -100,19 +100,19 @@ Using a custom Comparator.
             return key;
         }
     };
-    Options options = new Options();
+    Options options = Options.make();
     options.comparator(comparator);
     DB db = factory.open(new File("example"), options);
     
 Disabling Compression
 
-    Options options = new Options();
+    Options options = Options.make();
     options.compressionType(CompressionType.NONE);
     DB db = factory.open(new File("example"), options);
 
 Configuring the Cache
     
-    Options options = new Options();
+    Options options = Options.make();
     options.cacheSize(100 * 1048576); // 100MB cache
     DB db = factory.open(new File("example"), options);
 
@@ -133,13 +133,13 @@ Getting informational log messages.
         System.out.println(message);
       }
     };
-    Options options = new Options();
+    Options options = Options.make();
     options.logger(logger);
     DB db = factory.open(new File("example"), options);
 
 Destroying a database.
     
-    Options options = new Options();
+    Options options = Options.make();
     factory.destroy(new File("example"), options);
 
 # Projects using this port of LevelDB
