@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBFactory;
@@ -29,14 +28,10 @@ import org.iq80.leveldb.util.FileUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicInteger;
 

@@ -33,7 +33,7 @@ import java.util.Arrays;
 import static org.testng.Assert.assertTrue;
 
 /**
- * Test the implemenation via the org.iq80.leveldb API.
+ * Test the implementation via the org.iq80.leveldb API.
  *
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
