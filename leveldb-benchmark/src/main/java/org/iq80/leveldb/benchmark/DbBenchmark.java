@@ -300,7 +300,7 @@ public class DbBenchmark
     private void open()
             throws IOException
     {
-        Options options = new Options();
+        Options options = Options.make();
         options.createIfMissing(!useExisting);
         // todo block cache
         if (writeBufferSize != null) {
@@ -533,7 +533,7 @@ public class DbBenchmark
 
     private void snappyCompress()
     {
-        byte[] raw = generator.generate(new Options().blockSize());
+        byte[] raw = generator.generate(Options.make().blockSize());
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(raw.length)];
 
         long produced = 0;
@@ -557,7 +557,7 @@ public class DbBenchmark
 
     private void snappyUncompressArray()
     {
-        int inputSize = new Options().blockSize();
+        int inputSize = Options.make().blockSize();
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
         byte[] raw = generator.generate(inputSize);
         int compressedLength;
@@ -583,7 +583,7 @@ public class DbBenchmark
 
     private void snappyUncompressDirectBuffer()
     {
-        int inputSize = new Options().blockSize();
+        int inputSize = Options.make().blockSize();
         byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
         byte[] raw = generator.generate(inputSize);
         int compressedLength;

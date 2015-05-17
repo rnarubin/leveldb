@@ -73,7 +73,7 @@ import static org.testng.Assert.fail;
 public class DBIteratorTest
 {
     private static final List<Entry<String, String>> entries, ordered, rOrdered;
-    private final Options options = new Options().createIfMissing(true);
+    private final Options options = Options.make().createIfMissing(true);
     private DB db;
     private File tempDir;
     private String testName;

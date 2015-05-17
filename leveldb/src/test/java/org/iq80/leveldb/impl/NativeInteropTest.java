@@ -103,7 +103,7 @@ public class NativeInteropTest
             throws IOException
     {
         File rc = new File(databaseDir, name);
-        iq80factory.destroy(rc, new Options().createIfMissing(true));
+        iq80factory.destroy(rc, Options.make().createIfMissing(true));
         rc.mkdirs();
         return rc;
     }
@@ -139,7 +139,7 @@ public class NativeInteropTest
     public void crud(DBFactory firstFactory, DBFactory secondFactory)
             throws IOException, DBException
     {
-        Options options = new Options().createIfMissing(true);
+        Options options = Options.make().createIfMissing(true);
 
         File path = getTestDirectory(getClass().getName() + "_" + NEXT_ID.incrementAndGet());
         DB db = firstFactory.open(path, options);

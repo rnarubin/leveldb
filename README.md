@@ -26,7 +26,7 @@ import java.io.*;
 Opening and closing the database.
 
 ```java
-Options options = new Options();
+Options options = Options.make();
 options.createIfMissing(true);
 DB db = factory.open(new File("example"), options);
 try {
@@ -113,7 +113,7 @@ DBComparator comparator = new DBComparator(){
         return key;
     }
 };
-Options options = new Options();
+Options options = Options.make();
 options.comparator(comparator);
 DB db = factory.open(new File("example"), options);
 ```
@@ -121,7 +121,7 @@ DB db = factory.open(new File("example"), options);
 Disabling Compression
 
 ```java
-Options options = new Options();
+Options options = Options.make();
 options.compressionType(CompressionType.NONE);
 DB db = factory.open(new File("example"), options);
 ```
@@ -129,7 +129,7 @@ DB db = factory.open(new File("example"), options);
 Configuring the Cache
 
 ```java    
-Options options = new Options();
+Options options = Options.make();
 options.cacheSize(100 * 1048576); // 100MB cache
 DB db = factory.open(new File("example"), options);
 ```
@@ -156,7 +156,7 @@ Logger logger = new Logger() {
     System.out.println(message);
   }
 };
-Options options = new Options();
+Options options = Options.make();
 options.logger(logger);
 DB db = factory.open(new File("example"), options);
 ```
@@ -164,7 +164,7 @@ DB db = factory.open(new File("example"), options);
 Destroying a database.
 
 ```java    
-Options options = new Options();
+Options options = Options.make();
 factory.destroy(new File("example"), options);
 ```
 

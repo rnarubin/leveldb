@@ -76,7 +76,7 @@ public abstract class TestLogWriter
     {
         public TestFileChannel()
         {
-            super(new Options().ioImplementation(IOImpl.FILE));
+            super(Options.make().ioImplementation(IOImpl.FILE));
         }
     }
 
@@ -85,7 +85,7 @@ public abstract class TestLogWriter
     {
         public TestMMap()
         {
-            super(new Options().ioImplementation(IOImpl.MMAP));
+            super(Options.make().ioImplementation(IOImpl.MMAP));
         }
     }
 }
