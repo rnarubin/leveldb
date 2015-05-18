@@ -139,8 +139,7 @@ public class TableCache
                     fileChannel = new FileInputStream(tableFile).getChannel();
                 }
                 catch (FileNotFoundException sstNotFound) {
-                    throw new FileNotFoundException("Neither " + Filename.tableFileName(fileNumber)
-                            + " nor " + tableFileName + " could be found");
+                    throw ldbNotFound;
                 }
             }
 
