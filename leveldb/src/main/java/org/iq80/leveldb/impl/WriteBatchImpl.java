@@ -31,8 +31,13 @@ import static com.google.common.collect.Lists.newArrayList;
 public class WriteBatchImpl
         implements WriteBatch
 {
-    private final List<Entry<Slice, Slice>> batch = newArrayList();
-    private int approximateSize;
+    private final List<Entry<Slice, Slice>> batch;
+    protected int approximateSize;
+    
+    public WriteBatchImpl()
+    {
+        batch = newArrayList();
+    }
 
     public int getApproximateSize()
     {
@@ -104,5 +109,42 @@ public class WriteBatchImpl
         void put(Slice key, Slice value);
 
         void delete(Slice key);
+    }
+    
+    static class WriteBatchSingle
+            extends WriteBatchImpl
+    {
+        private final Slice key, value;
+
+        WriteBatchSingle(byte[] key)
+        {
+            this.key = Slices.wrappedBuffer(key);
+            this.value = null;
+            this.approximateSize = 6 + key.length;
+        }
+
+        WriteBatchSingle(byte[] key, byte[] value)
+        {
+            this.key = Slices.wrappedBuffer(key);
+            this.value = Slices.wrappedBuffer(value);
+            this.approximateSize = 12 + key.length + value.length;
+        }
+
+        @Override
+        public int size()
+        {
+            return 1;
+        }
+
+        @Override
+        public void forEach(Handler handler)
+        {
+            if (value != null) {
+                handler.put(key, value);
+            }
+            else {
+                handler.delete(key);
+            }
+        }
     }
 }
