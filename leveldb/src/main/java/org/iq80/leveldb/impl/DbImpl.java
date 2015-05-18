@@ -624,28 +624,25 @@ public class DbImpl
         put(key, value, DEFAULT_WRITE_OPTIONS);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl().put(key, value), options);
+        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key, value), options);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public void delete(byte[] key)
             throws DBException
     {
-        writeInternal(new WriteBatchImpl().delete(key), DEFAULT_WRITE_OPTIONS);
+        delete(key, DEFAULT_WRITE_OPTIONS);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public Snapshot delete(byte[] key, WriteOptions options)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl().delete(key), options);
+        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key), options);
     }
 
     @Override
