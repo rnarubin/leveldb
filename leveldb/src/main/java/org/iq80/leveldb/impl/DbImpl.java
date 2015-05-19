@@ -123,12 +123,12 @@ public class DbImpl
 
     private ManualCompaction manualCompaction;
 
-    public DbImpl(Options options, File databaseDir)
+    public DbImpl(Options userOptions, File databaseDir)
             throws IOException
     {
-        Preconditions.checkNotNull(options, "options is null");
+        Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
-        this.options = options;
+        this.options = Options.copy(userOptions);
 
         if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.
