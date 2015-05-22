@@ -31,8 +31,7 @@ import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
 
 public final class LevelIterator
         extends AbstractReverseSeekingIterator<InternalKey, Slice>
-        implements
-        InternalIterator
+        implements InternalIterator
 {
     private final TableCache tableCache;
     private final List<FileMetaData> files;
@@ -56,6 +55,7 @@ public final class LevelIterator
     {
         // reset index to before first and clear the data iterator
         index = 0;
+        closeCurrent();
         current = null;
         currentOrigin = NONE;
     }
@@ -121,6 +121,7 @@ public final class LevelIterator
             current.seek(targetKey);
         }
         else {
+            closeCurrent();
             current = null;
             currentOrigin = NONE;
         }
@@ -191,6 +192,7 @@ public final class LevelIterator
             }
         }
         if (!currentHasNext) {
+            closeCurrent();
             current = null;
             currentOrigin = NONE;
         }
@@ -221,6 +223,7 @@ public final class LevelIterator
             }
         }
         if (!currentHasPrev) {
+            closeCurrent();
             current = null;
             currentOrigin = NONE;
         }
@@ -229,6 +232,7 @@ public final class LevelIterator
 
     private InternalTableIterator openFile(int i)
     {
+        closeCurrent();
         return tableCache.newIterator(files.get(i));
     }
 
@@ -254,5 +258,18 @@ public final class LevelIterator
         sb.append(", current=").append(current);
         sb.append('}');
         return sb.toString();
+    }
+
+    @Override
+    public void close()
+    {
+        closeCurrent();
+    }
+
+    private void closeCurrent()
+    {
+        if (current != null) {
+            current.close();
+        }
     }
 }

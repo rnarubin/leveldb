@@ -19,11 +19,14 @@ package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.TableIterator;
 import org.iq80.leveldb.util.VariableLengthQuantity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -31,16 +34,19 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class Table
-        implements SeekingIterable<Slice, Slice>
+        implements SeekingIterable<Slice, Slice>, AutoCloseable
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
     protected final String name;
     protected final FileChannel fileChannel;
     protected final Comparator<Slice> comparator;
     protected final boolean verifyChecksums;
     protected final Block indexBlock;
     protected final BlockHandle metaindexBlockHandle;
+    private final AtomicInteger refCount;
 
     public Table(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
             throws IOException
@@ -60,6 +66,7 @@ public abstract class Table
         Footer footer = init();
         indexBlock = readBlock(footer.getIndexBlockHandle());
         metaindexBlockHandle = footer.getMetaindexBlockHandle();
+        this.refCount = new AtomicInteger(1);
     }
 
     protected abstract Footer init()
@@ -90,7 +97,6 @@ public abstract class Table
             throws IOException;
 
     protected int uncompressedLength(ByteBuffer data)
-            throws IOException
     {
         int length = VariableLengthQuantity.readVariableLengthInt(data.duplicate());
         return length;
@@ -129,6 +135,57 @@ public abstract class Table
         sb.append(", verifyChecksums=").append(verifyChecksums);
         sb.append('}');
         return sb.toString();
+    }
+
+    public Table retain()
+    {
+        int count;
+        do {
+            count = refCount.get();
+            if (count == 0) {
+                // raced with a final release,
+                // force the caller to re-read from cache
+                return null;
+            }
+        }
+        while (!refCount.compareAndSet(count, count + 1));
+        return this;
+    }
+
+    public void release()
+    {
+        if (refCount.decrementAndGet() == 0) {
+            try {
+                closer().call();
+            }
+            catch (Exception e) {
+            }
+        }
+    }
+
+    @Override
+    public void close()
+    {
+        release();
+    }
+
+    @Override
+    public void finalize()
+            throws Throwable
+    {
+        if (refCount.get() != 0) {
+            LOGGER.warn("table finalized with {} open refs", refCount.get());
+        }
+        try {
+            closer().call();
+        }
+        catch (Exception e) {
+            LOGGER.warn("exception in finalizing table", e);
+            throw e;
+        }
+        finally {
+            super.finalize();
+        }
     }
 
     public Callable<?> closer()

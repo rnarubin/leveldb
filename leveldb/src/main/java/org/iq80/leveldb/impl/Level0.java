@@ -19,9 +19,9 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalTableIterator;
-import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.Slice;
 
 import java.util.Collections;
@@ -36,7 +36,6 @@ import static org.iq80.leveldb.impl.ValueType.VALUE;
 
 // todo this class should be immutable
 public class Level0
-        implements SeekingIterable<InternalKey, Slice>
 {
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
@@ -72,12 +71,6 @@ public class Level0
         return files;
     }
 
-    @Override
-    public Level0Iterator iterator()
-    {
-        return new Level0Iterator(tableCache, files, internalKeyComparator);
-    }
-
     public LookupResult get(LookupKey key, ReadStats readStats)
     {
         if (files.isEmpty()) {
@@ -97,24 +90,25 @@ public class Level0
         readStats.clear();
         for (FileMetaData fileMetaData : fileMetaDataList) {
             // open the iterator
-            InternalTableIterator iterator = tableCache.newIterator(fileMetaData);
+            try (InternalTableIterator iterator = tableCache.newIterator(fileMetaData)) {
+                // seek to the key
+                iterator.seek(key.getInternalKey());
 
-            // seek to the key
-            iterator.seek(key.getInternalKey());
+                if (iterator.hasNext()) {
+                    // parse the key in the block
+                    Entry<InternalKey, Slice> entry = iterator.next();
+                    InternalKey internalKey = entry.getKey();
+                    Preconditions.checkState(internalKey != null, "Corrupt key for %s", key.getUserKey()
+                            .toString(UTF_8));
 
-            if (iterator.hasNext()) {
-                // parse the key in the block
-                Entry<InternalKey, Slice> entry = iterator.next();
-                InternalKey internalKey = entry.getKey();
-                Preconditions.checkState(internalKey != null, "Corrupt key for %s", key.getUserKey().toString(UTF_8));
-
-                // if this is a value key (not a delete) and the keys match, return the value
-                if (key.getUserKey().equals(internalKey.getUserKey())) {
-                    if (internalKey.getValueType() == ValueType.DELETION) {
-                        return LookupResult.deleted(key);
-                    }
-                    else if (internalKey.getValueType() == VALUE) {
-                        return LookupResult.ok(key, entry.getValue());
+                    // if this is a value key (not a delete) and the keys match, return the value
+                    if (key.getUserKey().equals(internalKey.getUserKey())) {
+                        if (internalKey.getValueType() == ValueType.DELETION) {
+                            return LookupResult.deleted(key);
+                        }
+                        else if (internalKey.getValueType() == VALUE) {
+                            return LookupResult.ok(key, entry.getValue());
+                        }
                     }
                 }
             }

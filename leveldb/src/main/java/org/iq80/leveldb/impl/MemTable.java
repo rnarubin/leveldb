@@ -207,5 +207,11 @@ public class MemTable
         {
             return iterator.hasPrev();
         }
+
+        @Override
+        public void close()
+        {
+            // noop
+        }
     }
 }
