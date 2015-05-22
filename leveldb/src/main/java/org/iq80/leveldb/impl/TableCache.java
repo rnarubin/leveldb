@@ -62,6 +62,7 @@ public class TableCache
                     {
                         Table table = notification.getValue().getTable();
                         finalizer.addCleanup(table, table.closer());
+                        table.release(); // corresponding to constructor implicit retain
                     }
                 })
                 .build(new CacheLoader<Long, TableAndFile>()
@@ -87,14 +88,19 @@ public class TableCache
 
     public long getApproximateOffsetOf(FileMetaData file, Slice key)
     {
-        return getTable(file.getNumber()).getApproximateOffsetOf(key);
+        try (Table table = getTable(file.getNumber())) {
+            return table.getApproximateOffsetOf(key);
+        }
     }
 
     private Table getTable(long number)
     {
         Table table;
         try {
-            table = cache.get(number).getTable();
+            // minuscule chance of race between cache eviction and table release.
+            // re-read cache until we get a winner
+            while ((table = cache.get(number).getTable().retain()) == null)
+                ;
         }
         catch (ExecutionException e) {
             Throwable cause = e;

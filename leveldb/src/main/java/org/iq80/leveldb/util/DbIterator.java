@@ -22,6 +22,8 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -34,8 +36,8 @@ public final class DbIterator
         InternalIterator
 {
 
-    private final OrdinalIterator[] heap;
-    private final Comparator<OrdinalIterator> smallerNext, largerPrev;
+    private final OrdinalIterator<?>[] heap;
+    private final Comparator<OrdinalIterator<?>> smallerNext, largerPrev;
 
     private final Comparator<InternalKey> userComparator;
 
@@ -47,20 +49,20 @@ public final class DbIterator
     {
         this.userComparator = userComparator;
 
-        ArrayList<OrdinalIterator> ordinalIterators = new ArrayList<OrdinalIterator>();
+        ArrayList<OrdinalIterator<?>> ordinalIterators = new ArrayList<OrdinalIterator<?>>();
         int ordinal = 0;
         if (memTableIterator != null) {
-            ordinalIterators.add(new OrdinalIterator(ordinal++, memTableIterator));
+            ordinalIterators.add(new OrdinalIterator<MemTableIterator>(ordinal++, memTableIterator));
         }
 
         if (immutableMemTableIterator != null) {
-            ordinalIterators.add(new OrdinalIterator(ordinal++, immutableMemTableIterator));
+            ordinalIterators.add(new OrdinalIterator<MemTableIterator>(ordinal++, immutableMemTableIterator));
         }
         for (InternalTableIterator level0File : level0Files) {
-            ordinalIterators.add(new OrdinalIterator(ordinal++, level0File));
+            ordinalIterators.add(new OrdinalIterator<InternalTableIterator>(ordinal++, level0File));
         }
         for (LevelIterator level : levels) {
-            ordinalIterators.add(new OrdinalIterator(ordinal++, level));
+            ordinalIterators.add(new OrdinalIterator<LevelIterator>(ordinal++, level));
         }
 
         smallerNext = new SmallerNextElementComparator();
@@ -73,7 +75,7 @@ public final class DbIterator
     @Override
     protected void seekToFirstInternal()
     {
-        for (OrdinalIterator ord : heap) {
+        for (OrdinalIterator<?> ord : heap) {
             ord.iterator.seekToFirst();
         }
         resetHeap();
@@ -89,7 +91,7 @@ public final class DbIterator
     @Override
     public void seekToEndInternal()
     {
-        for (OrdinalIterator ord : heap) {
+        for (OrdinalIterator<?> ord : heap) {
             ord.iterator.seekToEnd();
         }
         resetHeap();
@@ -98,13 +100,13 @@ public final class DbIterator
     @Override
     protected void seekInternal(InternalKey targetKey)
     {
-        for (OrdinalIterator ord : heap) {
+        for (OrdinalIterator<?> ord : heap) {
             ord.iterator.seek(targetKey);
         }
         resetHeap();
     }
 
-    private Tuple<OrdinalIterator, Integer> getMaxAndIndex()
+    private Tuple<OrdinalIterator<?>, Integer> getMaxAndIndex()
     {
       /*
        * forward iteration can take advantage of the heap ordering but reverse iteration cannot,
@@ -114,18 +116,18 @@ public final class DbIterator
        * than 10) even when the database contains a substantial number of items (in the millions)
        * (the c++ implementation, as of this writing, uses linear search forwards and backwards)
        */
-        OrdinalIterator max = heap[0];
+        OrdinalIterator<?> max = heap[0];
         int maxIndex = 0;
 
         for (int i = 1; i < heap.length; i++) {
-            OrdinalIterator ord = heap[i];
+            OrdinalIterator<?> ord = heap[i];
             if (largerPrev.compare(ord, max) > 0) {
                 max = ord;
                 maxIndex = i;
             }
         }
 
-        return Tuple.of(max, maxIndex);
+        return Tuple.<OrdinalIterator<?>, Integer> of(max, maxIndex);
     }
 
     @Override
@@ -137,7 +139,7 @@ public final class DbIterator
     @Override
     protected boolean hasPrevInternal()
     {
-        for (OrdinalIterator ord : heap) {
+        for (OrdinalIterator<?> ord : heap) {
             if (ord.iterator.hasPrev()) {
                 return true;
             }
@@ -157,8 +159,8 @@ public final class DbIterator
     @Override
     protected Entry<InternalKey, Slice> getPrevElement()
     {
-        Tuple<OrdinalIterator, Integer> maxAndIndex = getMaxAndIndex();
-        OrdinalIterator ord = maxAndIndex.item1;
+        Tuple<OrdinalIterator<?>, Integer> maxAndIndex = getMaxAndIndex();
+        OrdinalIterator<?> ord = maxAndIndex.item1;
         int index = maxAndIndex.item2;
 
         Entry<InternalKey, Slice> prev = ord.iterator.prev();
@@ -223,6 +225,15 @@ public final class DbIterator
     }
 
     @Override
+    public void close()
+            throws IOException
+    {
+        for (OrdinalIterator<?> ord : heap) {
+            ord.iterator.close();
+        }
+    }
+
+    @Override
     public String toString()
     {
         final StringBuilder sb = new StringBuilder();
@@ -233,12 +244,12 @@ public final class DbIterator
         return sb.toString();
     }
 
-    private class OrdinalIterator
+    private class OrdinalIterator<T extends ReverseSeekingIterator<InternalKey, Slice> & Closeable>
     {
-        final public ReverseSeekingIterator<InternalKey, Slice> iterator;
+        final public T iterator;
         final public int ordinal;
 
-        public OrdinalIterator(int ordinal, ReverseSeekingIterator<InternalKey, Slice> iterator)
+        public OrdinalIterator(int ordinal, T iterator)
         {
             this.ordinal = ordinal;
             this.iterator = iterator;
@@ -246,10 +257,10 @@ public final class DbIterator
     }
 
     protected class SmallerNextElementComparator
-            implements Comparator<OrdinalIterator>
+            implements Comparator<OrdinalIterator<?>>
     {
         @Override
-        public int compare(OrdinalIterator o1, OrdinalIterator o2)
+        public int compare(OrdinalIterator<?> o1, OrdinalIterator<?> o2)
         {
             if (o1.iterator.hasNext()) {
                 if (o2.iterator.hasNext()) {
@@ -269,10 +280,10 @@ public final class DbIterator
     }
 
     protected class LargerPrevElementComparator
-            implements Comparator<OrdinalIterator>
+            implements Comparator<OrdinalIterator<?>>
     {
         @Override
-        public int compare(OrdinalIterator o1, OrdinalIterator o2)
+        public int compare(OrdinalIterator<?> o1, OrdinalIterator<?> o2)
         {
             if (o1.iterator.hasPrev()) {
                 if (o2.iterator.hasPrev()) {

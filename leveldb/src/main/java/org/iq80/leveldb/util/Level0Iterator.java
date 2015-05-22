@@ -21,11 +21,13 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Ints;
+
 import org.iq80.leveldb.impl.FileMetaData;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.impl.TableCache;
 
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -51,15 +53,6 @@ public final class Level0Iterator
         this.comparator = comparator;
 
         this.priorityQueue = new PriorityQueue<>(Iterables.size(inputs) + 1);
-        resetPriorityQueue(comparator);
-    }
-
-    public Level0Iterator(List<InternalTableIterator> inputs, Comparator<InternalKey> comparator)
-    {
-        this.inputs = inputs;
-        this.comparator = comparator;
-
-        this.priorityQueue = new PriorityQueue<>(Iterables.size(inputs));
         resetPriorityQueue(comparator);
     }
 
@@ -199,6 +192,15 @@ public final class Level0Iterator
                 result = Ints.compare(this.ordinal, that.ordinal);
             }
             return result;
+        }
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        for (InternalTableIterator iter : this.inputs) {
+            iter.close();
         }
     }
 }

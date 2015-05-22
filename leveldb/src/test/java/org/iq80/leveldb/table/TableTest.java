@@ -54,7 +54,7 @@ public abstract class TableTest
     public void testEmptyFile()
             throws Exception
     {
-        createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true);
+        createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true).close();
     }
 
     @Test
@@ -130,50 +130,50 @@ public abstract class TableTest
         }
         builder.finish();
 
-        Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true);
+        try (Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true)) {
+            ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
+            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
+            BlockHelper.assertSequence(seekingIterator, entries);
+            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-        ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
-        BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>>emptyList());
-        BlockHelper.assertSequence(seekingIterator, entries);
-        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+            seekingIterator.seekToFirst();
+            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
+            BlockHelper.assertSequence(seekingIterator, entries);
+            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-        seekingIterator.seekToFirst();
-        BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>>emptyList());
-        BlockHelper.assertSequence(seekingIterator, entries);
-        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-        seekingIterator.seekToLast();
-        if (reverseEntries.size() > 0) {
-            BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
             seekingIterator.seekToLast();
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
-        }
-        BlockHelper.assertSequence(seekingIterator, entries);
+            if (reverseEntries.size() > 0) {
+                BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
+                seekingIterator.seekToLast();
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+            }
+            BlockHelper.assertSequence(seekingIterator, entries);
 
-        long lastApproximateOffset = 0;
-        for (BlockEntry entry : entries) {
-            List<BlockEntry> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
-            seekingIterator.seek(entry.getKey());
-            BlockHelper.assertSequence(seekingIterator, nextEntries);
+            long lastApproximateOffset = 0;
+            for (BlockEntry entry : entries) {
+                List<BlockEntry> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
+                seekingIterator.seek(entry.getKey());
+                BlockHelper.assertSequence(seekingIterator, nextEntries);
 
-            seekingIterator.seek(BlockHelper.before(entry));
-            BlockHelper.assertSequence(seekingIterator, nextEntries);
+                seekingIterator.seek(BlockHelper.before(entry));
+                BlockHelper.assertSequence(seekingIterator, nextEntries);
 
-            seekingIterator.seek(BlockHelper.after(entry));
-            BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+                seekingIterator.seek(BlockHelper.after(entry));
+                BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
 
-            long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                assertTrue(approximateOffset >= lastApproximateOffset);
+                lastApproximateOffset = approximateOffset;
+            }
+
+            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
+            seekingIterator.seek(endKey);
+            BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry> emptyList());
+            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+
+            long approximateOffset = table.getApproximateOffsetOf(endKey);
             assertTrue(approximateOffset >= lastApproximateOffset);
-            lastApproximateOffset = approximateOffset;
         }
-
-        Slice endKey = Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
-        seekingIterator.seek(endKey);
-        BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry>emptyList());
-        BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-        long approximateOffset = table.getApproximateOffsetOf(endKey);
-        assertTrue(approximateOffset >= lastApproximateOffset);
     }
 
     @BeforeMethod

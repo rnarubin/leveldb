@@ -59,7 +59,6 @@ import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
 
 public class VersionSet
-        implements SeekingIterable<InternalKey, Slice>
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(VersionSet.class);
 
@@ -199,12 +198,6 @@ public class VersionSet
     public long getPrevLogNumber()
     {
         return prevLogNumber;
-    }
-
-    @Override
-    public MergingIterator iterator()
-    {
-        return current.iterator();
     }
 
     public MergingIterator makeInputIterator(Compaction c)

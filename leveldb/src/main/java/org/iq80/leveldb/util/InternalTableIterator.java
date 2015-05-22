@@ -26,8 +26,7 @@ import java.util.Map.Entry;
 
 public class InternalTableIterator
         extends AbstractReverseSeekingIterator<InternalKey, Slice>
-        implements
-        InternalIterator
+        implements InternalIterator
 {
     private final TableIterator tableIterator;
 
@@ -120,5 +119,11 @@ public class InternalTableIterator
     protected boolean hasPrevInternal()
     {
         return tableIterator.hasPrev();
+    }
+
+    @Override
+    public void close()
+    {
+        tableIterator.close();
     }
 }

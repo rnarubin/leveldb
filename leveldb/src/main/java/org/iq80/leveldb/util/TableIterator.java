@@ -21,17 +21,20 @@ import org.iq80.leveldb.table.Block;
 import org.iq80.leveldb.table.BlockIterator;
 import org.iq80.leveldb.table.Table;
 
+import java.io.Closeable;
 import java.util.Map.Entry;
 
 import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
 
 public final class TableIterator
         extends AbstractReverseSeekingIterator<Slice, Slice>
+        implements Closeable
 {
     private final Table table;
     private final BlockIterator blockIterator;
     private BlockIterator current;
     private CurrentOrigin currentOrigin = NONE;
+    private boolean closed;
 
     protected enum CurrentOrigin
     {
@@ -48,8 +51,18 @@ public final class TableIterator
     public TableIterator(Table table, BlockIterator blockIterator)
     {
         this.table = table;
+        this.closed = false;
         this.blockIterator = blockIterator;
         clearCurrent();
+    }
+
+    @Override
+    public void close()
+    {
+        if (!closed) {
+            closed = true;
+            table.close();
+        }
     }
 
     @Override
