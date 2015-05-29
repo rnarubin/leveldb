@@ -23,10 +23,8 @@ import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
-import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.InternalTableIterator;
 import org.iq80.leveldb.util.LevelIterator;
-import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.Slice;
 
 import java.util.Collection;
@@ -42,7 +40,6 @@ import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
 
 // todo this class should be immutable
 public class Version
-        implements SeekingIterable<InternalKey, Slice>
 {
     private final AtomicInteger retained = new AtomicInteger(1);
     private final VersionSet versionSet;
@@ -127,15 +124,6 @@ public class Version
     public synchronized void setCompactionScore(double compactionScore)
     {
         this.compactionScore = compactionScore;
-    }
-
-    @Override
-    public MergingIterator iterator()
-    {
-        Builder<InternalIterator> builder = ImmutableList.builder();
-        builder.add(level0.iterator());
-        builder.addAll(getLevelIterators());
-        return new MergingIterator(builder.build(), getInternalKeyComparator());
     }
 
     List<InternalTableIterator> getLevel0Files()

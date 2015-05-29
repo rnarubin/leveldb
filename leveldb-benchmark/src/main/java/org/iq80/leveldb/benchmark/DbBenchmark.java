@@ -24,7 +24,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 
-import org.apache.commons.lang3.ClassUtils;
 import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.iq80.leveldb.DB;
@@ -44,18 +43,13 @@ import org.iq80.leveldb.util.Snappy;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableSet;
 import java.util.Random;
-import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -162,6 +156,10 @@ public class DbBenchmark
     {
         printHeader();
         open();
+        if (Boolean.parseBoolean(System.getProperty("leveldb.benchmark.pause", "false"))) {
+            System.out.println("Press any key to begin");
+            System.in.read();
+        }
 
         for (String benchmark : benchmarks) {
             start();
@@ -334,46 +332,8 @@ public class DbBenchmark
         }
     }
 
-    private static final Options defaultOptions;
-    static {
-        NavigableSet<String> propSet = new TreeSet<String>(System.getProperties().stringPropertyNames());
-        String prefix = "leveldb.";
-        Options opt = new Options();
-        for (String prop : propSet.subSet(prefix, true,
-                prefix.substring(0, prefix.length() - 1) + (prefix.charAt(prefix.length() - 1) + 1), false)) {
-            String val = System.getProperty(prop);
-            String name = prop.replaceFirst(prefix, "");
-            Class<?> argClass = null;
-            Method method = null;
-            for (Class<?> c : Arrays.asList(Object.class, int.class, boolean.class, long.class)) {
-                try {
-                    method = Options.class.getMethod(name, c);
-                    argClass = c.isPrimitive() ? ClassUtils.primitiveToWrapper(c) : c;
-                    break;
-                }
-                catch (NoSuchMethodException | SecurityException e) {
-                    // System.out.println("prop not a variable on Options:" + e);
-                }
-            }
-            if (argClass != null) {
-                try {
-                    Method parser = argClass.getMethod("valueOf", String.class);
-                    try {
-                        method.invoke(opt, parser.invoke(null, val));
-                    }
-                    catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-                        System.out.println("Failed to set " + method + " on Options:" + e);
-                    }
-                }
-                catch (NoSuchMethodException | SecurityException e) {
-                    System.out.println("Could not parse type " + argClass + " to set Options:" + e);
-                }
-            }
-        }
-        defaultOptions = opt;
-    }
     protected Options defaultOptions(){
-        return defaultOptions;
+        return Options.make();
     }
 
     private void open()
@@ -980,7 +940,7 @@ public class DbBenchmark
                     }
                 },
         // If running concurrently, how many parallel threads
-        thread_count(20)
+        thread_count(8)
                 {
                    @Override
                    public Object parseValue(String value)

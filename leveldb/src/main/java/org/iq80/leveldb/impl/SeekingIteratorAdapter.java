@@ -18,10 +18,13 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+
+import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
 
+import java.io.IOException;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -72,7 +75,12 @@ public class SeekingIteratorAdapter
         // This is an end user API.. he might screw up and close multiple times.
         // but we don't want the close multiple times as reference counts go bad.
         if (closed.compareAndSet(false, true)) {
-            seekingIterator.close();
+            try {
+                seekingIterator.close();
+            }
+            catch (IOException e) {
+                throw new DBException(e);
+            }
         }
     }
 

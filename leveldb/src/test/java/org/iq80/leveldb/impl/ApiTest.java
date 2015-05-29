@@ -33,7 +33,7 @@ import java.util.Arrays;
 import static org.testng.Assert.assertTrue;
 
 /**
- * Test the implemenation via the org.iq80.leveldb API.
+ * Test the implementation via the org.iq80.leveldb API.
  *
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
@@ -78,7 +78,7 @@ public class ApiTest
             throws IOException
     {
         File rc = new File(databaseDir, name);
-        factory.destroy(rc, new Options().createIfMissing(true));
+        factory.destroy(rc, Options.make().createIfMissing(true));
         rc.mkdirs();
         return rc;
     }
@@ -87,7 +87,7 @@ public class ApiTest
     public void testCompaction()
             throws IOException, DBException
     {
-        Options options = new Options().createIfMissing(true).compressionType(CompressionType.NONE);
+        Options options = Options.make().createIfMissing(true).compressionType(CompressionType.NONE);
 
         File path = getTestDirectory("testCompaction");
         DB db = factory.open(path, options);

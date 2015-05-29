@@ -25,6 +25,7 @@ import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -73,7 +74,7 @@ import static org.testng.Assert.fail;
 public class DBIteratorTest
 {
     private static final List<Entry<String, String>> entries, ordered, rOrdered;
-    private final Options options = new Options().createIfMissing(true);
+    private final Options options = Options.make().createIfMissing(true);
     private DB db;
     private File tempDir;
     private String testName;
@@ -131,6 +132,7 @@ public class DBIteratorTest
 
     @Test
     public void testStraightIteration()
+            throws IOException
     {
         putAll(db, entries);
 
@@ -139,6 +141,7 @@ public class DBIteratorTest
 
     @Test
     public void testStraightIterationWithDeletes()
+            throws IOException
     {
         putAll(db, entries);
 
@@ -146,16 +149,20 @@ public class DBIteratorTest
         straightIteration(db, preserved, reverseOrdered(preserved));
     }
 
-    private static void straightIteration(DB db, Iterable<Entry<String, String>> forward, Iterable<Entry<String, String>> backward)
+    private static void straightIteration(DB db,
+            Iterable<Entry<String, String>> forward,
+            Iterable<Entry<String, String>> backward)
+            throws IOException
     {
-        StringDbIterator actual = new StringDbIterator(db.iterator());
-        actual.seekToFirst();
-        assertForwardSame(actual, forward);
-        assertBackwardSame(actual, backward);
+        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+            actual.seekToFirst();
+            assertForwardSame(actual, forward);
+            assertBackwardSame(actual, backward);
 
-        actual.seekToEnd();
-        assertBackwardSame(actual, backward);
-        assertForwardSame(actual, forward);
+            actual.seekToEnd();
+            assertBackwardSame(actual, backward);
+            assertForwardSame(actual, forward);
+        }
     }
 
     @Test
@@ -209,19 +216,22 @@ public class DBIteratorTest
                 {
                     @Override
                     public Void call()
+                            throws IOException
                     {
-                        StringDbIterator actual = dbiter != null ? dbiter : new StringDbIterator(db.iterator(readOptions));
-                        int loc = seekIndex;
-                        List<Entry<String, String>> forwardExpected =
-                                expectedForward.subList(loc, Math.min(size, loc + seekCheckDist));
-                        loc = expectedBackward.size() - seekIndex;
-                        List<Entry<String, String>> reverseExpected =
-                                expectedBackward.subList(loc, Math.min(size, loc + seekCheckDist));
-                        actual.seek(e.getKey());
-                        assertForwardSame(actual, forwardExpected, false);
-                        actual.seek(e.getKey());
-                        assertBackwardSame(actual, reverseExpected, false);
-                        return null;
+                        try (StringDbIterator actual = dbiter != null ? dbiter : new StringDbIterator(
+                                db.iterator(readOptions))) {
+                            int loc = seekIndex;
+                            List<Entry<String, String>> forwardExpected = expectedForward.subList(loc,
+                                    Math.min(size, loc + seekCheckDist));
+                            loc = expectedBackward.size() - seekIndex;
+                            List<Entry<String, String>> reverseExpected = expectedBackward.subList(loc,
+                                    Math.min(size, loc + seekCheckDist));
+                            actual.seek(e.getKey());
+                            assertForwardSame(actual, forwardExpected, false);
+                            actual.seek(e.getKey());
+                            assertBackwardSame(actual, reverseExpected, false);
+                            return null;
+                        }
                     }
                 }));
             }
@@ -241,66 +251,70 @@ public class DBIteratorTest
 
     @Test
     public void testSeeksWithConcurrentOps()
-            throws ExecutionException, InterruptedException
+            throws InterruptedException, IOException
     {
         putAll(db, entries);
-        StringDbIterator actual = new StringDbIterator(db.iterator());
+        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
 
-        int concurrency = 10;
-        ExecutorService pool = Executors.newFixedThreadPool(concurrency,
-                new ThreadFactoryBuilder().setNameFormat(testName + "-%d").build());
-        List<Future<Void>> work = new ArrayList<Future<Void>>();
-        for (int i = 0; i < concurrency; i++) {
-            final int j = i;
-            work.add(pool.submit(new Callable<Void>()
-            {
-                public Void call()
-                        throws Exception
+            int concurrency = 10;
+            ExecutorService pool = Executors.newFixedThreadPool(concurrency,
+                    new ThreadFactoryBuilder().setNameFormat(testName + "-%d").build());
+            List<Future<Void>> work = new ArrayList<Future<Void>>();
+            for (int i = 0; i < concurrency; i++) {
+                final int j = i;
+                work.add(pool.submit(new Callable<Void>()
                 {
-                    Random rand = new Random(j);
-                    while (!Thread.interrupted()) {
-                        int r = rand.nextInt(entries.size() - 1);
-                        String target = entries.get(r).getKey();
-                        if (rand.nextDouble() < 0.5) {
-                            put(db, target, "dummy val:" + r);
+                    public Void call()
+                            throws Exception
+                    {
+                        Random rand = new Random(j);
+                        while (!Thread.interrupted()) {
+                            int r = rand.nextInt(entries.size() - 1);
+                            String target = entries.get(r).getKey();
+                            if (rand.nextDouble() < 0.5) {
+                                put(db, target, "dummy val:" + r);
+                            }
+                            else {
+                                delete(db, target);
+                            }
                         }
-                        else {
-                            delete(db, target);
-                        }
+                        return null;
                     }
-                    return null;
+                }));
+            }
+
+            Random rand = new Random(0);
+            int max = (int) (entries.size() * 0.005f);
+            int dist = 1000;
+            for (int i = 0; i < max; i++) {
+                int index = rand.nextInt(ordered.size() - 1);
+                String target = ordered.get(index).getKey();
+                double r = rand.nextDouble();
+                if (r < 1.0 / 3) {
+                    target = BlockHelper.beforeString(Maps.immutableEntry(target, null));
                 }
-            }));
-        }
+                else if (r > 2.0 / 3) {
+                    index++;
+                    target = BlockHelper.afterString(Maps.immutableEntry(target, null));
+                }
+                actual.seek(target);
+                assertForwardSame(actual, ordered.subList(index, Math.min(ordered.size(), index + dist)), false);
+                actual.seek(target);
+                assertBackwardSame(
+                        actual,
+                        rOrdered.subList(rOrdered.size() - index,
+                                Math.min(rOrdered.size(), rOrdered.size() - index + dist)), false);
+            }
 
-        Random rand = new Random(0);
-        int max = (int) (entries.size() * 0.005f);
-        int dist = 1000;
-        for (int i = 0; i < max; i++) {
-            int index = rand.nextInt(ordered.size() - 1);
-            String target = ordered.get(index).getKey();
-            double r = rand.nextDouble();
-            if (r < 1.0 / 3) {
-                target = BlockHelper.beforeString(Maps.immutableEntry(target, null));
+            try {
+                for (Future<Void> job : work) {
+                    job.cancel(true);
+                }
             }
-            else if (r > 2.0 / 3) {
-                index++;
-                target = BlockHelper.afterString(Maps.immutableEntry(target, null));
+            finally {
+                pool.shutdown();
+                pool.awaitTermination(30, TimeUnit.MINUTES);
             }
-            actual.seek(target);
-            assertForwardSame(actual, ordered.subList(index, Math.min(ordered.size(), index + dist)), false);
-            actual.seek(target);
-            assertBackwardSame(actual, rOrdered.subList(rOrdered.size() - index, Math.min(rOrdered.size(), rOrdered.size() - index + dist)), false);
-        }
-
-        try {
-            for (Future<Void> job : work) {
-                job.cancel(true);
-            }
-        }
-        finally {
-            pool.shutdown();
-            pool.awaitTermination(30, TimeUnit.MINUTES);
         }
     }
 
@@ -380,39 +394,39 @@ public class DBIteratorTest
 
     @Test
     public void testIterationSnapshotWithSeeks()
-            throws ExecutionException, InterruptedException, IOException
+            throws IOException
     {
         List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size() / 2);
         List<Entry<String, String>> firstHalf = splitList.get(0), secondHalf = splitList.get(1);
         putAll(db, firstHalf);
         // TODO: use actual snapshots once snapshot preservation through compaction is supported
         //Snapshot snapshot = db.getSnapshot();
-        StringDbIterator actual = new StringDbIterator(db.iterator());
+        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
 
-        // delete one-third of the entries in the db
-        deletePortion(db, firstHalf, 1.0 / 3.0);
+            // delete one-third of the entries in the db
+            deletePortion(db, firstHalf, 1.0 / 3.0);
 
-        // put in another set of data
-        putAll(db, secondHalf);
+            // put in another set of data
+            putAll(db, secondHalf);
 
-        List<Entry<String, String>> forward = ordered(firstHalf), backward =
-                reverseOrdered(firstHalf);
+            List<Entry<String, String>> forward = ordered(firstHalf), backward = reverseOrdered(firstHalf);
 
-        //ReadOptions snapshotRead = new ReadOptions().snapshot(snapshot);
-        // snapshot should retain the entries of the first insertion batch
-        //StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
+            // ReadOptions snapshotRead = new ReadOptions().snapshot(snapshot);
+            // snapshot should retain the entries of the first insertion batch
+            // StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
 
-        actual.seekToFirst();
-        assertForwardSame(actual, forward);
-        assertBackwardSame(actual, backward);
+            actual.seekToFirst();
+            assertForwardSame(actual, forward);
+            assertBackwardSame(actual, backward);
 
-        actual.seekToEnd();
-        assertBackwardSame(actual, backward);
-        assertForwardSame(actual, forward);
+            actual.seekToEnd();
+            assertBackwardSame(actual, backward);
+            assertForwardSame(actual, forward);
 
-        // TODO seeks after deletes require snapshots
-        //System.out.println("Testing snapshot seeks (this may take a while)");
-        //doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead);
+            // TODO seeks after deletes require snapshots
+            // System.out.println("Testing snapshot seeks (this may take a while)");
+            // doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead);
+        }
     }
 
     private static List<Entry<String, String>> deletePortion(DB db, Collection<Entry<String, String>> items, double portion)
@@ -432,6 +446,7 @@ public class DBIteratorTest
 
     @Test
     public void testSmallIterationSnapshot()
+            throws IOException
     {
         put(db, "a", "0");
         put(db, "b", "0");
@@ -463,39 +478,44 @@ public class DBIteratorTest
             expected.add(Maps.immutableEntry("" + s.charAt(0), "" + s.charAt(1)));
         }
         List<Entry<String, String>> reverseExpected = reverseOrdered(expected);
-        StringDbIterator actual = new StringDbIterator(db.iterator(new ReadOptions().snapshot(snapshot)));
+        try (StringDbIterator actual = new StringDbIterator(db.iterator(new ReadOptions().snapshot(snapshot)))) {
 
-        actual.seekToFirst();
-        assertForwardSame(actual, expected);
-        assertBackwardSame(actual, reverseExpected);
+            actual.seekToFirst();
+            assertForwardSame(actual, expected);
+            assertBackwardSame(actual, reverseExpected);
 
-        actual.seekToLast();
-        actual.next();
-        assertBackwardSame(actual, reverseExpected);
-        assertForwardSame(actual, expected);
+            actual.seekToLast();
+            actual.next();
+            assertBackwardSame(actual, reverseExpected);
+            assertForwardSame(actual, expected);
+        }
     }
 
     @Test
     public void testMixedIteration()
+            throws IOException
     {
 
         putAll(db, entries);
 
         ReversePeekingIterator<Entry<String, String>> expected =
                 ReverseIterators.reversePeekingIterator(ordered);
-        ReverseSeekingIterator<String, String> actual = new StringDbIterator(db.iterator());
-
-        mixedIteration(entries.size(), actual, expected);
+        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+            mixedIteration(entries.size(), actual, expected);
+        }
     }
 
     @Test
     public void testMixedIterationWithDeletes()
+            throws IOException
     {
         putAll(db, entries);
 
         List<Entry<String, String>> preserved = deletePortion(db, ordered, 0.75);
 
-        mixedIteration(preserved.size(), new StringDbIterator(db.iterator()), ReverseIterators.reversePeekingIterator(preserved));
+        try (StringDbIterator iter = new StringDbIterator(db.iterator())) {
+            mixedIteration(preserved.size(), iter, ReverseIterators.reversePeekingIterator(preserved));
+        }
     }
 
     private static void mixedIteration(int size, ReverseSeekingIterator<String, String> actual, ReversePeekingIterator<Entry<String, String>> expected)
@@ -544,6 +564,7 @@ public class DBIteratorTest
 
     @Test
     public void testSeekPastContentsWithDeletesAndReverse()
+            throws IOException
     {
         String keys[] = {"a", "b", "c", "d", "e", "f"};
         int deleteIndex[] = {2, 3, 5};
@@ -576,43 +597,44 @@ public class DBIteratorTest
         expectedSet.addAll(keyvals);
         List<Entry<String, String>> expected = new ArrayList<Entry<String, String>>(expectedSet);
 
-        StringDbIterator actual = new StringDbIterator(db.iterator());
-        actual.seek("f");
-        for (int i = expected.size() - 1; i >= 0; i--) {
+        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+            actual.seek("f");
+            for (int i = expected.size() - 1; i >= 0; i--) {
+                assertTrue(actual.hasPrev());
+                assertEquals(expected.get(i), actual.peekPrev());
+                assertEquals(expected.get(i), actual.prev());
+            }
+            assertFalse(actual.hasPrev());
+
+            actual.seek("g");
+            assertFalse(actual.hasNext());
+            for (int i = expected.size() - 1; i >= 0; i--) {
+                assertTrue(actual.hasPrev());
+                assertEquals(expected.get(i), actual.peekPrev());
+                assertEquals(expected.get(i), actual.prev());
+            }
+            assertFalse(actual.hasPrev());
+
+            // recreating a strange set of circumstances encountered in the field
+            actual.seek("g");
+            assertFalse(actual.hasNext());
+            actual.seekToLast();
+            List<Entry<String, String>> items = new ArrayList<Entry<String, String>>();
+            Entry<String, String> peek = actual.peek();
+            items.add(peek);
+            assertEquals(expected.get(expected.size() - 1), peek);
             assertTrue(actual.hasPrev());
-            assertEquals(expected.get(i), actual.peekPrev());
-            assertEquals(expected.get(i), actual.prev());
+            Entry<String, String> prev = actual.prev();
+            items.add(prev);
+            assertEquals(expected.get(expected.size() - 2), prev);
+
+            while (actual.hasPrev()) {
+                items.add(actual.prev());
+            }
+
+            Collections.reverse(items);
+            assertEquals(expected, items);
         }
-        assertFalse(actual.hasPrev());
-
-        actual.seek("g");
-        assertFalse(actual.hasNext());
-        for (int i = expected.size() - 1; i >= 0; i--) {
-            assertTrue(actual.hasPrev());
-            assertEquals(expected.get(i), actual.peekPrev());
-            assertEquals(expected.get(i), actual.prev());
-        }
-        assertFalse(actual.hasPrev());
-
-        // recreating a strange set of circumstances encountered in the field
-        actual.seek("g");
-        assertFalse(actual.hasNext());
-        actual.seekToLast();
-        List<Entry<String, String>> items = new ArrayList<Entry<String, String>>();
-        Entry<String, String> peek = actual.peek();
-        items.add(peek);
-        assertEquals(expected.get(expected.size() - 1), peek);
-        assertTrue(actual.hasPrev());
-        Entry<String, String> prev = actual.prev();
-        items.add(prev);
-        assertEquals(expected.get(expected.size() - 2), prev);
-
-        while (actual.hasPrev()) {
-            items.add(actual.prev());
-        }
-
-        Collections.reverse(items);
-        assertEquals(expected, items);
     }
 
     private void putAll(final DB db, final List<Entry<String, String>> entries)
@@ -680,13 +702,20 @@ public class DBIteratorTest
     }
 
     private static class StringDbIterator
-            implements ReverseSeekingIterator<String, String>
+            implements ReverseSeekingIterator<String, String>, Closeable
     {
         private DBIterator iterator;
 
         private StringDbIterator(DBIterator iterator)
         {
             this.iterator = iterator;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            this.iterator.close();
         }
 
         @Override

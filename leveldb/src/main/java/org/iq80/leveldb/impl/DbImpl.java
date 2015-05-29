@@ -123,12 +123,12 @@ public class DbImpl
 
     private ManualCompaction manualCompaction;
 
-    public DbImpl(Options options, File databaseDir)
+    public DbImpl(Options userOptions, File databaseDir)
             throws IOException
     {
-        Preconditions.checkNotNull(options, "options is null");
+        Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
-        this.options = options;
+        this.options = Options.copy(userOptions);
 
         if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.
@@ -624,28 +624,25 @@ public class DbImpl
         put(key, value, DEFAULT_WRITE_OPTIONS);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl().put(key, value), options);
+        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key, value), options);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public void delete(byte[] key)
             throws DBException
     {
-        writeInternal(new WriteBatchImpl().delete(key), DEFAULT_WRITE_OPTIONS);
+        delete(key, DEFAULT_WRITE_OPTIONS);
     }
 
-    @SuppressWarnings("resource")
     @Override
     public Snapshot delete(byte[] key, WriteOptions options)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl().delete(key), options);
+        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key), options);
     }
 
     @Override
@@ -735,18 +732,6 @@ public class DbImpl
         finally {
             mutex.unlock();
         }
-    }
-
-    SeekingIterable<InternalKey, Slice> internalIterable()
-    {
-        return new SeekingIterable<InternalKey, Slice>()
-        {
-            @Override
-            public DbIterator iterator()
-            {
-                return internalIterator();
-            }
-        };
     }
 
     DbIterator internalIterator()
@@ -998,7 +983,7 @@ public class DbImpl
             FileMetaData fileMetaData = new FileMetaData(fileNumber, file.length(), smallest, largest);
 
             // verify table can be opened
-            tableCache.newIterator(fileMetaData);
+            tableCache.newIterator(fileMetaData).close();
 
             pendingOutputs.remove(fileNumber);
 
@@ -1024,81 +1009,82 @@ public class DbImpl
         // Release mutex while we're actually doing the compaction work
         mutex.unlock();
         try {
-            MergingIterator iterator = versions.makeInputIterator(compactionState.compaction);
-
-            Slice currentUserKey = null;
-            boolean hasCurrentUserKey = false;
-
-            long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-            while (iterator.hasNext() && !shuttingDown.get()) {
-                // always give priority to compacting the current mem table
-                compactMemTableInternal();
-
-                InternalKey key = iterator.peek().getKey();
-                if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
-                    finishCompactionOutputFile(compactionState);
-                }
-
-                // Handle key/value, add to state, etc.
-                boolean drop = false;
-                // todo if key doesn't parse (it is corrupted),
-                /*
-                if (false
-                //!ParseInternalKey(key, &ikey)) {
-                    // do not hide error keys
-                    currentUserKey = null;
-                    hasCurrentUserKey = false;
-                    lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-                }
-                else
-                */
-                {
-                    if (!hasCurrentUserKey || internalKeyComparator.getUserComparator().compare(key.getUserKey(), currentUserKey) != 0) {
-                        // First occurrence of this user key
-                        currentUserKey = key.getUserKey();
-                        hasCurrentUserKey = true;
-                        lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-                    }
-
-                    if (lastSequenceForKey <= compactionState.smallestSnapshot) {
-                        // Hidden by an newer entry for same user key
-                        drop = true; // (A)
-                    }
-                    else if (key.getValueType() == ValueType.DELETION &&
-                            key.getSequenceNumber() <= compactionState.smallestSnapshot &&
-                            compactionState.compaction.isBaseLevelForKey(key.getUserKey())) {
-
-                        // For this user key:
-                        // (1) there is no data in higher levels
-                        // (2) data in lower levels will have larger sequence numbers
-                        // (3) data in layers that are being compacted here and have
-                        //     smaller sequence numbers will be dropped in the next
-                        //     few iterations of this loop (by rule (A) above).
-                        // Therefore this deletion marker is obsolete and can be dropped.
-                        drop = true;
-                    }
-
-                    lastSequenceForKey = key.getSequenceNumber();
-                }
-
-                if (!drop) {
-                    // Open output file if necessary
-                    if (compactionState.builder == null) {
-                        openCompactionOutputFile(compactionState);
-                    }
-                    if (compactionState.builder.getEntryCount() == 0) {
-                        compactionState.currentSmallest = key;
-                    }
-                    compactionState.currentLargest = key;
-                    compactionState.builder.add(key.encode(), iterator.peek().getValue());
-
-                    // Close output file if it is big enough
-                    if (compactionState.builder.getFileSize() >=
-                            compactionState.compaction.getMaxOutputFileSize()) {
+            try(MergingIterator iterator = versions.makeInputIterator(compactionState.compaction)){
+    
+                Slice currentUserKey = null;
+                boolean hasCurrentUserKey = false;
+    
+                long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
+                while (iterator.hasNext() && !shuttingDown.get()) {
+                    // always give priority to compacting the current mem table
+                    compactMemTableInternal();
+    
+                    InternalKey key = iterator.peek().getKey();
+                    if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
                         finishCompactionOutputFile(compactionState);
                     }
+    
+                    // Handle key/value, add to state, etc.
+                    boolean drop = false;
+                    // todo if key doesn't parse (it is corrupted),
+                    /*
+                    if (false
+                    //!ParseInternalKey(key, &ikey)) {
+                        // do not hide error keys
+                        currentUserKey = null;
+                        hasCurrentUserKey = false;
+                        lastSequenceForKey = MAX_SEQUENCE_NUMBER;
+                    }
+                    else
+                    */
+                    {
+                        if (!hasCurrentUserKey || internalKeyComparator.getUserComparator().compare(key.getUserKey(), currentUserKey) != 0) {
+                            // First occurrence of this user key
+                            currentUserKey = key.getUserKey();
+                            hasCurrentUserKey = true;
+                            lastSequenceForKey = MAX_SEQUENCE_NUMBER;
+                        }
+    
+                        if (lastSequenceForKey <= compactionState.smallestSnapshot) {
+                            // Hidden by an newer entry for same user key
+                            drop = true; // (A)
+                        }
+                        else if (key.getValueType() == ValueType.DELETION &&
+                                key.getSequenceNumber() <= compactionState.smallestSnapshot &&
+                                compactionState.compaction.isBaseLevelForKey(key.getUserKey())) {
+    
+                            // For this user key:
+                            // (1) there is no data in higher levels
+                            // (2) data in lower levels will have larger sequence numbers
+                            // (3) data in layers that are being compacted here and have
+                            //     smaller sequence numbers will be dropped in the next
+                            //     few iterations of this loop (by rule (A) above).
+                            // Therefore this deletion marker is obsolete and can be dropped.
+                            drop = true;
+                        }
+    
+                        lastSequenceForKey = key.getSequenceNumber();
+                    }
+    
+                    if (!drop) {
+                        // Open output file if necessary
+                        if (compactionState.builder == null) {
+                            openCompactionOutputFile(compactionState);
+                        }
+                        if (compactionState.builder.getEntryCount() == 0) {
+                            compactionState.currentSmallest = key;
+                        }
+                        compactionState.currentLargest = key;
+                        compactionState.builder.add(key.encode(), iterator.peek().getValue());
+    
+                        // Close output file if it is big enough
+                        if (compactionState.builder.getFileSize() >=
+                                compactionState.compaction.getMaxOutputFileSize()) {
+                            finishCompactionOutputFile(compactionState);
+                        }
+                    }
+                    iterator.next();
                 }
-                iterator.next();
             }
 
             if (shuttingDown.get()) {
@@ -1173,12 +1159,11 @@ public class DbImpl
 
         if (currentEntries > 0) {
             // Verify that the table is usable
-            tableCache.newIterator(outputNumber);
+            tableCache.newIterator(outputNumber).close();
         }
     }
 
     private void installCompactionResults(CompactionState compact)
-            throws IOException
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
 
@@ -1195,6 +1180,7 @@ public class DbImpl
             deleteObsoleteFiles();
         }
         catch (IOException e) {
+            LOGGER.debug("{} compaction failed due to {}. will try again later", this, e.toString());
             // Compaction failed for some reason.  Simply discard the work and try again later.
 
             // Discard any files we may have created during this failed compaction

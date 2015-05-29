@@ -18,8 +18,11 @@
 package org.iq80.leveldb.util;
 
 import com.google.common.primitives.Ints;
+
 import org.iq80.leveldb.impl.InternalKey;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -29,6 +32,7 @@ import java.util.PriorityQueue;
 
 public final class MergingIterator
         extends AbstractSeekingIterator<InternalKey, Slice>
+        implements Closeable
 {
     private final List<? extends InternalIterator> levels;
     private final PriorityQueue<ComparableIterator> priorityQueue;
@@ -94,6 +98,15 @@ public final class MergingIterator
         sb.append(", comparator=").append(comparator);
         sb.append('}');
         return sb.toString();
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        for (InternalIterator iter : levels) {
+            iter.close();
+        }
     }
 
     private static class ComparableIterator

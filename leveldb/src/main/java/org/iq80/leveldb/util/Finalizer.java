@@ -54,7 +54,7 @@ public class Finalizer<T>
 
     public Finalizer(int threads)
     {
-        this(1, IGNORE_FINALIZER_MONITOR);
+        this(threads, IGNORE_FINALIZER_MONITOR);
     }
 
     public Finalizer(int threads, FinalizerMonitor monitor)

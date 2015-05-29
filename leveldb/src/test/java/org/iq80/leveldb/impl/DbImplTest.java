@@ -33,6 +33,7 @@ import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
@@ -57,6 +59,7 @@ import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.ConcurrencyHelper;
+import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
@@ -86,7 +89,7 @@ public class DbImplTest
     public void testBackgroundCompaction()
             throws Exception
     {
-        Options options = new Options();
+        Options options = Options.make();
         options.maxOpenFiles(100);
         options.createIfMissing(true);
         try (DbImpl db = new DbImpl(options, this.databaseDir)) {
@@ -105,7 +108,7 @@ public class DbImplTest
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
-        Options options = new Options();
+        Options options = Options.make();
         options.createIfMissing(true);
         try (DbImpl db = new DbImpl(options, databaseDir)) {
             for (int index = 0; index < 5000000; index++) {
@@ -122,7 +125,7 @@ public class DbImplTest
     public void testEmpty()
             throws Exception
     {
-        Options options = new Options();
+        Options options = Options.make();
         File databaseDir = this.databaseDir;
         DbStringWrapper db = new DbStringWrapper(options, databaseDir);
         assertNull(db.get("foo"));
@@ -133,7 +136,7 @@ public class DbImplTest
             throws Exception
     {
         // open new db
-        Options options = new Options().createIfMissing(true);
+        Options options = Options.make().createIfMissing(true);
         DB db = new Iq80DBFactory().open(databaseDir, options);
 
         // write an empty batch
@@ -152,7 +155,7 @@ public class DbImplTest
     public void testReadWrite()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         assertEquals(db.get("foo"), "v1");
         db.put("bar", "v2");
@@ -165,7 +168,7 @@ public class DbImplTest
     public void testPutDeleteGet()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         assertEquals(db.get("foo"), "v1");
         db.put("foo", "v2");
@@ -179,7 +182,7 @@ public class DbImplTest
             throws Exception
     {
         // create db with small write buffer
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(100000), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000), databaseDir);
         db.put("foo", "v1");
         assertEquals(db.get("foo"), "v1");
 
@@ -198,7 +201,7 @@ public class DbImplTest
     public void testGetFromVersions()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         db.compactMemTable();
         assertEquals(db.get("foo"), "v1");
@@ -208,7 +211,7 @@ public class DbImplTest
     public void testGetSnapshot()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         // Try with both a short key and a long key
         for (int i = 0; i < 2; i++) {
@@ -230,7 +233,7 @@ public class DbImplTest
     public void testGetLevel0Ordering()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         // Check that we process level-0 files in correct order.  The code
         // below generates two level-0 files where the earlier one comes
@@ -248,7 +251,7 @@ public class DbImplTest
     public void testGetOrderedByLevels()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         db.compact("a", "z");
         assertEquals(db.get("foo"), "v1");
@@ -262,7 +265,7 @@ public class DbImplTest
     public void testGetPicksCorrectFile()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("a", "va");
         db.compact("a", "b");
         db.put("x", "vx");
@@ -279,59 +282,63 @@ public class DbImplTest
     public void testEmptyIterator()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
-        SeekingIterator<String, String> iterator = db.iterator();
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
+        try (StringDbIterator iterator = db.iterator()) {
 
-        iterator.seekToFirst();
-        assertNoNextElement(iterator);
+            iterator.seekToFirst();
+            assertNoNextElement(iterator);
 
-        iterator.seek("foo");
-        assertNoNextElement(iterator);
+            iterator.seek("foo");
+            assertNoNextElement(iterator);
+        }
     }
 
     @Test
     public void testIteratorSingle()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("a", "va");
 
-        assertSequence(db.iterator(), immutableEntry("a", "va"));
+        try(StringDbIterator iter = db.iterator()){
+           assertSequence(iter, immutableEntry("a", "va"));
+        }
     }
 
     @Test
     public void testIteratorMultiple()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("a", "va");
         db.put("b", "vb");
         db.put("c", "vc");
 
-        SeekingIterator<String, String> iterator = db.iterator();
-        assertSequence(iterator,
-                immutableEntry("a", "va"),
-                immutableEntry("b", "vb"),
-                immutableEntry("c", "vc"));
-
-        // Make sure iterator stays at snapshot
-        db.put("a", "va2");
-        db.put("a2", "va3");
-        db.put("b", "vb2");
-        db.put("c", "vc2");
-
-        iterator.seekToFirst();
-        assertSequence(iterator,
-                immutableEntry("a", "va"),
-                immutableEntry("b", "vb"),
-                immutableEntry("c", "vc"));
+        try(StringDbIterator iterator = db.iterator()){
+            assertSequence(iterator,
+                    immutableEntry("a", "va"),
+                    immutableEntry("b", "vb"),
+                    immutableEntry("c", "vc"));
+            
+            // Make sure iterator stays at snapshot
+            db.put("a", "va2");
+            db.put("a2", "va3");
+            db.put("b", "vb2");
+            db.put("c", "vc2");
+            
+            iterator.seekToFirst();
+            assertSequence(iterator,
+                    immutableEntry("a", "va"),
+                    immutableEntry("b", "vb"),
+                    immutableEntry("c", "vc"));
+        }
     }
 
     @Test
     public void testRecover()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         db.put("baz", "v5");
 
@@ -355,7 +362,7 @@ public class DbImplTest
     public void testRecoveryWithEmptyLog()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         db.put("foo", "v2");
         db.reopen();
@@ -369,7 +376,7 @@ public class DbImplTest
     public void testRecoverDuringMemtableCompaction()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(1000000), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(1000000), databaseDir);
 
         // Trigger a long memtable compaction and reopen the database during it
         db.put("foo", "v1");                        // Goes to 1st log file
@@ -388,7 +395,7 @@ public class DbImplTest
     public void testMinorCompactionsHappen()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(10000), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(10000), databaseDir);
 
         int n = 500;
         int startingNumTables = db.totalTableFiles();
@@ -417,14 +424,14 @@ public class DbImplTest
     public void testRecoverWithLargeLog()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("big1", longString(200000, '1'));
         db.put("big2", longString(200000, '2'));
         db.put("small3", longString(10, '3'));
         db.put("small4", longString(10, '4'));
         assertEquals(db.numberOfFilesInLevel(0), 0);
 
-        db.reopen(new Options().writeBufferSize(100000));
+        db.reopen(Options.make().writeBufferSize(100000));
         assertEquals(db.numberOfFilesInLevel(0), 3);
         assertEquals(db.get("big1"), longString(200000, '1'));
         assertEquals(db.get("big2"), longString(200000, '2'));
@@ -437,7 +444,7 @@ public class DbImplTest
     public void testCompactionsGenerateMultipleFiles()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(100000000), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000), databaseDir);
 
         // Write 8MB (80 values, each 100K)
         assertEquals(db.numberOfFilesInLevel(0), 0);
@@ -467,7 +474,7 @@ public class DbImplTest
     public void testRepeatedWritesToSameKey()
             throws Exception
     {
-        Options options = new Options().writeBufferSize(100000);
+        Options options = Options.make().writeBufferSize(100000);
         DbStringWrapper db = new DbStringWrapper(options, databaseDir);
 
         // We must have at most one file per level except for level-0,
@@ -488,7 +495,7 @@ public class DbImplTest
     public void testSparseMerge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
 
         fillLevels(db, "A", "Z");
 
@@ -529,7 +536,7 @@ public class DbImplTest
     public void testApproximateSizes()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(100000000).compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000).compressionType(NONE), databaseDir);
 
         assertBetween(db.size("", "xyz"), 0, 0);
         db.reopen();
@@ -571,7 +578,7 @@ public class DbImplTest
     public void testApproximateSizesMixOfSmallAndLarge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
         Random random = new Random(301);
         String big1 = randomString(random, 100000);
         db.put(key(0), randomString(random, 10000));
@@ -607,25 +614,26 @@ public class DbImplTest
     public void testIteratorPinsRef()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "hello");
 
-        SeekingIterator<String, String> iterator = db.iterator();
+        try (StringDbIterator iterator = db.iterator()) {
 
-        db.put("foo", "newvalue1");
-        for (int i = 0; i < 100; i++) {
-            db.put(key(i), key(i) + longString(100000, 'v'));
+            db.put("foo", "newvalue1");
+            for (int i = 0; i < 100; i++) {
+                db.put(key(i), key(i) + longString(100000, 'v'));
+            }
+            db.put("foo", "newvalue1");
+
+            assertSequence(iterator, immutableEntry("foo", "hello"));
         }
-        db.put("foo", "newvalue1");
-
-        assertSequence(iterator, immutableEntry("foo", "hello"));
     }
 
     @Test
     public void testSnapshot()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         db.put("foo", "v1");
         Snapshot s1 = db.getSnapshot();
         db.put("foo", "v2");
@@ -657,7 +665,7 @@ public class DbImplTest
     public void testHiddenValuesAreRemoved()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         Random random = new Random(301);
         fillLevels(db, "a", "z");
 
@@ -691,7 +699,7 @@ public class DbImplTest
     public void testDeletionMarkers1()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         db.put("foo", "v1");
         db.compactMemTable();
@@ -734,7 +742,7 @@ public class DbImplTest
     public void testDeletionMarkers2()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         db.put("foo", "v1");
         db.compactMemTable();
@@ -769,7 +777,7 @@ public class DbImplTest
     public void testEmptyDb()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         testDb(db);
     }
 
@@ -777,7 +785,7 @@ public class DbImplTest
     public void testSingleEntrySingle()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         testDb(db, immutableEntry("name", "dain sundstrom"));
     }
 
@@ -785,7 +793,7 @@ public class DbImplTest
     public void testMultipleEntries()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
@@ -802,7 +810,7 @@ public class DbImplTest
     public void testMultiPassMultipleEntries()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
 
         List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
@@ -825,7 +833,7 @@ public class DbImplTest
     public void testCantCreateDirectoryReturnMessage()
             throws Exception
     {
-        new DbStringWrapper(new Options(), new File(DOES_NOT_EXIST_FILENAME));
+        new DbStringWrapper(Options.make(), new File(DOES_NOT_EXIST_FILENAME));
     }
 
     @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
@@ -834,7 +842,7 @@ public class DbImplTest
     {
         File databaseFile = new File(databaseDir + "/imafile");
         assertTrue(databaseFile.createNewFile());
-        new DbStringWrapper(new Options(), databaseFile);
+        new DbStringWrapper(Options.make(), databaseFile);
     }
 
     @Test
@@ -853,7 +861,7 @@ public class DbImplTest
     public void testCustomComparator()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().comparator(new ReverseDBComparator()), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().comparator(new ReverseDBComparator()), databaseDir);
 
         List<Entry<String, String>> entries = asList(
                 immutableEntry("scotch/strong", "Lagavulin"),
@@ -868,21 +876,22 @@ public class DbImplTest
             db.put(entry.getKey(), entry.getValue());
         }
 
-        SeekingIterator<String, String> seekingIterator = db.iterator();
-        for (Entry<String, String> entry : entries) {
-            assertTrue(seekingIterator.hasNext());
-            assertEquals(seekingIterator.peek(), entry);
-            assertEquals(seekingIterator.next(), entry);
-        }
+        try (StringDbIterator seekingIterator = db.iterator()) {
+            for (Entry<String, String> entry : entries) {
+                assertTrue(seekingIterator.hasNext());
+                assertEquals(seekingIterator.peek(), entry);
+                assertEquals(seekingIterator.next(), entry);
+            }
 
-        assertFalse(seekingIterator.hasNext());
+            assertFalse(seekingIterator.hasNext());
+        }
     }
 
     @Test
     public void testConcurrentPuts()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(new Options().writeBufferSize(1024), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(1024), databaseDir);
 
         Random rand = new Random(0);
         List<Entry<String, String>> entries = new ArrayList<>();
@@ -904,19 +913,19 @@ public class DbImplTest
 
     @SafeVarargs
     private final void testDb(DbStringWrapper db, Entry<String, String>... entries)
-            throws IOException, InterruptedException, ExecutionException
+            throws InterruptedException, ExecutionException, IOException
     {
         testDb(db, asList(entries));
     }
 
     private void testDb(DbStringWrapper db, List<Entry<String, String>> entries)
-            throws IOException, InterruptedException, ExecutionException
+            throws InterruptedException, ExecutionException, IOException
     {
         testDb(db, entries, 1);
     }
 
     private void testDb(final DbStringWrapper db, List<Entry<String, String>> entries, final int threadCount)
-            throws IOException, InterruptedException, ExecutionException
+            throws InterruptedException, ExecutionException, IOException
     {
 
         List<Entry<String, String>> reverseEntries = newArrayList(entries);
@@ -953,50 +962,52 @@ public class DbImplTest
             assertEquals(actual, entry.getValue(), "Key: " + entry.getKey());
         }
 
-        ReverseSeekingIterator<String, String> seekingIterator = db.iterator();
-        assertReverseSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
-        assertSequence(seekingIterator, entries);
-        assertReverseSequence(seekingIterator, reverseEntries);
+        try (StringDbIterator seekingIterator = db.iterator()) {
+            assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
+            assertSequence(seekingIterator, entries);
+            assertReverseSequence(seekingIterator, reverseEntries);
 
-        seekingIterator.seekToFirst();
-        assertReverseSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
-        assertSequence(seekingIterator, entries);
-        assertReverseSequence(seekingIterator, reverseEntries);
+            seekingIterator.seekToFirst();
+            assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
+            assertSequence(seekingIterator, entries);
+            assertReverseSequence(seekingIterator, reverseEntries);
 
-        seekingIterator.seekToLast();
-        if (reverseEntries.size() > 0) {
-            assertSequence(seekingIterator, reverseEntries.get(0));
             seekingIterator.seekToLast();
-            assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+            if (reverseEntries.size() > 0) {
+                assertSequence(seekingIterator, reverseEntries.get(0));
+                seekingIterator.seekToLast();
+                assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+            }
+            assertSequence(seekingIterator, entries);
+
+            for (Entry<String, String> entry : entries) {
+                List<Entry<String, String>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
+                List<Entry<String, String>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry),
+                        reverseEntries.size());
+                seekingIterator.seek(entry.getKey());
+                assertSequence(seekingIterator, nextEntries);
+
+                seekingIterator.seek(beforeString(entry));
+                assertSequence(seekingIterator, nextEntries);
+
+                seekingIterator.seek(afterString(entry));
+                assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+
+                seekingIterator.seek(beforeString(entry));
+                assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
+
+                seekingIterator.seek(entry.getKey());
+                assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
+
+                seekingIterator.seek(afterString(entry));
+                assertReverseSequence(seekingIterator, prevEntries);
+            }
+
+            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
+            seekingIterator.seek(endKey.toString(UTF_8));
+            assertSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
+            assertReverseSequence(seekingIterator, reverseEntries);
         }
-        assertSequence(seekingIterator, entries);
-
-        for (Entry<String, String> entry : entries) {
-            List<Entry<String, String>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
-            List<Entry<String, String>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());
-            seekingIterator.seek(entry.getKey());
-            assertSequence(seekingIterator, nextEntries);
-
-            seekingIterator.seek(beforeString(entry));
-            assertSequence(seekingIterator, nextEntries);
-
-            seekingIterator.seek(afterString(entry));
-            assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
-
-            seekingIterator.seek(beforeString(entry));
-            assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
-
-            seekingIterator.seek(entry.getKey());
-            assertReverseSequence(seekingIterator, prevEntries.subList(1, prevEntries.size()));
-
-            seekingIterator.seek(afterString(entry));
-            assertReverseSequence(seekingIterator, prevEntries);
-        }
-
-        Slice endKey = Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
-        seekingIterator.seek(endKey.toString(UTF_8));
-        assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
-        assertReverseSequence(seekingIterator, reverseEntries);
     }
 
     @BeforeMethod
@@ -1204,7 +1215,7 @@ public class DbImplTest
             db.delete(toByteArray(key));
         }
 
-        public ReverseSeekingIterator<String, String> iterator()
+        public StringDbIterator iterator()
         {
             return new StringDbIterator(db.iterator());
         }
@@ -1281,25 +1292,36 @@ public class DbImplTest
         }
 
         private List<String> allEntriesFor(String userKey)
+                throws IOException
         {
             ImmutableList.Builder<String> result = ImmutableList.builder();
-            for (Entry<InternalKey, Slice> entry : db.internalIterable()) {
-                String entryKey = entry.getKey().getUserKey().toString(UTF_8);
-                if (entryKey.equals(userKey)) {
-                    if (entry.getKey().getValueType() == ValueType.VALUE) {
-                        result.add(entry.getValue().toString(UTF_8));
+            try (final DbIterator iter = db.internalIterator()) {
+                for (Entry<InternalKey, Slice> entry : new Iterable<Entry<InternalKey, Slice>>()
+                {
+                    @Override
+                    public Iterator<Entry<InternalKey, Slice>> iterator()
+                    {
+                        return iter;
                     }
-                    else {
-                        result.add("DEL");
+                }) {
+                    String entryKey = entry.getKey().getUserKey().toString(UTF_8);
+                    if (entryKey.equals(userKey)) {
+                        if (entry.getKey().getValueType() == ValueType.VALUE) {
+                            result.add(entry.getValue().toString(UTF_8));
+                        }
+                        else {
+                            result.add("DEL");
+                        }
                     }
                 }
+                return result.build();
             }
-            return result.build();
         }
+
     }
 
     private static class StringDbIterator
-            implements ReverseSeekingIterator<String, String>
+            implements ReverseSeekingIterator<String, String>, Closeable
     {
         private final DBIterator iterator;
 
@@ -1379,6 +1401,13 @@ public class DbImplTest
             // ignore this, it's a complication of the class hierarchy that doesnt need to be fixed for
             // testing as of yet
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            this.iterator.close();
         }
     }
 }
