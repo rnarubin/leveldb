@@ -31,7 +31,6 @@ import java.util.Properties;
 public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
-    private static final String OPTIONS_PREFIX = "leveldb.options.";
     private static final Options DEFAULT_OPTIONS = new Options(null);
     static {
         readProperties(System.getProperties());
@@ -41,6 +40,7 @@ public class Options
     {
         // possibly update DEFAULT_OPTIONS with provided properties
 
+        final String optionsPrefix = "leveldb.options.";
         final Map<String, List<Method>> methodsByName = new HashMap<>();
         for (final Method m : Options.class.getMethods()) {
 
@@ -50,7 +50,7 @@ public class Options
                 continue;
             }
 
-            final String propertyName = OPTIONS_PREFIX + m.getName();
+            final String propertyName = optionsPrefix + m.getName();
 
             // future-proof for possible overloading
             List<Method> ms = methodsByName.get(propertyName);
@@ -149,12 +149,7 @@ public class Options
 
     public static Options make()
     {
-        try {
-            return (Options) DEFAULT_OPTIONS.clone();
-        }
-        catch (final CloneNotSupportedException notExpected) {
-            return new Options(DEFAULT_OPTIONS);
-        }
+        return copy(DEFAULT_OPTIONS);
     }
 
     public static Options copy(final Options other)
