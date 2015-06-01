@@ -930,12 +930,17 @@ public class DbImplTest
         else {
             List<Callable<Void>> work = new ArrayList<>(threadCount);
             for (final List<Entry<String, String>> sublist : Lists.partition(entries, entries.size() / threadCount)) {
+                final List<Entry<byte[], byte[]>> byteSubList = new ArrayList<>(sublist.size());
+                for (Entry<String, String> entry : sublist) {
+                    byteSubList.add(Maps.immutableEntry(entry.getKey().getBytes(UTF_8), entry.getValue()
+                            .getBytes(UTF_8)));
+                }
                 work.add(new Callable<Void>()
                 {
                     @Override
                     public Void call()
                     {
-                        for (Entry<String, String> entry : sublist) {
+                        for (Entry<byte[], byte[]> entry : byteSubList) {
                             db.put(entry.getKey(), entry.getValue());
                         }
 
@@ -1197,6 +1202,11 @@ public class DbImplTest
         public void put(String key, String value)
         {
             db.put(toByteArray(key), toByteArray(value));
+        }
+
+        public void put(byte[] key, byte[] value)
+        {
+            db.put(key, value);
         }
 
         public void delete(String key)

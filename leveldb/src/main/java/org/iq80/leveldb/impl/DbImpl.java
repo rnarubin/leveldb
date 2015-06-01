@@ -847,6 +847,11 @@ public class DbImpl
                     current.acquireUpgraded(); // block other writers that might be spinning in wait for a new memtable
                     try {
                         this.memTables.waitForImmutableCompaction();
+                        checkBackgroundException();
+                    }
+                    catch (Throwable e) {
+                        current.release();
+                        throw e;
                     }
                     finally {
                         current.releaseDowngraded();
@@ -907,23 +912,27 @@ public class DbImpl
 
         //block until pending writes have finished
         MemTableAndLog immutable = tables.immutable.acquireAll();
-        immutable.log.close();
-        VersionEdit edit = new VersionEdit();
-        Version base = versions.getCurrent();
-        LOGGER.debug("{} flushing {}", this, immutable.memTable);
-        writeLevel0Table(immutable.memTable, edit, base);
+        try {
+            immutable.log.close();
+            VersionEdit edit = new VersionEdit();
+            Version base = versions.getCurrent();
+            LOGGER.debug("{} flushing {}", this, immutable.memTable);
+            writeLevel0Table(immutable.memTable, edit, base);
 
-        if (shuttingDown.get()) {
-            throw new DatabaseShutdownException("Database shutdown during memtable compaction");
+            if (shuttingDown.get()) {
+                throw new DatabaseShutdownException("Database shutdown during memtable compaction");
+            }
+
+            edit.setPreviousLogNumber(0);
+            edit.setLogNumber(immutable.log.getFileNumber());  // Earlier logs no longer needed
+            versions.logAndApply(edit);
+
+            this.memTables = new MemTables(this.memTables.mutable, null);
         }
-
-        edit.setPreviousLogNumber(0);
-        edit.setLogNumber(immutable.log.getFileNumber());  // Earlier logs no longer needed
-        versions.logAndApply(edit);
-
-        this.memTables = new MemTables(this.memTables.mutable, null);
-        tables.finishCompaction();
-        immutable.releaseAll();
+        finally {
+            tables.finishCompaction();
+            immutable.releaseAll();
+        }
 
         deleteObsoleteFiles();
     }
