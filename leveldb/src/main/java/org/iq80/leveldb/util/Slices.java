@@ -112,16 +112,6 @@ public final class Slices
         return copy;
     }
 
-    public static Slice nonCopiedBuffer(ByteBuffer source)
-    {
-        if (source.hasArray()) {
-            return new Slice(source.array(), source.arrayOffset(), source.remaining());
-        }
-        else {
-            return copiedBuffer(source);
-        }
-    }
-
     public static Slice copiedBuffer(String string, Charset charset)
     {
         Preconditions.checkNotNull(string, "string is null");

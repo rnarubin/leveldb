@@ -180,13 +180,6 @@ public final class SliceInput
         return v;
     }
 
-    public byte[] readByteArray(int length)
-    {
-        byte[] value = slice.copyBytes(position, length);
-        position += length;
-        return value;
-    }
-
     /**
      * Transfers this buffer's data to a newly created buffer starting at
      * the current {@code position} and increases the {@code position}
@@ -262,78 +255,6 @@ public final class SliceInput
     public void readBytes(byte[] destination, int destinationIndex, int length)
     {
         slice.getBytes(position, destination, destinationIndex, length);
-        position += length;
-    }
-
-    /**
-     * Transfers this buffer's data to the specified destination starting at
-     * the current {@code position} until the destination becomes
-     * non-writable, and increases the {@code position} by the number of the
-     * transferred bytes.  This method is basically same with
-     * {@link #readBytes(Slice, int, int)}, except that this method
-     * increases the {@code writerIndex} of the destination by the number of
-     * the transferred bytes while {@link #readBytes(Slice, int, int)}
-     * does not.
-     *
-     * @throws IndexOutOfBoundsException if {@code destination.writableBytes} is greater than
-     * {@code this.available()}
-     */
-    public void readBytes(Slice destination)
-    {
-        readBytes(destination, destination.length());
-    }
-
-    /**
-     * Transfers this buffer's data to the specified destination starting at
-     * the current {@code position} and increases the {@code position}
-     * by the number of the transferred bytes (= {@code length}).  This method
-     * is basically same with {@link #readBytes(Slice, int, int)},
-     * except that this method increases the {@code writerIndex} of the
-     * destination by the number of the transferred bytes (= {@code length})
-     * while {@link #readBytes(Slice, int, int)} does not.
-     *
-     * @throws IndexOutOfBoundsException if {@code length} is greater than {@code this.available()} or
-     * if {@code length} is greater than {@code destination.writableBytes}
-     */
-    public void readBytes(Slice destination, int length)
-    {
-        if (length > destination.length()) {
-            throw new IndexOutOfBoundsException();
-        }
-        readBytes(destination, destination.length(), length);
-    }
-
-    /**
-     * Transfers this buffer's data to the specified destination starting at
-     * the current {@code position} and increases the {@code position}
-     * by the number of the transferred bytes (= {@code length}).
-     *
-     * @param destinationIndex the first index of the destination
-     * @param length the number of bytes to transfer
-     * @throws IndexOutOfBoundsException if the specified {@code destinationIndex} is less than {@code 0},
-     * if {@code length} is greater than {@code this.available()}, or
-     * if {@code destinationIndex + length} is greater than
-     * {@code destination.capacity}
-     */
-    public void readBytes(Slice destination, int destinationIndex, int length)
-    {
-        slice.getBytes(position, destination, destinationIndex, length);
-        position += length;
-    }
-
-    /**
-     * Transfers this buffer's data to the specified destination starting at
-     * the current {@code position} until the destination's position
-     * reaches its limit, and increases the {@code position} by the
-     * number of the transferred bytes.
-     *
-     * @throws IndexOutOfBoundsException if {@code destination.remaining()} is greater than
-     * {@code this.available()}
-     */
-    public void readBytes(ByteBuffer destination)
-    {
-        int length = destination.remaining();
-        slice.getBytes(position, destination);
         position += length;
     }
 

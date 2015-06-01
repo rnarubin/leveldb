@@ -44,7 +44,7 @@ public class FileChannelTable
     {
         long size = fileChannel.size();
         ByteBuffer footerData = read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
-        return Footer.readFooter(Slices.nonCopiedBuffer(footerData));
+        return Footer.readFooter(Slices.copiedBuffer(footerData));
     }
 
     @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod", "NonPrivateFieldAccessedInSynchronizedContext"})
@@ -54,7 +54,7 @@ public class FileChannelTable
     {
         // read block trailer
         ByteBuffer trailerData = read(blockHandle.getOffset() + blockHandle.getDataSize(), BlockTrailer.ENCODED_LENGTH);
-        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.nonCopiedBuffer(trailerData));
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.copiedBuffer(trailerData));
 
 // todo re-enable crc check when ported to support direct buffers
 //        // only verify check sums if explicitly asked by the user
@@ -84,7 +84,7 @@ public class FileChannelTable
             }
         }
         else {
-            uncompressedData = Slices.nonCopiedBuffer(uncompressedBuffer);
+            uncompressedData = Slices.copiedBuffer(uncompressedBuffer);
         }
 
         return new Block(uncompressedData, comparator);

@@ -60,20 +60,17 @@ public final class Slice
 
     public Slice(byte[] data)
     {
-        this(data, 0, data.length);
+        this(ByteBuffer.wrap(data).order(LITTLE_ENDIAN));
     }
 
-    public Slice(byte[] data, int offset, int length)
+    private static ByteBuffer dup(ByteBuffer b)
     {
-        Preconditions.checkNotNull(data, "array is null");
-        this.buffer = ByteBuffer.wrap(data).order(LITTLE_ENDIAN);
-        this.offset = offset;
-        this.length = length;
+        return b.duplicate().order(LITTLE_ENDIAN);
     }
 
     private ByteBuffer dup()
     {
-        return this.buffer.duplicate().order(LITTLE_ENDIAN);
+        return dup(this.buffer);
     }
 
     /**
@@ -176,9 +173,7 @@ public final class Slice
      */
     public void getBytes(int index, Slice dst, int dstIndex, int length)
     {
-        ByteBuffer dest = (ByteBuffer) dst.buffer.duplicate().position(dstIndex);
-        ByteBuffer src = (ByteBuffer) dup().limit(index + length).position(index);
-        dest.put(src);
+        nope();
     }
 
     /**
@@ -211,21 +206,6 @@ public final class Slice
         byte[] ret = new byte[length];
         getBytes(index, ret, 0, length);
         return ret;
-    }
-
-    /**
-     * Transfers this buffer's data to the specified destination starting at
-     * the specified absolute {@code index} until the destination's position
-     * reaches its limit.
-     *
-     * @throws IndexOutOfBoundsException if the specified {@code index} is less than {@code 0} or
-     * if {@code index + dst.remaining()} is greater than
-     * {@code this.capacity}
-     */
-    public void getBytes(int index, ByteBuffer destination)
-    {
-        Preconditions.checkPositionIndex(index, this.length);
-        destination.put((ByteBuffer) dup().position(index));
     }
 
     /**
@@ -332,7 +312,7 @@ public final class Slice
     public void setBytes(int index, Slice src, int srcIndex, int length)
     {
         ByteBuffer dest = (ByteBuffer) dup().position(index);
-        dest.put((ByteBuffer) src.buffer.duplicate().limit(srcIndex + length).position(srcIndex));
+        dest.put((ByteBuffer) dup(src.buffer).limit(srcIndex + length).position(srcIndex));
     }
 
     /**
@@ -434,7 +414,7 @@ public final class Slice
 
     public Slice copySlice()
     {
-        return copySlice(0, length);
+        return copySlice(offset, length);
     }
 
     /**
@@ -445,18 +425,8 @@ public final class Slice
     {
         ByteBuffer src = (ByteBuffer) dup().limit(index + length).position(index);
         Slice ret = new Slice(length);
-        ret.buffer.put(src);
+        ret.setBytes(0, src);
         return ret;
-    }
-
-    public byte[] copyBytes()
-    {
-        return copyBytes(0, length);
-    }
-
-    public byte[] copyBytes(int index, int length)
-    {
-        return getBytes(index, length);
     }
 
     /**
@@ -466,7 +436,7 @@ public final class Slice
      */
     public Slice slice()
     {
-        return slice(0, length);
+        return slice(offset, length);
     }
 
     /**
@@ -504,7 +474,7 @@ public final class Slice
      */
     public ByteBuffer toByteBuffer()
     {
-        return toByteBuffer(0, length);
+        return toByteBuffer(offset, length);
     }
 
     /**
