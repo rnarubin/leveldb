@@ -28,14 +28,10 @@ import org.iq80.leveldb.util.FileUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicInteger;
 
