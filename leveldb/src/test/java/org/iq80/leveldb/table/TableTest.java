@@ -201,4 +201,32 @@ public abstract class TableTest
         Closeables.closeQuietly(randomAccessFile);
         file.delete();
     }
+
+    public static class FileChannelTableTest
+            extends TableTest
+    {
+        @Override
+        protected Table createTable(String name,
+                FileChannel fileChannel,
+                Comparator<Slice> comparator,
+                boolean verifyChecksums)
+                throws IOException
+        {
+            return new FileChannelTable(name, fileChannel, comparator, verifyChecksums);
+        }
+    }
+
+    public static class MMapTableTest
+            extends TableTest
+    {
+        @Override
+        protected Table createTable(String name,
+                FileChannel fileChannel,
+                Comparator<Slice> comparator,
+                boolean verifyChecksums)
+                throws IOException
+        {
+            return new MMapTable(name, fileChannel, comparator, verifyChecksums);
+        }
+    }
 }

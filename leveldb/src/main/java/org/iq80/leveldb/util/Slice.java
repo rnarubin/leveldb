@@ -17,8 +17,6 @@
  */
 package org.iq80.leveldb.util;
 
-import com.google.common.base.Preconditions;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -87,7 +85,7 @@ public final class Slice
     public byte[] getRawArray()
     {
         byte[] b = new byte[this.buffer.capacity()];
-        ((ByteBuffer) dup().limit(b.length).position(0)).get(b);
+        ((ByteBuffer) dup().clear()).get(b);
         return b;
     }
 
@@ -107,7 +105,7 @@ public final class Slice
      */
     public byte getByte(int index)
     {
-        return buffer.get(index);
+        return buffer.get(offset + index);
     }
 
     /**
@@ -131,7 +129,7 @@ public final class Slice
      */
     public short getShort(int index)
     {
-        return buffer.getShort(index);
+        return buffer.getShort(offset + index);
     }
 
     /**
@@ -143,7 +141,7 @@ public final class Slice
      */
     public int getInt(int index)
     {
-        return buffer.getInt(index);
+        return buffer.getInt(offset + index);
     }
 
     /**
@@ -155,7 +153,7 @@ public final class Slice
      */
     public long getLong(int index)
     {
-        return buffer.getLong(index);
+        return buffer.getLong(offset + index);
     }
 
     /**
@@ -191,20 +189,13 @@ public final class Slice
      */
     public void getBytes(int index, byte[] destination, int destinationIndex, int length)
     {
-        Preconditions.checkPositionIndexes(index, index + length, this.length);
-        Preconditions.checkPositionIndexes(destinationIndex, destinationIndex + length, destination.length);
-        ((ByteBuffer) dup().position(index)).get(destination, destinationIndex, length);
+        ((ByteBuffer) dup().position(offset + index)).get(destination, destinationIndex, length);
     }
 
     public byte[] getBytes()
     {
-        return getBytes(this.offset, this.length);
-    }
-
-    public byte[] getBytes(int index, int length)
-    {
         byte[] ret = new byte[length];
-        getBytes(index, ret, 0, length);
+        getBytes(0, ret, 0, length);
         return ret;
     }
 
@@ -257,7 +248,7 @@ public final class Slice
      */
     public void setShort(int index, int value)
     {
-        this.buffer.putShort(index, (short) value);
+        this.buffer.putShort(offset + index, (short) value);
     }
 
     /**
@@ -269,7 +260,7 @@ public final class Slice
      */
     public void setInt(int index, int value)
     {
-        this.buffer.putInt(index, value);
+        this.buffer.putInt(offset + index, value);
     }
 
     /**
@@ -281,7 +272,7 @@ public final class Slice
      */
     public void setLong(int index, long value)
     {
-        this.buffer.putLong(index, value);
+        this.buffer.putLong(offset + index, value);
     }
 
     /**
@@ -293,7 +284,7 @@ public final class Slice
      */
     public void setByte(int index, int value)
     {
-        this.buffer.put(index, (byte) value);
+        this.buffer.put(offset + index, (byte) value);
     }
 
     /**
@@ -311,8 +302,8 @@ public final class Slice
      */
     public void setBytes(int index, Slice src, int srcIndex, int length)
     {
-        ByteBuffer dest = (ByteBuffer) dup().position(index);
-        dest.put((ByteBuffer) dup(src.buffer).limit(srcIndex + length).position(srcIndex));
+        ByteBuffer dest = (ByteBuffer) dup().position(offset + index);
+        dest.put((ByteBuffer) dup(src.buffer).limit(src.offset + srcIndex + length).position(src.offset + srcIndex));
     }
 
     /**
@@ -327,7 +318,7 @@ public final class Slice
      */
     public void setBytes(int index, byte[] source, int sourceIndex, int length)
     {
-        ByteBuffer dest = (ByteBuffer) dup().position(index);
+        ByteBuffer dest = (ByteBuffer) dup().position(offset + index);
         dest.put(source, sourceIndex, length);
     }
 
@@ -342,7 +333,7 @@ public final class Slice
      */
     public void setBytes(int index, ByteBuffer source)
     {
-        ((ByteBuffer) dup().position(index)).put(source);
+        ((ByteBuffer) dup().position(offset + index)).put(source);
     }
 
     /**
@@ -377,7 +368,7 @@ public final class Slice
     public int setBytes(int index, ScatteringByteChannel in, int length)
             throws IOException
     {
-        ByteBuffer dest = (ByteBuffer) dup().limit(index + length).position(index);
+        ByteBuffer dest = (ByteBuffer) dup().limit(offset + index + length).position(offset + index);
         int readBytes = 0;
 
         do {
@@ -414,7 +405,7 @@ public final class Slice
 
     public Slice copySlice()
     {
-        return copySlice(offset, length);
+        return copySlice(0, length);
     }
 
     /**
@@ -423,7 +414,7 @@ public final class Slice
      */
     public Slice copySlice(int index, int length)
     {
-        ByteBuffer src = (ByteBuffer) dup().limit(index + length).position(index);
+        ByteBuffer src = (ByteBuffer) dup().limit(offset + index + length).position(offset + index);
         Slice ret = new Slice(length);
         ret.setBytes(0, src);
         return ret;
@@ -436,7 +427,7 @@ public final class Slice
      */
     public Slice slice()
     {
-        return slice(offset, length);
+        return slice(0, length);
     }
 
     /**
@@ -446,10 +437,7 @@ public final class Slice
      */
     public Slice slice(int index, int length)
     {
-        if (index == 0 && length == this.length) {
-            return this;
-        }
-        return new Slice((ByteBuffer) dup().limit(index + length).position(index));
+        return new Slice((ByteBuffer) dup().limit(offset + index + length).position(offset + index));
     }
 
     /**
@@ -474,7 +462,7 @@ public final class Slice
      */
     public ByteBuffer toByteBuffer()
     {
-        return toByteBuffer(offset, length);
+        return toByteBuffer(0, length);
     }
 
     /**
@@ -483,7 +471,7 @@ public final class Slice
      */
     public ByteBuffer toByteBuffer(int index, int length)
     {
-        return (ByteBuffer) dup().limit(index + length).position(index);
+        return (ByteBuffer) dup().limit(offset + index + length).position(offset + index);
     }
 
     @Override
@@ -538,8 +526,7 @@ public final class Slice
      */
     public int compareTo(Slice that)
     {
-        return FastByteComparisons.compareTo(getBytes(), this.offset, this.length, that.getBytes(), that.offset,
-                that.length);
+        return FastByteComparisons.compareTo(getBytes(), 0, this.length, that.getBytes(), 0, that.length);
     }
 
     /**

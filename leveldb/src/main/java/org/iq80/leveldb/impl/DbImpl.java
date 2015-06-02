@@ -348,6 +348,7 @@ public class DbImpl
         while (memTables.immutableExists()) {
             memTables.waitForImmutableCompaction();
         }
+        checkBackgroundException();
     }
 
     public void compactRange(int level, Slice start, Slice end)
