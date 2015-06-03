@@ -192,6 +192,7 @@ public class Options
     private long cacheSize = 0;
     private boolean throttleLevel0 = true;
     private IOImpl io = USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE;
+    private MemoryManager mem = null;
 
     static void checkArgNotNull(Object value, String name)
     {
@@ -366,6 +367,17 @@ public class Options
     public Options throttleLevel0(boolean throttleLevel0)
     {
         this.throttleLevel0 = throttleLevel0;
+        return this;
+    }
+
+    public MemoryManager memoryManager()
+    {
+        return mem;
+    }
+
+    public Options memoryManager(MemoryManager mem)
+    {
+        this.mem = mem;
         return this;
     }
 }

@@ -22,12 +22,13 @@ import org.iq80.leveldb.table.BlockIterator;
 import org.iq80.leveldb.table.Table;
 
 import java.io.Closeable;
+import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 
 import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
 
 public final class TableIterator
-        extends AbstractReverseSeekingIterator<Slice, Slice>
+        extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
         implements Closeable
 {
     private final Table table;
@@ -91,7 +92,7 @@ public final class TableIterator
     }
 
     @Override
-    protected void seekInternal(Slice targetKey)
+    protected void seekInternal(ByteBuffer targetKey)
     {
         // seek the index to the block containing the key
         blockIterator.seek(targetKey);
@@ -120,7 +121,7 @@ public final class TableIterator
     }
 
     @Override
-    protected Entry<Slice, Slice> getNextElement()
+    protected Entry<ByteBuffer, ByteBuffer> getNextElement()
     {
         // note: it must be here & not where 'current' is assigned,
         // because otherwise we'll have called inputs.next() before throwing
@@ -130,19 +131,19 @@ public final class TableIterator
     }
 
     @Override
-    protected Entry<Slice, Slice> getPrevElement()
+    protected Entry<ByteBuffer, ByteBuffer> getPrevElement()
     {
         return currentHasPrev() ? current.prev() : null;
     }
 
     @Override
-    protected Entry<Slice, Slice> peekInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekInternal()
     {
         return currentHasNext() ? current.peek() : null;
     }
 
     @Override
-    protected Entry<Slice, Slice> peekPrevInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekPrevInternal()
     {
         return currentHasPrev() ? current.peekPrev() : null;
     }
@@ -211,7 +212,7 @@ public final class TableIterator
 
     private BlockIterator getNextBlock()
     {
-        Slice blockHandle = blockIterator.next().getValue();
+        ByteBuffer blockHandle = blockIterator.next().getValue();
         Block dataBlock = table.openBlock(blockHandle);
         currentOrigin = NEXT;
         return dataBlock.iterator();
@@ -219,7 +220,7 @@ public final class TableIterator
 
     private BlockIterator getPrevBlock()
     {
-        Slice blockHandle = blockIterator.prev().getValue();
+        ByteBuffer blockHandle = blockIterator.prev().getValue();
         Block dataBlock = table.openBlock(blockHandle);
         currentOrigin = PREV;
         return dataBlock.iterator();

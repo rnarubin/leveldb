@@ -51,6 +51,7 @@ public class InternalUserComparator
             Slice limit)
     {
         // Attempt to shorten the user portion of the key
+        // ByteBuffer startUserKey = InternalKey.getUserKey(start); etc
         Slice startUserKey = new InternalKey(start).getUserKey();
         Slice limitUserKey = new InternalKey(limit).getUserKey();
 

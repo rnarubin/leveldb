@@ -17,21 +17,23 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import java.nio.ByteBuffer;
 
-import static com.google.common.base.Charsets.UTF_8;
+import com.google.common.base.Preconditions;
+
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.ByteBuffers;
+
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 
 public class InternalKey
 {
-    private final Slice userKey;
+    private final ByteBuffer[] data;
+    private final ByteBuffer userKey;
     private final long sequenceNumber;
     private final ValueType valueType;
 
-    public InternalKey(Slice userKey, long sequenceNumber, ValueType valueType)
+    public InternalKey(ByteBuffer userKey, long sequenceNumber, ValueType valueType, MemoryManager memory)
     {
         Preconditions.checkNotNull(userKey, "userKey is null");
         Preconditions.checkArgument(sequenceNumber >= 0, "sequenceNumber is negative");
@@ -40,24 +42,29 @@ public class InternalKey
         this.userKey = userKey;
         this.sequenceNumber = sequenceNumber;
         this.valueType = valueType;
+        this.data = new ByteBuffer[] {
+                userKey,
+                memory.allocate(SIZE_OF_LONG).putLong(0,
+                        SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType)) };
     }
 
-    public InternalKey(Slice data)
+    public InternalKey(ByteBuffer data)
     {
         Preconditions.checkNotNull(data, "data is null");
-        Preconditions.checkArgument(data.length() >= SIZE_OF_LONG, "data must be at least %s bytes", SIZE_OF_LONG);
+        Preconditions.checkArgument(data.remaining() >= SIZE_OF_LONG, "data must be at least %s bytes", SIZE_OF_LONG);
         this.userKey = getUserKey(data);
-        long packedSequenceAndType = data.getLong(data.length() - SIZE_OF_LONG);
+        long packedSequenceAndType = data.getLong(data.limit() - SIZE_OF_LONG);
         this.sequenceNumber = SequenceNumber.unpackSequenceNumber(packedSequenceAndType);
         this.valueType = SequenceNumber.unpackValueType(packedSequenceAndType);
+        this.data = new ByteBuffer[] { data };
     }
 
     public InternalKey(byte[] data)
     {
-        this(Slices.wrappedBuffer(data));
+        this(ByteBuffer.wrap(data));
     }
 
-    public Slice getUserKey()
+    public ByteBuffer getUserKey()
     {
         return userKey;
     }
@@ -72,13 +79,9 @@ public class InternalKey
         return valueType;
     }
 
-    public Slice encode()
+    public ByteBuffer[] encode()
     {
-        Slice slice = Slices.allocate(userKey.length() + SIZE_OF_LONG);
-        SliceOutput sliceOutput = slice.output();
-        sliceOutput.writeBytes(userKey);
-        sliceOutput.writeLong(SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType));
-        return slice;
+        return this.data;
     }
 
     @Override
@@ -128,15 +131,16 @@ public class InternalKey
     {
         StringBuilder sb = new StringBuilder();
         sb.append("InternalKey");
-        sb.append("{key=").append(getUserKey().toString(UTF_8));      // todo don't print the real value
+        // sb.append("{key=").append(getUserKey().toString(UTF_8)); // TODO don't print the real value
+        sb.append("{key=").append(getUserKey().toString());
         sb.append(", sequenceNumber=").append(getSequenceNumber());
         sb.append(", valueType=").append(getValueType());
         sb.append('}');
         return sb.toString();
     }
 
-    private static Slice getUserKey(Slice data)
+    static ByteBuffer getUserKey(ByteBuffer data)
     {
-        return data.slice(0, data.length() - SIZE_OF_LONG);
+        return ByteBuffers.duplicate(data, data.position(), data.limit() - SIZE_OF_LONG);
     }
 }

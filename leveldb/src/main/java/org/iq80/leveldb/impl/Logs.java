@@ -20,8 +20,6 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPools;
-import org.iq80.leveldb.util.PureJavaCrc32C;
-import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.IOException;
@@ -55,17 +53,19 @@ public final class Logs
         }
     }
 
-    public static int getChunkChecksum(int chunkTypeId, Slice slice)
+    public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)
     {
-        return getChunkChecksum(chunkTypeId, slice.getRawArray(), slice.getRawOffset(), slice.length());
+        // TODO FIXME
+        return 0;
+        // return getChunkChecksum(chunkTypeId, slice.getRawArray(), slice.getRawOffset(), slice.length());
     }
 
-    public static int getChunkChecksum(int chunkTypeId, byte[] buffer, int offset, int length)
-    {
-        // Compute the crc of the record type and the payload.
-        PureJavaCrc32C crc32C = new PureJavaCrc32C();
-        crc32C.update(chunkTypeId);
-        crc32C.update(buffer, offset, length);
-        return crc32C.getMaskedValue();
-    }
+    // public static int getChunkChecksum(int chunkTypeId, byte[] buffer, int offset, int length)
+    // {
+    // // Compute the crc of the record type and the payload.
+    // PureJavaCrc32C crc32C = new PureJavaCrc32C();
+    // crc32C.update(chunkTypeId);
+    // crc32C.update(buffer, offset, length);
+    // return crc32C.getMaskedValue();
+    // }
 }

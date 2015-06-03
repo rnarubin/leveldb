@@ -39,12 +39,6 @@ public final class Slices
         return sliceInput.readBytes(length);
     }
 
-    public static void writeLengthPrefixedBytes(SliceOutput sliceOutput, Slice value)
-    {
-        VariableLengthQuantity.writeVariableLengthInt(value.length(), sliceOutput);
-        sliceOutput.writeBytes(value);
-    }
-
     /**
      * A buffer whose capacity is {@code 0}.
      */

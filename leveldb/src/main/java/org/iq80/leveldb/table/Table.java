@@ -22,7 +22,6 @@ import com.google.common.base.Throwables;
 
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.TableIterator;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.slf4j.Logger;
@@ -37,18 +36,18 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class Table
-        implements SeekingIterable<Slice, Slice>, AutoCloseable
+        implements SeekingIterable<ByteBuffer, ByteBuffer>, AutoCloseable
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
     protected final String name;
     protected final FileChannel fileChannel;
-    protected final Comparator<Slice> comparator;
+    protected final Comparator<ByteBuffer> comparator;
     protected final boolean verifyChecksums;
     protected final Block indexBlock;
     protected final BlockHandle metaindexBlockHandle;
     private final AtomicInteger refCount;
 
-    public Table(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    public Table(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, boolean verifyChecksums)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");
@@ -78,9 +77,9 @@ public abstract class Table
         return new TableIterator(this, indexBlock.iterator());
     }
 
-    public Block openBlock(Slice blockEntry)
+    public Block openBlock(ByteBuffer blockEntry)
     {
-        BlockHandle blockHandle = BlockHandle.readBlockHandle(blockEntry.input());
+        BlockHandle blockHandle = BlockHandle.readBlockHandle(blockEntry);
         Block dataBlock;
         try {
             dataBlock = readBlock(blockHandle);
@@ -91,6 +90,7 @@ public abstract class Table
         return dataBlock;
     }
 
+    // TODO FIXME
     protected static ByteBuffer uncompressedScratch = ByteBuffer.allocateDirect(4 * 1024 * 1024);
 
     protected abstract Block readBlock(BlockHandle blockHandle)
@@ -110,12 +110,12 @@ public abstract class Table
      * For example, the approximate offset of the last key in the table will
      * be close to the file length.
      */
-    public long getApproximateOffsetOf(Slice key)
+    public long getApproximateOffsetOf(ByteBuffer key)
     {
         BlockIterator iterator = indexBlock.iterator();
         iterator.seek(key);
         if (iterator.hasNext()) {
-            BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue().input());
+            BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue());
             return blockHandle.getOffset();
         }
 

@@ -22,9 +22,10 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.Slice;
 
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -33,14 +34,24 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MemTable
-        implements SeekingIterable<InternalKey, Slice>
+        implements SeekingIterable<InternalKey, ByteBuffer>
 {
-    private final ConcurrentSkipListMap<InternalKey, Slice> table;
+    private final ConcurrentSkipListMap<InternalKey, ByteBuffer> table;
     private final AtomicLong approximateMemoryUsage = new AtomicLong();
+    private final MemoryManager memory;
+    private final Comparator<Entry<InternalKey, ByteBuffer>> iteratorComparator;
 
-    public MemTable(InternalKeyComparator internalKeyComparator)
+    public MemTable(final InternalKeyComparator internalKeyComparator, final MemoryManager memory)
     {
-        table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
+        this.table = new ConcurrentSkipListMap<InternalKey, ByteBuffer>(internalKeyComparator);
+        this.memory = memory;
+        this.iteratorComparator = new Comparator<Entry<InternalKey, ByteBuffer>>()
+        {
+            public int compare(Entry<InternalKey, ByteBuffer> o1, Entry<InternalKey, ByteBuffer> o2)
+            {
+                return internalKeyComparator.compare(o1.getKey(), o2.getKey());
+            }
+        };
     }
 
     public void clear()
@@ -63,13 +74,9 @@ public class MemTable
         return approximateMemoryUsage.getAndAdd(delta);
     }
 
-    public void add(long sequenceNumber, ValueType valueType, Slice key, Slice value)
+    public void add(long sequenceNumber, ValueType valueType, ByteBuffer key, ByteBuffer value)
     {
-        Preconditions.checkNotNull(valueType, "valueType is null");
-        Preconditions.checkNotNull(key, "key is null");
-        Preconditions.checkNotNull(valueType, "valueType is null");
-
-        InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType);
+        InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType, memory);
         table.put(internalKey, value);
     }
 
@@ -78,7 +85,7 @@ public class MemTable
         Preconditions.checkNotNull(key, "key is null");
 
         InternalKey internalKey = key.getInternalKey();
-        Entry<InternalKey, Slice> entry = table.ceilingEntry(internalKey);
+        Entry<InternalKey, ByteBuffer> entry = table.ceilingEntry(internalKey);
         if (entry == null) {
             return null;
         }
@@ -104,11 +111,10 @@ public class MemTable
     public class MemTableIterator
             implements
             InternalIterator,
-            ReverseSeekingIterator<InternalKey, Slice>
+            ReverseSeekingIterator<InternalKey, ByteBuffer>
     {
-
-        private ReversePeekingIterator<Entry<InternalKey, Slice>> iterator;
-        private final List<Entry<InternalKey, Slice>> entryList;
+        private ReversePeekingIterator<Entry<InternalKey, ByteBuffer>> iterator;
+        private final List<Entry<InternalKey, ByteBuffer>> entryList;
 
         public MemTableIterator()
         {
@@ -131,13 +137,8 @@ public class MemTable
         @Override
         public void seek(InternalKey targetKey)
         {
-            int index = Collections.binarySearch(entryList, Maps.immutableEntry(targetKey, (Slice) null), new Comparator<Entry<InternalKey, Slice>>()
-            {
-                public int compare(Entry<InternalKey, Slice> o1, Entry<InternalKey, Slice> o2)
-                {
-                    return table.comparator().compare(o1.getKey(), o2.getKey());
-                }
-            });
+            int index = Collections.binarySearch(entryList, Maps.immutableEntry(targetKey, (ByteBuffer) null),
+                    iteratorComparator);
             if (index < 0) {
             /*
              * from Collections.binarySearch:
@@ -152,13 +153,13 @@ public class MemTable
         }
 
         @Override
-        public Entry<InternalKey, Slice> peek()
+        public Entry<InternalKey, ByteBuffer> peek()
         {
             return iterator.peek();
         }
 
         @Override
-        public Entry<InternalKey, Slice> next()
+        public Entry<InternalKey, ByteBuffer> next()
         {
             return iterator.next();
         }
@@ -191,13 +192,13 @@ public class MemTable
         }
 
         @Override
-        public Entry<InternalKey, Slice> peekPrev()
+        public Entry<InternalKey, ByteBuffer> peekPrev()
         {
             return iterator.peekPrev();
         }
 
         @Override
-        public Entry<InternalKey, Slice> prev()
+        public Entry<InternalKey, ByteBuffer> prev()
         {
             return iterator.prev();
         }

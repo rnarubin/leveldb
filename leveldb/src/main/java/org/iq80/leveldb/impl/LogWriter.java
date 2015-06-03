@@ -20,8 +20,6 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.LongToIntFunction;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
 
 import com.google.common.base.Preconditions;
 
@@ -81,7 +79,7 @@ public abstract class LogWriter
     protected abstract CloseableLogBuffer requestSpace(LongToIntFunction len)
             throws IOException;
 
-    protected void buildRecord(final SliceInput sliceInput)
+    protected void buildRecord(final ByteBuffer input)
             throws IOException
     {
         // Fragment the record into chunks as necessary and write it.  Note that if record
@@ -93,7 +91,7 @@ public abstract class LogWriter
             @Override
             public int applyAsInt(long previousWrite)
             {
-                return calculateWriteSize(previousWrite, sliceInput);
+                return calculateWriteSize(previousWrite, input);
             }
         })) {
             // used to track first, middle and last blocks
@@ -101,7 +99,7 @@ public abstract class LogWriter
             int blockOffset = (int) (buffer.lastEndPosition % BLOCK_SIZE);
             do {
                 int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
-                Preconditions.checkState(bytesRemainingInBlock >= 0);
+                assert (bytesRemainingInBlock >= 0);
 
                 // Switch to a new block if necessary
                 if (bytesRemainingInBlock < HEADER_SIZE) {
@@ -116,19 +114,19 @@ public abstract class LogWriter
 
                 // Invariant: we never leave less than HEADER_SIZE bytes available in a block
                 int bytesAvailableInBlock = bytesRemainingInBlock - HEADER_SIZE;
-                Preconditions.checkState(bytesAvailableInBlock >= 0);
+                assert (bytesAvailableInBlock >= 0);
 
                 // if there are more bytes in the record then there are available in the block,
                 // fragment the record; otherwise write to the end of the record
                 boolean end;
                 int fragmentLength;
-                if (sliceInput.available() > bytesAvailableInBlock) {
+                if (input.remaining() > bytesAvailableInBlock) {
                     end = false;
                     fragmentLength = bytesAvailableInBlock;
                 }
                 else {
                     end = true;
-                    fragmentLength = sliceInput.available();
+                    fragmentLength = input.remaining();
                 }
 
                 // determine block type
@@ -148,22 +146,25 @@ public abstract class LogWriter
 
                 // write the chunk
                 Preconditions.checkArgument(blockOffset + HEADER_SIZE <= BLOCK_SIZE);
-                blockOffset += appendChunk(buffer, type, sliceInput.readSlice(fragmentLength));
+                final int oldlim = input.limit();
+                input.limit(input.position() + fragmentLength);
+                blockOffset += appendChunk(buffer, type, input);
+                input.limit(oldlim);
 
                 // we are no longer on the first chunk
                 begin = false;
             }
-            while (sliceInput.isReadable());
+            while (input.hasRemaining());
         }
     }
 
-    private static int appendChunk(CloseableLogBuffer buffer, LogChunkType type, Slice slice)
+    private static int appendChunk(CloseableLogBuffer buffer, LogChunkType type, ByteBuffer data)
             throws IOException
     {
-        final int length = slice.length();
-        Preconditions.checkArgument(length <= 0xffff, "length %s is larger than two bytes", length);
+        final int length = data.remaining();
+        assert (length <= 0xffff) : String.format("length %s is larger than two bytes", length);
 
-        int crc = Logs.getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), length);
+        int crc = Logs.getChunkChecksum(type.getPersistentId(), data);
 
         // Format the header
         buffer.putInt(crc);
@@ -171,17 +172,17 @@ public abstract class LogWriter
         buffer.put((byte) (length >>> 8));
         buffer.put((byte) (type.getPersistentId()));
 
-        buffer.put(slice.toByteBuffer());
+        buffer.put(data);
 
-        return HEADER_SIZE + slice.length();
+        return HEADER_SIZE + length;
     }
 
-    public void addRecord(Slice record, boolean sync)
+    public void addRecord(ByteBuffer record, boolean sync)
             throws IOException
     {
         Preconditions.checkState(!isClosed(), "Log is closed");
 
-        buildRecord(record.input());
+        buildRecord(record);
 
         if (sync) {
             sync();
@@ -199,10 +200,10 @@ public abstract class LogWriter
      * @param newData slice with new data to be written
      * @return this write's size in bytes
      */
-    public static int calculateWriteSize(long previousWrite, SliceInput newData)
+    public static int calculateWriteSize(long previousWrite, ByteBuffer newData)
     {
         int firstBlockWrite;
-        int dataRemaining = newData.available();
+        int dataRemaining = newData.remaining();
         int remainingInBlock = BLOCK_SIZE - (int) (previousWrite % BLOCK_SIZE);
         if (remainingInBlock < HEADER_SIZE) {
             //zero fill

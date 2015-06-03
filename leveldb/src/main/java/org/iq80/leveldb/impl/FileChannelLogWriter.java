@@ -140,7 +140,7 @@ public class FileChannelLogWriter
                 throws IOException
         {
             checkCapacity(b.remaining());
-            if (b.remaining() > buffer.remaining() || b.isDirect()) {
+            if (b.remaining() > buffer.remaining()) {
                 write(b);
             }
             else {

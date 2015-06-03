@@ -17,8 +17,9 @@
  */
 package org.iq80.leveldb.table;
 
+import java.nio.ByteBuffer;
+
 import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -92,7 +93,7 @@ public class BlockHandle
         return sb.toString();
     }
 
-    public static BlockHandle readBlockHandle(SliceInput sliceInput)
+    public static BlockHandle readBlockHandle(ByteBuffer sliceInput)
     {
         long offset = VariableLengthQuantity.readVariableLengthLong(sliceInput);
         long size = VariableLengthQuantity.readVariableLengthLong(sliceInput);

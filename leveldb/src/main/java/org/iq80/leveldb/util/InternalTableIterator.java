@@ -22,10 +22,11 @@ import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.impl.InternalKey;
 
+import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 
 public class InternalTableIterator
-        extends AbstractReverseSeekingIterator<InternalKey, Slice>
+        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
         implements InternalIterator
 {
     private final TableIterator tableIterator;
@@ -60,40 +61,40 @@ public class InternalTableIterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getNextElement()
+    protected Entry<InternalKey, ByteBuffer> getNextElement()
     {
         if (tableIterator.hasNext()) {
-            Entry<Slice, Slice> next = tableIterator.next();
+            Entry<ByteBuffer, ByteBuffer> next = tableIterator.next();
             return Maps.immutableEntry(new InternalKey(next.getKey()), next.getValue());
         }
         return null;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getPrevElement()
+    protected Entry<InternalKey, ByteBuffer> getPrevElement()
     {
         if (tableIterator.hasPrev()) {
-            Entry<Slice, Slice> prev = tableIterator.prev();
+            Entry<ByteBuffer, ByteBuffer> prev = tableIterator.prev();
             return Maps.immutableEntry(new InternalKey(prev.getKey()), prev.getValue());
         }
         return null;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekInternal()
+    protected Entry<InternalKey, ByteBuffer> peekInternal()
     {
         if (tableIterator.hasNext()) {
-            Entry<Slice, Slice> peek = tableIterator.peek();
+            Entry<ByteBuffer, ByteBuffer> peek = tableIterator.peek();
             return Maps.immutableEntry(new InternalKey(peek.getKey()), peek.getValue());
         }
         return null;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekPrevInternal()
+    protected Entry<InternalKey, ByteBuffer> peekPrevInternal()
     {
         if (tableIterator.hasPrev()) {
-            Entry<Slice, Slice> peekPrev = tableIterator.peekPrev();
+            Entry<ByteBuffer, ByteBuffer> peekPrev = tableIterator.peekPrev();
             return Maps.immutableEntry(new InternalKey(peekPrev.getKey()), peekPrev.getValue());
         }
         return null;

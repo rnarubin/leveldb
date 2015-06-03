@@ -26,6 +26,7 @@ import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -40,7 +41,9 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.DbIterator;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPools;
@@ -85,7 +88,6 @@ import static org.iq80.leveldb.impl.ValueType.VALUE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 import static org.iq80.leveldb.util.Slices.readLengthPrefixedBytes;
-import static org.iq80.leveldb.util.Slices.writeLengthPrefixedBytes;
 
 @SuppressWarnings("AccessingNonPublicFieldOfAnotherObject")
 public class DbImpl
@@ -123,12 +125,16 @@ public class DbImpl
 
     private ManualCompaction manualCompaction;
 
+    private final MemoryManager memory;
+
     public DbImpl(Options userOptions, File databaseDir)
             throws IOException
     {
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.options = Options.copy(userOptions);
+
+        this.memory = MemoryManagers.sanitze(this.options.memoryManager());
 
         if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.
@@ -232,7 +238,7 @@ public class DbImpl
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
                     logFileNumber, options, scratchCache);
             this.memTables = new MemTables(
-                    new MemTableAndLog(new MemTable(internalKeyComparator), log),
+new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
                     null);
             edit.setLogNumber(log.getFileNumber());
 
@@ -445,8 +451,9 @@ public class DbImpl
         Compaction compaction;
         if (manualCompaction != null) {
             compaction = versions.compactRange(manualCompaction.level,
-                    new InternalKey(manualCompaction.begin, MAX_SEQUENCE_NUMBER, ValueType.VALUE),
-                    new InternalKey(manualCompaction.end, 0, ValueType.DELETION));
+ new InternalKey(manualCompaction.begin,
+                    MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory), new InternalKey(manualCompaction.end, 0L,
+                    ValueType.DELETION, memory));
         }
         else {
             compaction = versions.pickCompaction();
@@ -501,7 +508,7 @@ public class DbImpl
         // closing channel closes FD
         FileChannel channel = new FileInputStream(file).getChannel()) {
             LogMonitor logMonitor = LogMonitors.logMonitor();
-            LogReader logReader = new LogReader(channel, logMonitor, true, 0);
+            LogReader logReader = new LogReader(channel, logMonitor, true, 0, memory);
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
 
@@ -523,7 +530,7 @@ public class DbImpl
 
                 // apply entries to memTable
                 if (memTable == null) {
-                    memTable = new MemTable(internalKeyComparator);
+                    memTable = new MemTable(internalKeyComparator, memory);
                 }
                 memTable.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
                 writeBatch.forEach(new InsertIntoHandler(memTable, sequenceBegin));
@@ -660,7 +667,7 @@ public class DbImpl
         return writeInternal((WriteBatchImpl) updates, options);
     }
 
-    public Snapshot writeInternal(WriteBatchImpl updates, WriteOptions options)
+    public Snapshot writeInternal(WriteBatchImpl updates, WriteOptions writeOptions)
             throws DBException
     {
         checkBackgroundException();
@@ -678,9 +685,9 @@ public class DbImpl
                 sequenceEnd = sequenceBegin + sequenceDelta - 1;
 
                 // Log write
-                Slice record = writeWriteBatch(updates, sequenceBegin);
+                ByteBuffer record = writeWriteBatch(updates, sequenceBegin);
                 try {
-                    memlog.log.addRecord(record, options.sync());
+                    memlog.log.addRecord(record, writeOptions.sync());
                 }
                 catch (IOException e) {
                     throw Throwables.propagate(e);
@@ -697,7 +704,7 @@ public class DbImpl
             sequenceEnd = versions.getLastSequence();
         }
 
-        if (options.snapshot()) {
+        if (writeOptions.snapshot()) {
             return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
         }
         else {
@@ -973,6 +980,7 @@ public class DbImpl
                     }
                     largest = key;
 
+                    // TODO check encode
                     tableBuilder.add(key.encode(), entry.getValue());
                 }
 
@@ -1085,6 +1093,7 @@ public class DbImpl
                             compactionState.currentSmallest = key;
                         }
                         compactionState.currentLargest = key;
+                        // TODO: check encode
                         compactionState.builder.add(key.encode(), iterator.peek().getValue());
     
                         // Close output file if it is big enough
@@ -1223,8 +1232,10 @@ public class DbImpl
     {
         Version v = versions.getCurrent();
 
-        InternalKey startKey = new InternalKey(Slices.wrappedBuffer(range.start()), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-        InternalKey limitKey = new InternalKey(Slices.wrappedBuffer(range.limit()), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        InternalKey startKey = new InternalKey(ByteBuffer.wrap(range.start()), SequenceNumber.MAX_SEQUENCE_NUMBER,
+                ValueType.VALUE, memory);
+        InternalKey limitKey = new InternalKey(ByteBuffer.wrap(range.limit()), SequenceNumber.MAX_SEQUENCE_NUMBER,
+                ValueType.VALUE, memory);
         long startOffset = v.getApproximateOffsetOf(startKey);
         long limitOffset = v.getApproximateOffsetOf(limitKey);
 
@@ -1270,10 +1281,10 @@ public class DbImpl
     private static class ManualCompaction
     {
         private final int level;
-        private final Slice begin;
-        private final Slice end;
+        private final ByteBuffer begin;
+        private final ByteBuffer end;
 
-        private ManualCompaction(int level, Slice begin, Slice end)
+        private ManualCompaction(int level, ByteBuffer begin, ByteBuffer end)
         {
             this.level = level;
             this.begin = begin;
@@ -1311,30 +1322,30 @@ public class DbImpl
         return writeBatch;
     }
 
-    private Slice writeWriteBatch(WriteBatchImpl updates, long sequenceBegin)
+    private ByteBuffer writeWriteBatch(WriteBatchImpl updates, long sequenceBegin)
     {
-        Slice record = Slices.allocate(SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
-        final SliceOutput sliceOutput = record.output();
-        sliceOutput.writeLong(sequenceBegin);
-        sliceOutput.writeInt(updates.size());
+        final ByteBuffer record = this.memory.allocate(SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
+        record.putLong(sequenceBegin);
+        record.putInt(updates.size());
         updates.forEach(new Handler()
         {
             @Override
-            public void put(Slice key, Slice value)
+            public void put(ByteBuffer key, ByteBuffer value)
             {
-                sliceOutput.writeByte(VALUE.getPersistentId());
-                writeLengthPrefixedBytes(sliceOutput, key);
-                writeLengthPrefixedBytes(sliceOutput, value);
+                record.put(VALUE.getPersistentId());
+                ByteBuffers.writeLengthPrefixedBytes(record, key);
+                ByteBuffers.writeLengthPrefixedBytes(record, value);
             }
 
             @Override
-            public void delete(Slice key)
+            public void delete(ByteBuffer key)
             {
-                sliceOutput.writeByte(DELETION.getPersistentId());
-                writeLengthPrefixedBytes(sliceOutput, key);
+                record.put(DELETION.getPersistentId());
+                ByteBuffers.writeLengthPrefixedBytes(record, key);
             }
         });
-        return record.slice(0, sliceOutput.size());
+        record.flip();
+        return record;
     }
 
     private static class InsertIntoHandler
@@ -1350,15 +1361,15 @@ public class DbImpl
         }
 
         @Override
-        public void put(Slice key, Slice value)
+        public void put(ByteBuffer key, ByteBuffer value)
         {
             memTable.add(sequence++, VALUE, key, value);
         }
 
         @Override
-        public void delete(Slice key)
+        public void delete(ByteBuffer key)
         {
-            memTable.add(sequence++, DELETION, key, Slices.EMPTY_SLICE);
+            memTable.add(sequence++, DELETION, key, ByteBuffers.EMPTY_BUFFER);
         }
     }
 

@@ -24,6 +24,7 @@ import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -31,7 +32,7 @@ import java.util.List;
 import java.util.Map.Entry;
 
 public final class DbIterator
-        extends AbstractReverseSeekingIterator<InternalKey, Slice>
+        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
         implements
         InternalIterator
 {
@@ -244,7 +245,7 @@ public final class DbIterator
         return sb.toString();
     }
 
-    private class OrdinalIterator<T extends ReverseSeekingIterator<InternalKey, Slice> & Closeable>
+    private class OrdinalIterator<T extends ReverseSeekingIterator<InternalKey, ByteBuffer> & Closeable>
     {
         final public T iterator;
         final public int ordinal;

@@ -24,15 +24,19 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.ScatteringByteChannel;
 import java.nio.charset.Charset;
 
+import org.iq80.leveldb.MemoryManager;
+
 public class DynamicSliceOutput
         extends SliceOutput
 {
     private Slice slice;
     private int size;
+    private final MemoryManager memory;
 
-    public DynamicSliceOutput(int estimatedSize)
+    public DynamicSliceOutput(int estimatedSize, MemoryManager memory)
     {
         this.slice = new Slice(estimatedSize);
+        this.memory = memory;
     }
 
     @Override

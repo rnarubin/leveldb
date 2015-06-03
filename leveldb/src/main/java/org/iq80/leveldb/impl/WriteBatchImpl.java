@@ -19,10 +19,10 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
-import org.iq80.leveldb.WriteBatch;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
 
+import org.iq80.leveldb.WriteBatch;
+
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -31,7 +31,7 @@ import static com.google.common.collect.Lists.newArrayList;
 public class WriteBatchImpl
         implements WriteBatch
 {
-    private final List<Entry<Slice, Slice>> batch;
+    private final List<Entry<ByteBuffer, ByteBuffer>> batch;
     protected int approximateSize;
     
     public WriteBatchImpl()
@@ -52,36 +52,29 @@ public class WriteBatchImpl
     @Override
     public WriteBatchImpl put(byte[] key, byte[] value)
     {
-        Preconditions.checkNotNull(key, "key is null");
-        Preconditions.checkNotNull(value, "value is null");
-        batch.add(Maps.immutableEntry(Slices.wrappedBuffer(key), Slices.wrappedBuffer(value)));
-        approximateSize += 12 + key.length + value.length;
-        return this;
+        return put(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
     }
 
-    public WriteBatchImpl put(Slice key, Slice value)
+    public WriteBatchImpl put(ByteBuffer key, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
         Preconditions.checkNotNull(value, "value is null");
         batch.add(Maps.immutableEntry(key, value));
-        approximateSize += 12 + key.length() + value.length();
+        approximateSize += 12 + key.remaining() + value.remaining();
         return this;
     }
 
     @Override
     public WriteBatchImpl delete(byte[] key)
     {
-        Preconditions.checkNotNull(key, "key is null");
-        batch.add(Maps.immutableEntry(Slices.wrappedBuffer(key), (Slice) null));
-        approximateSize += 6 + key.length;
-        return this;
+        return delete(ByteBuffer.wrap(key));
     }
 
-    public WriteBatchImpl delete(Slice key)
+    public WriteBatchImpl delete(ByteBuffer key)
     {
         Preconditions.checkNotNull(key, "key is null");
-        batch.add(Maps.immutableEntry(key, (Slice) null));
-        approximateSize += 6 + key.length();
+        batch.add(Maps.immutableEntry(key, (ByteBuffer) null));
+        approximateSize += 6 + key.remaining();
         return this;
     }
 
@@ -92,9 +85,9 @@ public class WriteBatchImpl
 
     public void forEach(Handler handler)
     {
-        for (Entry<Slice, Slice> entry : batch) {
-            Slice key = entry.getKey();
-            Slice value = entry.getValue();
+        for (Entry<ByteBuffer, ByteBuffer> entry : batch) {
+            ByteBuffer key = entry.getKey();
+            ByteBuffer value = entry.getValue();
             if (value != null) {
                 handler.put(key, value);
             }
@@ -106,28 +99,38 @@ public class WriteBatchImpl
 
     public interface Handler
     {
-        void put(Slice key, Slice value);
+        void put(ByteBuffer key, ByteBuffer value);
 
-        void delete(Slice key);
+        void delete(ByteBuffer key);
     }
     
     static class WriteBatchSingle
             extends WriteBatchImpl
     {
-        private final Slice key, value;
-
-        WriteBatchSingle(byte[] key)
-        {
-            this.key = Slices.wrappedBuffer(key);
-            this.value = null;
-            this.approximateSize = 6 + key.length;
-        }
+        private final ByteBuffer key, value;
 
         WriteBatchSingle(byte[] key, byte[] value)
         {
-            this.key = Slices.wrappedBuffer(key);
-            this.value = Slices.wrappedBuffer(value);
-            this.approximateSize = 12 + key.length + value.length;
+            this(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
+        }
+
+        WriteBatchSingle(ByteBuffer key, ByteBuffer value)
+        {
+            this.key = key;
+            this.value = value;
+            this.approximateSize = 12 + key.remaining() + value.remaining();
+        }
+
+        WriteBatchSingle(byte[] key)
+        {
+            this(ByteBuffer.wrap(key));
+        }
+
+        WriteBatchSingle(ByteBuffer key)
+        {
+            this.key = key;
+            this.value = null;
+            this.approximateSize = 6 + key.remaining();
         }
 
         @Override

@@ -17,12 +17,15 @@
  */
 package org.iq80.leveldb.impl;
 
+import java.nio.ByteBuffer;
+
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Slice;
+
+import org.iq80.leveldb.util.ByteBuffers;
 
 public class LookupResult
 {
-    public static LookupResult ok(LookupKey key, Slice value)
+    public static LookupResult ok(LookupKey key, ByteBuffer value)
     {
         return new LookupResult(key, value, false);
     }
@@ -33,15 +36,15 @@ public class LookupResult
     }
 
     private final LookupKey key;
-    private final Slice value;
+    private final ByteBuffer value;
     private final boolean deleted;
 
-    private LookupResult(LookupKey key, Slice value, boolean deleted)
+    private LookupResult(LookupKey key, ByteBuffer value, boolean deleted)
     {
         Preconditions.checkNotNull(key, "key is null");
         this.key = key;
         if (value != null) {
-            this.value = value.slice();
+            this.value = ByteBuffers.duplicate(value);
         }
         else {
             this.value = null;
@@ -54,11 +57,8 @@ public class LookupResult
         return key;
     }
 
-    public Slice getValue()
+    public ByteBuffer getValue()
     {
-        if (value == null) {
-            return null;
-        }
         return value;
     }
 
