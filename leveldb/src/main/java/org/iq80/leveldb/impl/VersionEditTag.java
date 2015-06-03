@@ -236,14 +236,20 @@ public enum VersionEditTag
                 }
             };
 
+    private static final VersionEditTag[] indexedTag = new VersionEditTag[10];
+    static {
+        for (VersionEditTag tag : VersionEditTag.values()) {
+            indexedTag[tag.persistentId] = tag;
+        }
+    }
     public static VersionEditTag getValueTypeByPersistentId(int persistentId)
     {
-        for (VersionEditTag compressionType : VersionEditTag.values()) {
-            if (compressionType.persistentId == persistentId) {
-                return compressionType;
-            }
+        VersionEditTag tag;
+        if (persistentId < 0 || persistentId >= indexedTag.length || (tag = indexedTag[persistentId]) == null) {
+            throw new IllegalArgumentException(String.format("Unknown %s persistentId %d",
+                    VersionEditTag.class.getSimpleName(), persistentId));
         }
-        throw new IllegalArgumentException(String.format("Unknown %s persistentId %d", VersionEditTag.class.getSimpleName(), persistentId));
+        return tag;
     }
 
     private final int persistentId;

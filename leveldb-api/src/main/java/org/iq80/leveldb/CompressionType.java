@@ -22,14 +22,19 @@ public enum CompressionType
     NONE(0x00),
     SNAPPY(0x01);
 
+    private static final CompressionType[] indexedTypes = new CompressionType[2];
+    static {
+        for (CompressionType type : CompressionType.values()) {
+            indexedTypes[type.persistentId] = type;
+        }
+    }
+
     public static CompressionType getCompressionTypeByPersistentId(int persistentId)
     {
-        for (CompressionType compressionType : CompressionType.values()) {
-            if (compressionType.persistentId == persistentId) {
-                return compressionType;
-            }
+        if (persistentId < 0 || persistentId >= indexedTypes.length) {
+            throw new IllegalArgumentException("Unknown persistentId " + persistentId);
         }
-        throw new IllegalArgumentException("Unknown persistentId " + persistentId);
+        return indexedTypes[persistentId];
     }
 
     private final int persistentId;
