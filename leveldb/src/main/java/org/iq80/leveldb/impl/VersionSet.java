@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -113,7 +114,7 @@ public class VersionSet
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
             try {
                 writeSnapshot(log);
-                log.addRecord(edit.encode(), true);
+                log.addRecord(edit.encode(options.memoryManager()), true);
             }
             finally {
                log.close();
@@ -294,7 +295,7 @@ public class VersionSet
             }
 
             // Write new record to MANIFEST log
-            Slice record = edit.encode();
+            ByteBuffer record = edit.encode(options.memoryManager());
             descriptorLog.addRecord(record, true);
 
             // If we just created a new descriptor file, install it by writing a
@@ -332,7 +333,7 @@ public class VersionSet
         // Save files
         edit.addFiles(current.getFiles());
 
-        Slice record = edit.encode();
+        ByteBuffer record = edit.encode(options.memoryManager());
         log.addRecord(record, true);
     }
 
@@ -361,8 +362,8 @@ public class VersionSet
             Long prevLogNumber = null;
             Builder builder = new Builder(this, current);
 
-            LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0);
-            for (Slice record = reader.readRecord(); record != null; record = reader.readRecord()) {
+            LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0, options.memoryManager());
+            for (ByteBuffer record = reader.readRecord(); record != null; record = reader.readRecord()) {
                 // read version edit
                 VersionEdit edit = new VersionEdit(record);
 
@@ -629,8 +630,8 @@ public class VersionSet
     List<FileMetaData> getOverlappingInputs(int level, InternalKey begin, InternalKey end)
     {
         ImmutableList.Builder<FileMetaData> files = ImmutableList.builder();
-        Slice userBegin = begin.getUserKey();
-        Slice userEnd = end.getUserKey();
+        ByteBuffer userBegin = begin.getUserKey();
+        ByteBuffer userEnd = end.getUserKey();
         UserComparator userComparator = internalKeyComparator.getUserComparator();
         for (FileMetaData fileMetaData : current.getFiles(level)) {
             if (userComparator.compare(fileMetaData.getLargest().getUserKey(), userBegin) < 0 ||

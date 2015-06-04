@@ -17,7 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.ByteBufferSupport;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.SizeOf;
@@ -305,7 +305,7 @@ public class MMapLogWriter
             {
                 assert mmapPosition % PAGE_SIZE == 0;
                 if (mmapPosition != headPosition) {
-                    ByteBufferSupport.unmap((MappedByteBuffer) currentSlice);
+                    ByteBuffers.unmap((MappedByteBuffer) currentSlice);
                 }
 
                 mmapPosition += PAGE_SIZE;

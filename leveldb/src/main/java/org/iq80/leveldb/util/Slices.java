@@ -33,11 +33,6 @@ import java.util.Map;
 
 public final class Slices
 {
-    public static Slice readLengthPrefixedBytes(SliceInput sliceInput)
-    {
-        int length = VariableLengthQuantity.readVariableLengthInt(sliceInput);
-        return sliceInput.readBytes(length);
-    }
 
     /**
      * A buffer whose capacity is {@code 0}.

@@ -149,22 +149,22 @@ public final class DbIterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getNextElement()
+    protected Entry<InternalKey, ByteBuffer> getNextElement()
     {
-        Entry<InternalKey, Slice> next = heap[0].iterator.next();
+        Entry<InternalKey, ByteBuffer> next = heap[0].iterator.next();
         siftDown(heap, smallerNext, 0, heap[0]);
 
         return next;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getPrevElement()
+    protected Entry<InternalKey, ByteBuffer> getPrevElement()
     {
         Tuple<OrdinalIterator<?>, Integer> maxAndIndex = getMaxAndIndex();
         OrdinalIterator<?> ord = maxAndIndex.item1;
         int index = maxAndIndex.item2;
 
-        Entry<InternalKey, Slice> prev = ord.iterator.prev();
+        Entry<InternalKey, ByteBuffer> prev = ord.iterator.prev();
         siftUp(heap, smallerNext, index, heap[index]);
         siftDown(heap, smallerNext, index, heap[index]);
 
@@ -172,13 +172,13 @@ public final class DbIterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekInternal()
+    protected Entry<InternalKey, ByteBuffer> peekInternal()
     {
         return heap[0].iterator.peek();
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekPrevInternal()
+    protected Entry<InternalKey, ByteBuffer> peekPrevInternal()
     {
         return getMaxAndIndex().item1.iterator.peekPrev();
     }

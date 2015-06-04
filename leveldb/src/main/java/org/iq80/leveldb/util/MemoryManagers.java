@@ -40,11 +40,18 @@ public enum MemoryManagers
         }
     };
 
-    private static final MemoryManager DEFAULT = Options.make().memoryManager();
+    // if the user has set the default to be DIRECT via system properties, make it direct.
+    // otherwise, the default was set to be:
+    // 1) HEAP, so heap
+    // 2) null, i.e. not set, so default to heap
+    // 3) user configured: in which case default to heap in case it's null in sanitize check
+    private static final MemoryManager DEFAULT = Options.make().memoryManager() == DIRECT ? DIRECT : HEAP;
 
-    public static MemoryManager sanitze(final MemoryManager userManager)
+    public static MemoryManager sanitize(final MemoryManager userManager)
     {
-        return userManager == null ? DEFAULT : new MemoryManager()
+        // bypass sanitation for known defaults
+        return userManager == null ? DEFAULT : userManager == HEAP ? HEAP : userManager == DIRECT ? DIRECT
+                : new MemoryManager()
         {
             @Override
             public ByteBuffer allocate(int capacity)

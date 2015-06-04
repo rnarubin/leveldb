@@ -23,7 +23,11 @@ public final class ByteBuffers
 
     private interface BufferUtil
     {
-        // ByteBuffer duplicate(ByteBuffer src, int position, int limit);
+        int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey);
+
+        void putZero(ByteBuffer dst, int length);
+
+        int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2);
     }
 
     private static final BufferUtil UTIL = PureJavaUtil.INSTANCE;
@@ -32,6 +36,48 @@ public final class ByteBuffers
             implements BufferUtil
     {
         INSTANCE;
+
+        @Override
+        public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
+        {
+            int sharedKeyBytes = 0;
+            final int lpos = leftKey.position(), rpos = rightKey.position();
+
+            if (leftKey != null && rightKey != null) {
+                int minSharedKeyBytes = Math.min(leftKey.remaining(), rightKey.remaining());
+                while (sharedKeyBytes < minSharedKeyBytes
+                        && leftKey.get(lpos + sharedKeyBytes) == rightKey.get(rpos + sharedKeyBytes)) {
+                    sharedKeyBytes++;
+                }
+            }
+
+            return sharedKeyBytes;
+        }
+
+        @Override
+        public void putZero(ByteBuffer dst, int length)
+        {
+            for (; length >= 0; length--) {
+                dst.put((byte) 0);
+            }
+        }
+
+        @Override
+        public int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2)
+        {
+            if (buffer1 == buffer2 && offset1 == offset2 && length1 == length2) {
+                return 0;
+            }
+            final int len = Math.min(length1, length2);
+            for (int i = 0; i < len; i++) {
+                int a = (buffer1.get(offset1 + i) & 0xff);
+                int b = (buffer2.get(offset2 + i) & 0xff);
+                if (a != b) {
+                    return a - b;
+                }
+            }
+            return length1 - length2;
+        }
     }
 
     public static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN);
@@ -97,6 +143,24 @@ public final class ByteBuffers
         dst.put(src);
     }
 
+    public static void writeLengthPrefixedBytes(GrowingBuffer buffer, ByteBuffer[] srcs)
+    {
+        int size = 0;
+        for (ByteBuffer src : srcs) {
+            size += src.remaining();
+        }
+        VariableLengthQuantity.writeVariableLengthInt(size, buffer);
+        for (ByteBuffer src : srcs) {
+            buffer.put(src);
+        }
+    }
+
+    public static ByteBuffer readLengthPrefixedBytes(ByteBuffer src)
+    {
+        int length = VariableLengthQuantity.readVariableLengthInt(src);
+        return sliceAndAdvance(src, length);
+    }
+
     public static ByteBuffer duplicate(ByteBuffer src, int position, int limit)
     {
         ByteBuffer ret = duplicate(src);
@@ -112,9 +176,9 @@ public final class ByteBuffers
         return src.duplicate().order(src.order());
     }
 
-    public static short readUnsignedByte(ByteBuffer src)
+    public static int readUnsignedByte(ByteBuffer src)
     {
-        return (short) (src.get() & 0xFF);
+        return src.get() & 0xFF;
     }
 
     public static ByteBuffer sliceAndAdvance(ByteBuffer src, int length)
@@ -122,5 +186,21 @@ public final class ByteBuffers
         final int oldpos = src.position();
         src.position(oldpos + length);
         return duplicate(src, oldpos, oldpos + length);
+    }
+
+    public static int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
+    {
+        return UTIL.calculateSharedBytes(leftKey, rightKey);
+    }
+
+    public static ByteBuffer putZero(ByteBuffer dst, int length)
+    {
+        UTIL.putZero(dst, length);
+        return dst;
+    }
+
+    public static int compare(ByteBuffer a, ByteBuffer b)
+    {
+        return UTIL.compare(a, a.position(), a.remaining(), b, b.position(), b.remaining());
     }
 }

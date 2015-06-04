@@ -134,7 +134,8 @@ public class DbImpl
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.options = Options.copy(userOptions);
 
-        this.memory = MemoryManagers.sanitze(this.options.memoryManager());
+        this.memory = MemoryManagers.sanitize(this.options.memoryManager());
+        this.options.memoryManager(this.memory);
 
         if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.

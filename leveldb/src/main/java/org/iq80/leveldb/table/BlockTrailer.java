@@ -17,12 +17,13 @@
  */
 package org.iq80.leveldb.table;
 
+import java.nio.ByteBuffer;
+
 import com.google.common.base.Preconditions;
+
 import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
 
 public class BlockTrailer
 {
@@ -98,16 +99,10 @@ public class BlockTrailer
         return new BlockTrailer(compressionType, crc32c);
     }
 
-    public static Slice writeBlockTrailer(BlockTrailer blockTrailer)
+    public static ByteBuffer writeBlockTrailer(BlockTrailer blockTrailer, ByteBuffer buffer)
     {
-        Slice slice = Slices.allocate(ENCODED_LENGTH);
-        writeBlockTrailer(blockTrailer, slice.output());
-        return slice;
-    }
-
-    public static void writeBlockTrailer(BlockTrailer blockTrailer, SliceOutput sliceOutput)
-    {
-        sliceOutput.writeByte(blockTrailer.getCompressionType().persistentId());
-        sliceOutput.writeInt(blockTrailer.getCrc32c());
+        buffer.put((byte) blockTrailer.getCompressionType().persistentId());
+        buffer.putInt(blockTrailer.getCrc32c());
+        return buffer;
     }
 }

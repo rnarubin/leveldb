@@ -17,7 +17,7 @@
  */
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.ByteBufferSupport;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
@@ -40,7 +40,7 @@ public class MMapTable
 {
     private MappedByteBuffer data;
 
-    public MMapTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    public MMapTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, boolean verifyChecksums)
             throws IOException
     {
         super(name, fileChannel, comparator, verifyChecksums);
@@ -50,9 +50,11 @@ public class MMapTable
     protected Footer init()
             throws IOException
     {
-        long size = fileChannel.size();
+        long fsize = fileChannel.size();
+        assert fsize <= Integer.MAX_VALUE;
+        int size = (int) fsize;
         data = fileChannel.map(MapMode.READ_ONLY, 0, size);
-        Slice footerSlice = Slices.copiedBuffer(data, (int) size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
+        ByteBuffer footerSlice = ByteBuffers.duplicate(data, size - Footer.ENCODED_LENGTH, size);
         return Footer.readFooter(footerSlice);
     }
 
@@ -76,8 +78,9 @@ public class MMapTable
         }
 
         public Void call()
+                throws IOException
         {
-            ByteBufferSupport.unmap(data);
+            ByteBuffers.unmap(data);
             Closeables.closeQuietly(closeable);
             return null;
         }
@@ -105,7 +108,7 @@ public class MMapTable
 //        }
 
         // decompress data
-        Slice uncompressedData;
+        ByteBuffer uncompressedData;
         ByteBuffer uncompressedBuffer = read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
         if (blockTrailer.getCompressionType() == SNAPPY) {
             synchronized (MMapTable.class) {

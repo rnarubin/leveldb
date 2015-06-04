@@ -71,10 +71,10 @@ public class IntVector
         return Arrays.copyOf(values, size);
     }
 
-    public void write(SliceOutput sliceOutput)
+    public void write(GrowingBuffer buffer)
     {
         for (int index = 0; index < size; index++) {
-            sliceOutput.writeInt(values[index]);
+            buffer.putInt(values[index]);
         }
     }
 

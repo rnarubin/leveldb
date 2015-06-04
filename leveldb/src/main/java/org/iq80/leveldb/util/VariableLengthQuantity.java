@@ -38,7 +38,7 @@ public final class VariableLengthQuantity
     public static int variableLengthSize(long value)
     {
         int size = 1;
-        while ((value & (~0x7f)) != 0) {
+        while ((value & (~0x7fL)) != 0) {
             value >>>= 7;
             size++;
         }
@@ -75,14 +75,24 @@ public final class VariableLengthQuantity
         }
     }
 
-    public static void writeVariableLengthLong(long value, SliceOutput sliceOutput)
+    public static void writeVariableLengthInt(int value, GrowingBuffer buffer)
+    {
+        writeVariableLengthInt(value, buffer.ensureSpace(5));
+    }
+
+    public static void writeVariableLengthLong(long value, ByteBuffer buffer)
     {
         // while value more than the first 7 bits set
-        while ((value & (~0x7f)) != 0) {
-            sliceOutput.writeByte((int) ((value & 0x7f) | 0x80));
+        while ((value & (~0x7fL)) != 0) {
+            buffer.put((byte) ((value & 0x7f) | 0x80));
             value >>>= 7;
         }
-        sliceOutput.writeByte((int) value);
+        buffer.put((byte) value);
+    }
+
+    public static void writeVariableLengthLong(long value, GrowingBuffer buffer)
+    {
+        writeVariableLengthLong(value, buffer.ensureSpace(10));
     }
 
     public static int readVariableLengthInt(SliceInput sliceInput)
@@ -106,7 +116,7 @@ public final class VariableLengthQuantity
     {
         int result = 0;
         for (int shift = 0; shift <= 28; shift += 7) {
-            int b = sliceInput.get();
+            int b = ByteBuffers.readUnsignedByte(sliceInput);
 
             // add the lower 7 bits to the result
             result |= ((b & 0x7f) << shift);

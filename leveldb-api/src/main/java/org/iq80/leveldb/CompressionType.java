@@ -19,8 +19,7 @@ package org.iq80.leveldb;
 
 public enum CompressionType
 {
-    NONE(0x00),
-    SNAPPY(0x01);
+    NONE((byte) 0x00), SNAPPY((byte) 0x01);
 
     private static final CompressionType[] indexedTypes = new CompressionType[2];
     static {
@@ -37,14 +36,14 @@ public enum CompressionType
         return indexedTypes[persistentId];
     }
 
-    private final int persistentId;
+    private final byte persistentId;
 
-    CompressionType(int persistentId)
+    CompressionType(byte persistentId)
     {
         this.persistentId = persistentId;
     }
 
-    public int persistentId()
+    public byte persistentId()
     {
         return persistentId;
     }

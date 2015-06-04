@@ -16,17 +16,36 @@ public class GrowingBuffer
         this.buffer = this.memory.allocate(nextPowerOf2(initialSize));
     }
 
-
-    public GrowingBuffer put(ByteBuffer src)
+    /**
+     * note: returns internal ByteBuffer
+     */
+    public ByteBuffer ensureSpace(int length)
     {
-        final int deficit = src.remaining() - this.buffer.remaining();
+        final int deficit = length - this.buffer.remaining();
         if (deficit > 0) {
             ByteBuffer oldBuffer = this.buffer;
             this.buffer = this.memory.allocate(nextPowerOf2(oldBuffer.capacity() + deficit));
             oldBuffer.flip();
             this.buffer.put(oldBuffer);
         }
-        this.buffer.put(src);
+        return this.buffer;
+    }
+
+    public GrowingBuffer put(ByteBuffer src)
+    {
+        ensureSpace(src.remaining()).put(src);
+        return this;
+    }
+
+    public GrowingBuffer put(byte[] src)
+    {
+        ensureSpace(src.length).put(src);
+        return this;
+    }
+
+    public GrowingBuffer putInt(int val)
+    {
+        ensureSpace(SizeOf.SIZE_OF_INT).putInt(val);
         return this;
     }
 

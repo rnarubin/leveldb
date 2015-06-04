@@ -22,6 +22,7 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TableCache;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -30,7 +31,7 @@ import org.iq80.leveldb.util.TableIterator.CurrentOrigin;
 import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
 
 public final class LevelIterator
-        extends AbstractReverseSeekingIterator<InternalKey, Slice>
+        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
         implements InternalIterator
 {
     private final TableCache tableCache;
@@ -140,7 +141,7 @@ public final class LevelIterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getNextElement()
+    protected Entry<InternalKey, ByteBuffer> getNextElement()
     {
         // note: it must be here & not where 'current' is assigned,
         // because otherwise we'll have called inputs.next() before throwing
@@ -150,19 +151,19 @@ public final class LevelIterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getPrevElement()
+    protected Entry<InternalKey, ByteBuffer> getPrevElement()
     {
         return currentHasPrev() ? current.prev() : null;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekInternal()
+    protected Entry<InternalKey, ByteBuffer> peekInternal()
     {
         return currentHasNext() ? current.peek() : null;
     }
 
     @Override
-    protected Entry<InternalKey, Slice> peekPrevInternal()
+    protected Entry<InternalKey, ByteBuffer> peekPrevInternal()
     {
         return currentHasPrev() ? current.peekPrev() : null;
     }
