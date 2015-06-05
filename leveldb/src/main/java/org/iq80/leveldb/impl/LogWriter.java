@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.Slice;
@@ -225,7 +224,7 @@ public abstract class LogWriter
     }
 
     protected abstract static class CloseableLogBuffer
-            implements CloseableByteBuffer
+            implements Closeable
     {
         private final long lastEndPosition;
 
@@ -234,24 +233,16 @@ public abstract class LogWriter
             this.lastEndPosition = startPosition;
         }
 
-        @Override
-        public abstract CloseableByteBuffer put(byte b)
+        public abstract CloseableLogBuffer put(byte b)
                 throws IOException;
 
-        @Override
-        public abstract CloseableByteBuffer put(byte[] b)
+        public abstract CloseableLogBuffer put(byte[] b)
                 throws IOException;
 
-        @Override
-        public abstract CloseableByteBuffer put(ByteBuffer b)
+        public abstract CloseableLogBuffer put(ByteBuffer b)
                 throws IOException;
 
-        @Override
-        public abstract CloseableByteBuffer putInt(int b)
-                throws IOException;
-
-        @Override
-        public abstract void close()
+        public abstract CloseableLogBuffer putInt(int b)
                 throws IOException;
     }
 }
