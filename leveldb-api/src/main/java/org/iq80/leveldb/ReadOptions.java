@@ -18,10 +18,44 @@
 package org.iq80.leveldb;
 
 public class ReadOptions
+        implements Cloneable
 {
-    private boolean verifyChecksums;
+    private static final ReadOptions DEFAULT_READ_OPTIONS = OptionsConfiguration.populateFromProperties(
+            "leveldb.ReadOptions.", new ReadOptions(null));
+
+    /**
+     * @deprecated use {@link ReadOptions#make()}
+     */
+    public ReadOptions()
+    {
+        this(DEFAULT_READ_OPTIONS);
+    }
+
+    private ReadOptions(ReadOptions that)
+    {
+        OptionsConfiguration.copyFields(ReadOptions.class, that, this);
+    }
+
+    public static ReadOptions make()
+    {
+        return copy(DEFAULT_READ_OPTIONS);
+    }
+
+    public static ReadOptions copy(ReadOptions other)
+    {
+        if (other == null)
+            throw new IllegalArgumentException("copy target cannot be null");
+        try {
+            return (ReadOptions) other.clone();
+        }
+        catch (CloneNotSupportedException e) {
+            return new ReadOptions(DEFAULT_READ_OPTIONS);
+        }
+    }
+
+    private boolean verifyChecksums = false;
     private boolean fillCache = true;
-    private Snapshot snapshot;
+    private Snapshot snapshot = null;
 
     public Snapshot snapshot()
     {

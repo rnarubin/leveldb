@@ -183,7 +183,7 @@ public class DBIteratorTest
             final double seekCheck)
             throws ExecutionException, InterruptedException
     {
-        doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, new ReadOptions(), null);
+        doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, ReadOptions.make(), null);
     }
 
     /**
@@ -411,7 +411,7 @@ public class DBIteratorTest
 
             List<Entry<String, String>> forward = ordered(firstHalf), backward = reverseOrdered(firstHalf);
 
-            // ReadOptions snapshotRead = new ReadOptions().snapshot(snapshot);
+            // ReadOptions snapshotRead = ReadOptions.make().snapshot(snapshot);
             // snapshot should retain the entries of the first insertion batch
             // StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
 
@@ -478,7 +478,7 @@ public class DBIteratorTest
             expected.add(Maps.immutableEntry("" + s.charAt(0), "" + s.charAt(1)));
         }
         List<Entry<String, String>> reverseExpected = reverseOrdered(expected);
-        try (StringDbIterator actual = new StringDbIterator(db.iterator(new ReadOptions().snapshot(snapshot)))) {
+        try (StringDbIterator actual = new StringDbIterator(db.iterator(ReadOptions.make().snapshot(snapshot)))) {
 
             actual.seekToFirst();
             assertForwardSame(actual, expected);
@@ -674,7 +674,7 @@ public class DBIteratorTest
         return db.write(batch, writeOptions);
     }
 
-    private final static WriteOptions writeOptions = new WriteOptions().snapshot(true);
+    private final static WriteOptions writeOptions = WriteOptions.make().snapshot(true);
 
     private static void put(DB db, String key, String val)
     {

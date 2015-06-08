@@ -17,103 +17,11 @@
  */
 package org.iq80.leveldb;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Properties;
-
 public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
-    private static final Options DEFAULT_OPTIONS = new Options(null);
-    static {
-        readProperties(System.getProperties());
-    }
-
-    static void readProperties(Properties properties)
-    {
-        // possibly update DEFAULT_OPTIONS with provided properties
-
-        final String optionsPrefix = "leveldb.options.";
-        final Map<String, List<Method>> methodsByName = new HashMap<>();
-        for (final Method m : Options.class.getMethods()) {
-
-            // only consider instance methods which require parameters
-            if (!m.getDeclaringClass().equals(Options.class) || m.getParameterTypes().length == 0
-                    || Modifier.isStatic(m.getModifiers())) {
-                continue;
-            }
-
-            final String propertyName = optionsPrefix + m.getName();
-
-            // future-proof for possible overloading
-            List<Method> ms = methodsByName.get(propertyName);
-            if (ms == null) {
-                methodsByName.put(propertyName, ms = new ArrayList<>());
-            }
-            ms.add(m);
-        }
-
-        @SuppressWarnings("serial")
-        final Map<Class<?>, Class<?>> primitiveToWrapper = new HashMap<Class<?>, Class<?>>()
-        {
-            {
-                put(int.class, Integer.class);
-                put(boolean.class, Boolean.class);
-                put(long.class, Long.class);
-                put(float.class, Float.class);
-                put(double.class, Double.class);
-                put(char.class, Character.class);
-                put(byte.class, Byte.class);
-                put(short.class, Short.class);
-                put(void.class, Void.class);
-            }
-        };
-
-        properties: for (final Entry<String, List<Method>> propAndMethod : methodsByName.entrySet()) {
-            final String arg = properties.getProperty(propAndMethod.getKey());
-            if (arg == null) {
-                continue properties;
-            }
-
-            final String[] splitArg = arg.split(",", -1);
-            methods: for (final Method m : propAndMethod.getValue()) {
-                final Class<?>[] paramTypes = m.getParameterTypes();
-                if (paramTypes.length != splitArg.length) {
-                    continue methods;
-                }
-
-                final Object[] args = new Object[paramTypes.length];
-                for (int i = 0; i < args.length; i++) {
-                    try {
-                        Class<?> c = paramTypes[i];
-                        args[i] = (c.isPrimitive() ? primitiveToWrapper.get(c) : c)
-                                .getMethod("valueOf", String.class)
-                                .invoke(null, splitArg[i]);
-                    }
-                    catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
-                            | NoSuchMethodException | SecurityException e) {
-                        // failed to parse given argument(s)
-                        break methods;
-                    }
-                }
-
-                try {
-                    m.invoke(DEFAULT_OPTIONS, args);
-                }
-                catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-                    // failed to set option
-                    break methods;
-                }
-            }
-        }
-    }
+    private static final Options DEFAULT_OPTIONS = OptionsConfiguration.populateFromProperties("leveldb.Options.",
+            new Options(null));
 
     /**
      * @deprecated use {@link Options#make()}
@@ -126,25 +34,7 @@ public class Options
 
     private Options(final Options that)
     {
-        if (that == null)
-            return;
-
-        // avoid copy-paste errors and improve ease of maintenance with reflection
-        // it's slower, but that's why it's private/deprecated and users should call Options.make()
-        for (final Field f : Options.class.getDeclaredFields()) {
-            final int mods = f.getModifiers();
-            if (Modifier.isFinal(mods) || Modifier.isStatic(mods)) {
-                continue;
-            }
-
-            f.setAccessible(true);
-            try {
-                f.set(this, f.get(that));
-            }
-            catch (IllegalArgumentException | IllegalAccessException e) {
-                throw new Error(e);
-            }
-        }
+        OptionsConfiguration.copyFields(Options.class, that, this);
     }
 
     public static Options make()
@@ -159,8 +49,8 @@ public class Options
         try {
             return (Options) other.clone();
         }
-        catch (final CloneNotSupportedException notExpected) {
-            return new Options(other);
+        catch (final CloneNotSupportedException e) {
+            throw new Error(e);
         }
     }
 

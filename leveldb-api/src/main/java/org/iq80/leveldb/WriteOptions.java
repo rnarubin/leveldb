@@ -18,9 +18,43 @@
 package org.iq80.leveldb;
 
 public class WriteOptions
+        implements Cloneable
 {
-    private boolean sync;
-    private boolean snapshot;
+    private static final WriteOptions DEFAULT_WRITE_OPTIONS = OptionsConfiguration.populateFromProperties(
+            "leveldb.WriteOptions.", new WriteOptions(null));
+
+    /**
+     * @deprecated use {@link WriteOptions#make()}
+     */
+    public WriteOptions()
+    {
+        this(DEFAULT_WRITE_OPTIONS);
+    }
+
+    private WriteOptions(WriteOptions that)
+    {
+        OptionsConfiguration.copyFields(WriteOptions.class, that, this);
+    }
+
+    public static WriteOptions make()
+    {
+        return copy(DEFAULT_WRITE_OPTIONS);
+    }
+
+    public static WriteOptions copy(WriteOptions other)
+    {
+        if (other == null)
+            throw new IllegalArgumentException("copy target cannot be null");
+        try {
+            return (WriteOptions) other.clone();
+        }
+        catch (CloneNotSupportedException e) {
+            return new WriteOptions(DEFAULT_WRITE_OPTIONS);
+        }
+    }
+
+    private boolean sync = false;
+    private boolean snapshot = false;
 
     public boolean sync()
     {
