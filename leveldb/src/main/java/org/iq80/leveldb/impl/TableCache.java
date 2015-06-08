@@ -152,12 +152,10 @@ public class TableCache
             try {
                 switch (options.ioImplemenation()) {
                     case MMAP:
-                        table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
-                                options.verifyChecksums());
+                        table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, options);
                         break;
                     case FILE:
-                        table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
-                                options.verifyChecksums());
+                        table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator, options);
                         break;
                     default:
                         throw new IllegalArgumentException("Unknown IO implementation:" + options.ioImplemenation());

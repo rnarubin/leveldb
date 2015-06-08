@@ -158,7 +158,7 @@ public final class ByteBuffers
     public static ByteBuffer readLengthPrefixedBytes(ByteBuffer src)
     {
         int length = VariableLengthQuantity.readVariableLengthInt(src);
-        return sliceAndAdvance(src, length);
+        return duplicateAndAdvance(src, length);
     }
 
     public static ByteBuffer duplicate(ByteBuffer src, int position, int limit)
@@ -166,6 +166,11 @@ public final class ByteBuffers
         ByteBuffer ret = duplicate(src);
         ret.limit(limit).position(position);
         return ret;
+    }
+
+    public static ByteBuffer duplicateByLength(ByteBuffer src, int position, int length)
+    {
+        return duplicate(src, position, position + length);
     }
 
     /**
@@ -181,7 +186,7 @@ public final class ByteBuffers
         return src.get() & 0xFF;
     }
 
-    public static ByteBuffer sliceAndAdvance(ByteBuffer src, int length)
+    public static ByteBuffer duplicateAndAdvance(ByteBuffer src, int length)
     {
         final int oldpos = src.position();
         src.position(oldpos + length);

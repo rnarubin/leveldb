@@ -17,11 +17,9 @@
  */
 package org.iq80.leveldb.table;
 
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
-import org.iq80.leveldb.util.Snappy;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -33,17 +31,16 @@ import java.nio.channels.FileChannel.MapMode;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 
-import static org.iq80.leveldb.CompressionType.SNAPPY;
 
 public class MMapTable
         extends Table
 {
     private MappedByteBuffer data;
 
-    public MMapTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, boolean verifyChecksums)
+    public MMapTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
             throws IOException
     {
-        super(name, fileChannel, comparator, verifyChecksums);
+        super(name, fileChannel, comparator, options.verifyChecksums(), options.memoryManager());
     }
 
     @Override
@@ -92,7 +89,7 @@ public class MMapTable
             throws IOException
     {
         // read block trailer
-        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.copiedBuffer(this.data,
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(ByteBuffers.duplicateByLength(this.data,
                 (int) blockHandle.getOffset() + blockHandle.getDataSize(),
                 BlockTrailer.ENCODED_LENGTH));
 
@@ -110,27 +107,26 @@ public class MMapTable
         // decompress data
         ByteBuffer uncompressedData;
         ByteBuffer uncompressedBuffer = read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
-        if (blockTrailer.getCompressionType() == SNAPPY) {
-            synchronized (MMapTable.class) {
-                int uncompressedLength = uncompressedLength(uncompressedBuffer);
-                if (uncompressedScratch.capacity() < uncompressedLength) {
-                    uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
-                }
-                uncompressedScratch.clear();
+        // if (blockTrailer.getCompressionType() == SNAPPY) {
+        // synchronized (MMapTable.class) {
+        // int uncompressedLength = uncompressedLength(uncompressedBuffer);
+        // if (uncompressedScratch.capacity() < uncompressedLength) {
+        // uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
+        // }
+        // uncompressedScratch.clear();
+        //
+        // Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
+        // uncompressedData = Slices.copiedBuffer(uncompressedScratch);
+        // }
+        // }
+        // else {
+        uncompressedData = uncompressedBuffer;
+        // }
 
-                Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
-                uncompressedData = Slices.copiedBuffer(uncompressedScratch);
-            }
-        }
-        else {
-            uncompressedData = Slices.copiedBuffer(uncompressedBuffer);
-        }
-
-        return new Block(uncompressedData, comparator);
+        return new Block(uncompressedData, comparator, memory);
     }
 
     public static ByteBuffer read(MappedByteBuffer data, int offset, int length)
-            throws IOException
     {
         int newPosition = data.position() + offset;
         ByteBuffer block = (ByteBuffer) data.duplicate().order(ByteOrder.LITTLE_ENDIAN).clear().limit(newPosition + length).position(newPosition);

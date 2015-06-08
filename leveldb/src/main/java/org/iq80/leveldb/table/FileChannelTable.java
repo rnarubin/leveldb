@@ -17,25 +17,21 @@
  */
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
-import org.iq80.leveldb.util.Snappy;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ByteBuffers;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Comparator;
-
-import static org.iq80.leveldb.CompressionType.SNAPPY;
 
 public class FileChannelTable
         extends Table
 {
-    public FileChannelTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    public FileChannelTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
             throws IOException
     {
-        super(name, fileChannel, comparator, verifyChecksums);
+        super(name, fileChannel, comparator, options.verifyChecksums(), options.memoryManager());
     }
 
     @Override
@@ -44,7 +40,7 @@ public class FileChannelTable
     {
         long size = fileChannel.size();
         ByteBuffer footerData = read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
-        return Footer.readFooter(Slices.copiedBuffer(footerData));
+        return Footer.readFooter(footerData);
     }
 
     @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod", "NonPrivateFieldAccessedInSynchronizedContext"})
@@ -53,8 +49,9 @@ public class FileChannelTable
             throws IOException
     {
         // read block trailer
-        ByteBuffer trailerData = read(blockHandle.getOffset() + blockHandle.getDataSize(), BlockTrailer.ENCODED_LENGTH);
-        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(Slices.copiedBuffer(trailerData));
+        ByteBuffer readBuffer = read(blockHandle.getOffset(), blockHandle.getDataSize() + BlockTrailer.ENCODED_LENGTH);
+        ByteBuffer uncompressedBuffer = ByteBuffers.duplicateAndAdvance(readBuffer, blockHandle.getDataSize());
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(readBuffer);
 
 // todo re-enable crc check when ported to support direct buffers
 //        // only verify check sums if explicitly asked by the user
@@ -69,36 +66,35 @@ public class FileChannelTable
 
         // decompress data
 
-        ByteBuffer uncompressedBuffer = read(blockHandle.getOffset(), blockHandle.getDataSize());
-        Slice uncompressedData;
-        if (blockTrailer.getCompressionType() == SNAPPY) {
-            synchronized (FileChannelTable.class) {
-                int uncompressedLength = uncompressedLength(uncompressedBuffer);
-                if (uncompressedScratch.capacity() < uncompressedLength) {
-                    uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
-                }
-                uncompressedScratch.clear();
+        ByteBuffer uncompressedData;
+        // if (blockTrailer.getCompressionType() == SNAPPY) {
+        // synchronized (FileChannelTable.class) {
+        // int uncompressedLength = uncompressedLength(uncompressedBuffer);
+        // if (uncompressedScratch.capacity() < uncompressedLength) {
+        // uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
+        // }
+        // uncompressedScratch.clear();
+        //
+        // Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
+        // uncompressedData = Slices.copiedBuffer(uncompressedScratch);
+        // }
+        // }
+        // else {
+        uncompressedData = uncompressedBuffer;
+        // }
 
-                Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
-                uncompressedData = Slices.copiedBuffer(uncompressedScratch);
-            }
-        }
-        else {
-            uncompressedData = Slices.copiedBuffer(uncompressedBuffer);
-        }
-
-        return new Block(uncompressedData, comparator);
+        return new Block(uncompressedData, comparator, memory);
     }
 
     private ByteBuffer read(long offset, int length)
             throws IOException
     {
-        ByteBuffer uncompressedBuffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer uncompressedBuffer = memory.allocate(length);
         fileChannel.read(uncompressedBuffer, offset);
         if (uncompressedBuffer.hasRemaining()) {
             throw new IOException("Could not read all the data");
         }
-        uncompressedBuffer.clear();
+        uncompressedBuffer.rewind();
         return uncompressedBuffer;
     }
 }

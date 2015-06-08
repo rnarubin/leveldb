@@ -20,6 +20,7 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.TableIterator;
@@ -45,9 +46,14 @@ public abstract class Table
     protected final boolean verifyChecksums;
     protected final Block indexBlock;
     protected final BlockHandle metaindexBlockHandle;
+    protected final MemoryManager memory;
     private final AtomicInteger refCount;
 
-    public Table(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, boolean verifyChecksums)
+    public Table(String name,
+            FileChannel fileChannel,
+            Comparator<ByteBuffer> comparator,
+            boolean verifyChecksums,
+            MemoryManager memory)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");
@@ -66,6 +72,7 @@ public abstract class Table
         indexBlock = readBlock(footer.getIndexBlockHandle());
         metaindexBlockHandle = footer.getMetaindexBlockHandle();
         this.refCount = new AtomicInteger(1);
+        this.memory = memory;
     }
 
     protected abstract Footer init()

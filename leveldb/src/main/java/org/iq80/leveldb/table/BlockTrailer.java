@@ -22,8 +22,7 @@ import java.nio.ByteBuffer;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.CompressionType;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
+import org.iq80.leveldb.util.ByteBuffers;
 
 public class BlockTrailer
 {
@@ -91,11 +90,10 @@ public class BlockTrailer
         return sb.toString();
     }
 
-    public static BlockTrailer readBlockTrailer(Slice slice)
+    public static BlockTrailer readBlockTrailer(ByteBuffer buffer)
     {
-        SliceInput sliceInput = slice.input();
-        CompressionType compressionType = CompressionType.getCompressionTypeByPersistentId(sliceInput.readUnsignedByte());
-        int crc32c = sliceInput.readInt();
+        CompressionType compressionType = CompressionType.getCompressionTypeByPersistentId(ByteBuffers.readUnsignedByte(buffer));
+        int crc32c = buffer.getInt();
         return new BlockTrailer(compressionType, crc32c);
     }
 

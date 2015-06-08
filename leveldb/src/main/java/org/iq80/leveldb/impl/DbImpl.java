@@ -87,7 +87,6 @@ import static org.iq80.leveldb.impl.ValueType.DELETION;
 import static org.iq80.leveldb.impl.ValueType.VALUE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
-import static org.iq80.leveldb.util.Slices.readLengthPrefixedBytes;
 
 @SuppressWarnings("AccessingNonPublicFieldOfAnotherObject")
 public class DbImpl
@@ -125,8 +124,6 @@ public class DbImpl
 
     private ManualCompaction manualCompaction;
 
-    private final MemoryManager memory;
-
     public DbImpl(Options userOptions, File databaseDir)
             throws IOException
     {
@@ -134,8 +131,7 @@ public class DbImpl
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.options = Options.copy(userOptions);
 
-        this.memory = MemoryManagers.sanitize(this.options.memoryManager());
-        this.options.memoryManager(this.memory);
+        this.options.memoryManager(MemoryManagers.sanitize(this.options.memoryManager()));
 
         if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
             // Disable snappy if it's not available.
@@ -238,9 +234,8 @@ public class DbImpl
             long logFileNumber = versions.getNextFileNumber();
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
                     logFileNumber, options, scratchCache);
-            this.memTables = new MemTables(
-new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
-                    null);
+            this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
+                    options.memoryManager()), log), null);
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -358,7 +353,7 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
         checkBackgroundException();
     }
 
-    public void compactRange(int level, Slice start, Slice end)
+    public void compactRange(int level, ByteBuffer start, ByteBuffer end)
     {
         // TODO not thread safe
         Preconditions.checkArgument(level >= 0, "level is negative");
@@ -451,10 +446,9 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
 
         Compaction compaction;
         if (manualCompaction != null) {
-            compaction = versions.compactRange(manualCompaction.level,
- new InternalKey(manualCompaction.begin,
-                    MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory), new InternalKey(manualCompaction.end, 0L,
-                    ValueType.DELETION, memory));
+            compaction = versions.compactRange(manualCompaction.level, new InternalKey(manualCompaction.begin,
+                    MAX_SEQUENCE_NUMBER, ValueType.VALUE, options.memoryManager()), new InternalKey(
+                    manualCompaction.end, 0L, ValueType.DELETION, options.memoryManager()));
         }
         else {
             compaction = versions.pickCompaction();
@@ -509,7 +503,7 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
         // closing channel closes FD
         FileChannel channel = new FileInputStream(file).getChannel()) {
             LogMonitor logMonitor = LogMonitors.logMonitor();
-            LogReader logReader = new LogReader(channel, logMonitor, true, 0, memory);
+            LogReader logReader = new LogReader(channel, logMonitor, true, 0, options.memoryManager());
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
 
@@ -531,7 +525,7 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
 
                 // apply entries to memTable
                 if (memTable == null) {
-                    memTable = new MemTable(internalKeyComparator, memory);
+                    memTable = new MemTable(internalKeyComparator, options.memoryManager());
                 }
                 memTable.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
                 writeBatch.forEach(new InsertIntoHandler(memTable, sequenceBegin));
@@ -1234,9 +1228,9 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
         Version v = versions.getCurrent();
 
         InternalKey startKey = new InternalKey(ByteBuffer.wrap(range.start()), SequenceNumber.MAX_SEQUENCE_NUMBER,
-                ValueType.VALUE, memory);
+                ValueType.VALUE, options.memoryManager());
         InternalKey limitKey = new InternalKey(ByteBuffer.wrap(range.limit()), SequenceNumber.MAX_SEQUENCE_NUMBER,
-                ValueType.VALUE, memory);
+                ValueType.VALUE, options.memoryManager());
         long startOffset = v.getApproximateOffsetOf(startKey);
         long limitOffset = v.getApproximateOffsetOf(limitKey);
 
@@ -1325,7 +1319,8 @@ new MemTableAndLog(new MemTable(internalKeyComparator, memory), log),
 
     private ByteBuffer writeWriteBatch(WriteBatchImpl updates, long sequenceBegin)
     {
-        final ByteBuffer record = this.memory.allocate(SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
+        final ByteBuffer record = options.memoryManager().allocate(
+                SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
         record.putLong(sequenceBegin);
         record.putInt(updates.size());
         updates.forEach(new Handler()

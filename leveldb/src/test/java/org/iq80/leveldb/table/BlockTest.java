@@ -17,6 +17,8 @@
  */
 package org.iq80.leveldb.table;
 
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
 import org.testng.annotations.Test;
@@ -34,7 +36,7 @@ public class BlockTest
     public void testEmptyBuffer()
             throws Exception
     {
-        new Block(Slices.EMPTY_SLICE, new BytewiseComparator());
+        new Block(ByteBuffers.EMPTY_BUFFER, new BytewiseComparator(), MemoryManagers.HEAP.make());
     }
 
     @Test

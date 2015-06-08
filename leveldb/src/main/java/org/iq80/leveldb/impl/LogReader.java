@@ -278,7 +278,7 @@ public class LogReader
         }
 
         // read the chunk
-        currentChunk = ByteBuffers.sliceAndAdvance(currentBlock, length);
+        currentChunk = ByteBuffers.duplicateAndAdvance(currentBlock, length);
 
         if (verifyChecksums) {
             int actualChecksum = getChunkChecksum(chunkTypeId, currentChunk);

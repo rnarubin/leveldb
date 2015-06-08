@@ -316,10 +316,10 @@ public class BlockIterator
                     "Entry has a shared key but no previous entry was provided");
             key.put(ByteBuffers.duplicate(previousEntry.getKey(), 0, sharedKeyLength));
         }
-        key.put(ByteBuffers.sliceAndAdvance(data, nonSharedKeyLength));
+        key.put(ByteBuffers.duplicateAndAdvance(data, nonSharedKeyLength));
 
         // read value
-        ByteBuffer value = ByteBuffers.sliceAndAdvance(data, valueLength);
+        ByteBuffer value = ByteBuffers.duplicateAndAdvance(data, valueLength);
 
         return new BlockEntry(key, value);
     }
