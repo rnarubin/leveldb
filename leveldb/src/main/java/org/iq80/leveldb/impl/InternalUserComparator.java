@@ -23,8 +23,6 @@ import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.Slice;
 
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 

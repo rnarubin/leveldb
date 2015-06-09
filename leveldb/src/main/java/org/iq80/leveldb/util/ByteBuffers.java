@@ -240,7 +240,14 @@ public final class ByteBuffers
 
     public static ByteBuffer copy(ByteBuffer src, int length, MemoryManager memory)
     {
-        return memory.allocate(length).put(duplicateByLength(src, src.position(), length));
+        ByteBuffer ret = memory.allocate(length).put(duplicateByLength(src, src.position(), length));
+        ret.rewind();
+        return ret;
+    }
+
+    public static ByteBuffer copy(ByteBuffer src, MemoryManager memory)
+    {
+        return copy(src, src.remaining(), memory);
     }
 
     public static byte[] toArray(ByteBuffer src)

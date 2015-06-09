@@ -37,6 +37,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,11 +59,10 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.FileUtils;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -1008,8 +1008,8 @@ public class DbImplTest
                 assertReverseSequence(seekingIterator, prevEntries);
             }
 
-            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
-            seekingIterator.seek(endKey.toString(UTF_8));
+            byte[] endKey = new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF };
+            seekingIterator.seek(new String(endKey, UTF_8));
             assertSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
             assertReverseSequence(seekingIterator, reverseEntries);
         }
@@ -1247,7 +1247,7 @@ public class DbImplTest
 
         public void compactRange(int level, String start, String limit)
         {
-            db.compactRange(level, Slices.copiedBuffer(start, UTF_8), Slices.copiedBuffer(limit, UTF_8));
+            db.compactRange(level, ByteBuffer.wrap(start.getBytes(UTF_8)), ByteBuffer.wrap(limit.getBytes(UTF_8)));
         }
 
         public void compact(String start, String limit)
@@ -1260,7 +1260,7 @@ public class DbImplTest
                 }
             }
             for (int level = 0; level < maxLevelWithFiles; level++) {
-                db.compactRange(level, Slices.copiedBuffer("", UTF_8), Slices.copiedBuffer("~", UTF_8));
+                db.compactRange(level, ByteBuffer.wrap("".getBytes(UTF_8)), ByteBuffer.wrap("~".getBytes(UTF_8)));
             }
         }
 
@@ -1306,18 +1306,18 @@ public class DbImplTest
         {
             ImmutableList.Builder<String> result = ImmutableList.builder();
             try (final DbIterator iter = db.internalIterator()) {
-                for (Entry<InternalKey, Slice> entry : new Iterable<Entry<InternalKey, Slice>>()
+                for (Entry<InternalKey, ByteBuffer> entry : new Iterable<Entry<InternalKey, ByteBuffer>>()
                 {
                     @Override
-                    public Iterator<Entry<InternalKey, Slice>> iterator()
+                    public Iterator<Entry<InternalKey, ByteBuffer>> iterator()
                     {
                         return iter;
                     }
                 }) {
-                    String entryKey = entry.getKey().getUserKey().toString(UTF_8);
+                    String entryKey = new String(ByteBuffers.toArray(entry.getKey().getUserKey()), UTF_8);
                     if (entryKey.equals(userKey)) {
                         if (entry.getKey().getValueType() == ValueType.VALUE) {
-                            result.add(entry.getValue().toString(UTF_8));
+                            result.add(new String(ByteBuffers.toArray(entry.getValue()), UTF_8));
                         }
                         else {
                             result.add("DEL");

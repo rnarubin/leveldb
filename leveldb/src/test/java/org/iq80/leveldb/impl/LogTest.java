@@ -25,9 +25,7 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -36,6 +34,7 @@ import org.testng.annotations.Test;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -87,20 +86,20 @@ public abstract class LogTest
     public void testSmallRecord()
             throws Exception
     {
-        testLog(toSlice("dain sundstrom"));
+        testLog(toByteBuffer("dain sundstrom"));
     }
 
     @Test
     public void testMultipleSmallRecords()
             throws Exception
     {
-        List<Slice> records = asList(
-                toSlice("Lagunitas  Little Sumpin’ Sumpin’"),
-                toSlice("Lagunitas IPA"),
-                toSlice("Lagunitas Imperial Stout"),
-                toSlice("Oban 14"),
-                toSlice("Highland Park"),
-                toSlice("Lagavulin"));
+        List<ByteBuffer> records = asList(
+                toByteBuffer("Lagunitas  Little Sumpin’ Sumpin’"),
+                toByteBuffer("Lagunitas IPA"),
+                toByteBuffer("Lagunitas Imperial Stout"),
+                toByteBuffer("Oban 14"),
+                toByteBuffer("Highland Park"),
+                toByteBuffer("Lagavulin"));
 
         testLog(records);
 
@@ -111,20 +110,20 @@ public abstract class LogTest
     public void testLargeRecord()
             throws Exception
     {
-        testLog(toSlice("dain sundstrom", 4000));
+        testLog(toByteBuffer("dain sundstrom", 4000));
     }
 
     @Test
     public void testMultipleLargeRecords()
             throws Exception
     {
-        List<Slice> records = asList(
-                toSlice("Lagunitas  Little Sumpin’ Sumpin’", 4000),
-                toSlice("Lagunitas IPA", 4000),
-                toSlice("Lagunitas Imperial Stout", 4000),
-                toSlice("Oban 14", 4000),
-                toSlice("Highland Park", 4000),
-                toSlice("Lagavulin", 4000));
+        List<ByteBuffer> records = asList(
+                toByteBuffer("Lagunitas  Little Sumpin’ Sumpin’", 4000),
+                toByteBuffer("Lagunitas IPA", 4000),
+                toByteBuffer("Lagunitas Imperial Stout", 4000),
+                toByteBuffer("Oban 14", 4000),
+                toByteBuffer("Highland Park", 4000),
+                toByteBuffer("Lagavulin", 4000));
 
         testLog(records);
 
@@ -136,11 +135,11 @@ public abstract class LogTest
             throws InterruptedException, ExecutionException, IOException
     {
         Random rand = new Random(0);
-        List<Slice> records = new ArrayList<>();
+        List<ByteBuffer> records = new ArrayList<>();
         for (int i = 0; i < 1_000_000; i++) {
             byte[] b = new byte[rand.nextInt(20) + 5];
             rand.nextBytes(b);
-            records.add(toSlice(new String(b, StandardCharsets.UTF_8)));
+            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8)));
         }
 
         testConcurrentLog(records, true, 8);
@@ -151,11 +150,11 @@ public abstract class LogTest
             throws InterruptedException, ExecutionException, IOException
     {
         Random rand = new Random(0);
-        List<Slice> records = new ArrayList<>();
+        List<ByteBuffer> records = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {
             byte[] b = new byte[rand.nextInt(20) + 5];
             rand.nextBytes(b);
-            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 4000));
+            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), 4000));
         }
 
         testConcurrentLog(records, true, 8);
@@ -167,11 +166,11 @@ public abstract class LogTest
     {
         //larger than page size to test mmap edges
         Random rand = new Random(0);
-        List<Slice> records = new ArrayList<>();
+        List<ByteBuffer> records = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             byte[] b = new byte[rand.nextInt(20) + 5];
             rand.nextBytes(b);
-            records.add(toSlice(new String(b, StandardCharsets.UTF_8), 200000));
+            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), 200000));
         }
 
         testConcurrentLog(records, true, 8);
@@ -181,25 +180,25 @@ public abstract class LogTest
     public void testReadWithoutProperClose()
             throws Exception
     {
-        testLog(ImmutableList.of(toSlice("something"), toSlice("something else")), false);
+        testLog(ImmutableList.of(toByteBuffer("something"), toByteBuffer("something else")), false);
     }
 
-    private void testLog(Slice... entries)
+    private void testLog(ByteBuffer... entries)
             throws IOException
     {
         testLog(asList(entries));
     }
 
-    private void testLog(List<Slice> records)
+    private void testLog(List<ByteBuffer> records)
             throws IOException
     {
         testLog(records, true);
     }
 
-    private void testLog(List<Slice> records, boolean closeWriter)
+    private void testLog(List<ByteBuffer> records, boolean closeWriter)
             throws IOException
     {
-        for (Slice entry : records) {
+        for (ByteBuffer entry : records) {
             writer.addRecord(entry, true);
         }
 
@@ -211,9 +210,9 @@ public abstract class LogTest
         @SuppressWarnings("resource")
         FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel();
         try {
-            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
-            for (Slice expected : records) {
-                Slice actual = reader.readRecord();
+            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, MemoryManagers.heap());
+            for (ByteBuffer expected : records) {
+                ByteBuffer actual = reader.readRecord();
                 assertEquals(actual, expected);
             }
             assertNull(reader.readRecord());
@@ -224,12 +223,12 @@ public abstract class LogTest
     }
 
     @SuppressWarnings("resource")
-    private void testConcurrentLog(List<Slice> record, boolean closeWriter, int threads)
+    private void testConcurrentLog(List<ByteBuffer> record, boolean closeWriter, int threads)
             throws InterruptedException, ExecutionException, IOException
     {
-        Multiset<Slice> recordBag = HashMultiset.create();
+        Multiset<ByteBuffer> recordBag = HashMultiset.create();
         List<Callable<Void>> work = new ArrayList<>(record.size());
-        for (final Slice s : record) {
+        for (final ByteBuffer s : record) {
             work.add(new Callable<Void>()
             {
                 @Override
@@ -251,8 +250,8 @@ public abstract class LogTest
         }
 
         try (FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel()) {
-            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0);
-            for (Slice actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
+            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, MemoryManagers.heap());
+            for (ByteBuffer actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
                 Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
             }
             Assert.assertEquals(recordBag.size(), 0, "Not all added slices found in log");
@@ -275,19 +274,19 @@ public abstract class LogTest
         }
     }
 
-    static Slice toSlice(String value)
+    static ByteBuffer toByteBuffer(String value)
     {
-        return toSlice(value, 1);
+        return toByteBuffer(value, 1);
     }
 
-    static Slice toSlice(String value, int times)
+    static ByteBuffer toByteBuffer(String value, int times)
     {
         byte[] bytes = value.getBytes(UTF_8);
-        Slice slice = Slices.allocate(bytes.length * times);
-        SliceOutput sliceOutput = slice.output();
+        ByteBuffer slice = ByteBuffer.allocate(bytes.length * times);
         for (int i = 0; i < times; i++) {
-            sliceOutput.writeBytes(bytes);
+            slice.put(bytes);
         }
+        slice.flip();
         return slice;
     }
 

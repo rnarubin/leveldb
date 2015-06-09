@@ -22,8 +22,7 @@ import com.google.common.base.Preconditions;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -31,6 +30,7 @@ import org.testng.annotations.Test;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collections;
@@ -46,15 +46,19 @@ public abstract class TableTest
     private File file;
     private RandomAccessFile randomAccessFile;
     private FileChannel fileChannel;
+    private static final BytewiseComparator byteCompare = new BytewiseComparator(MemoryManagers.heap());
 
-    protected abstract Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    protected abstract Table createTable(String name,
+            FileChannel fileChannel,
+            Comparator<ByteBuffer> comparator,
+            boolean verifyChecksums)
             throws IOException;
 
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyFile()
             throws Exception
     {
-        createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true).close();
+        createTable(file.getAbsolutePath(), fileChannel, byteCompare, true).close();
     }
 
     @Test
@@ -123,21 +127,21 @@ public abstract class TableTest
 
         reopenFile();
         Options options = Options.make().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
-        TableBuilder builder = new TableBuilder(options, fileChannel, new BytewiseComparator());
+        TableBuilder builder = new TableBuilder(options, fileChannel, byteCompare);
 
         for (BlockEntry entry : entries) {
             builder.add(entry);
         }
         builder.finish();
 
-        try (Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true)) {
-            ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
+        try (Table table = createTable(file.getAbsolutePath(), fileChannel, byteCompare, true)) {
+            ReverseSeekingIterator<ByteBuffer, ByteBuffer> seekingIterator = table.iterator();
+            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<ByteBuffer, ByteBuffer>> emptyList());
             BlockHelper.assertSequence(seekingIterator, entries);
             BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
             seekingIterator.seekToFirst();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
+            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<ByteBuffer, ByteBuffer>> emptyList());
             BlockHelper.assertSequence(seekingIterator, entries);
             BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
@@ -166,7 +170,8 @@ public abstract class TableTest
                 lastApproximateOffset = approximateOffset;
             }
 
-            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
+            ByteBuffer endKey = ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
+                    (byte) 0xFF });
             seekingIterator.seek(endKey);
             BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry> emptyList());
             BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
@@ -208,11 +213,13 @@ public abstract class TableTest
         @Override
         protected Table createTable(String name,
                 FileChannel fileChannel,
-                Comparator<Slice> comparator,
+                Comparator<ByteBuffer> comparator,
                 boolean verifyChecksums)
                 throws IOException
         {
-            return new FileChannelTable(name, fileChannel, comparator, verifyChecksums);
+            return new FileChannelTable(name, fileChannel, comparator, Options.make()
+                    .verifyChecksums(verifyChecksums)
+                    .memoryManager(MemoryManagers.heap()));
         }
     }
 
@@ -222,11 +229,13 @@ public abstract class TableTest
         @Override
         protected Table createTable(String name,
                 FileChannel fileChannel,
-                Comparator<Slice> comparator,
+                Comparator<ByteBuffer> comparator,
                 boolean verifyChecksums)
                 throws IOException
         {
-            return new MMapTable(name, fileChannel, comparator, verifyChecksums);
+            return new MMapTable(name, fileChannel, comparator, Options.make()
+                    .verifyChecksums(verifyChecksums)
+                    .memoryManager(MemoryManagers.heap()));
         }
     }
 }

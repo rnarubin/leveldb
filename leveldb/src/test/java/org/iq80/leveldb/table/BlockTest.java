@@ -19,10 +19,9 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.MemoryManagers;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
 import org.testng.annotations.Test;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -32,11 +31,12 @@ import static org.testng.Assert.assertEquals;
 
 public class BlockTest
 {
+    private static final BytewiseComparator byteCompare = new BytewiseComparator(MemoryManagers.heap());
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyBuffer()
             throws Exception
     {
-        new Block(ByteBuffers.EMPTY_BUFFER, new BytewiseComparator(), MemoryManagers.HEAP.make());
+        new Block(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap());
     }
 
     @Test
@@ -116,17 +116,17 @@ public class BlockTest
         Collections.copy(reverseEntries, entries);
         Collections.reverse(reverseEntries);
 
-        BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator());
+        BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, MemoryManagers.heap());
 
         for (BlockEntry entry : entries) {
             builder.add(entry);
         }
 
         assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-        Slice blockSlice = builder.finish();
+        ByteBuffer blockByteBuffer = builder.finish();
         assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
-        Block block = new Block(blockSlice, new BytewiseComparator());
+        Block block = new Block(blockByteBuffer, byteCompare, MemoryManagers.heap());
         assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
         BlockIterator blockIterator = block.iterator();
@@ -172,7 +172,7 @@ public class BlockTest
             BlockHelper.assertReverseSequence(blockIterator, prevEntries);
         }
 
-        blockIterator.seek(Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
+        blockIterator.seek(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF }));
         BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry>emptyList());
         BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
     }

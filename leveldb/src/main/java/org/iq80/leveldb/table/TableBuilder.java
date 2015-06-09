@@ -24,10 +24,8 @@ import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.PureJavaCrc32C;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
-import org.iq80.leveldb.util.Snappy;
+//import org.iq80.leveldb.util.PureJavaCrc32C;
+//import org.iq80.leveldb.util.Snappy;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -69,7 +67,7 @@ public class TableBuilder
     private boolean pendingIndexEntry;
     private BlockHandle pendingHandle;  // Handle to add to index block
 
-    private Slice compressedOutput;
+    // private Slice compressedOutput;
 
     private long position;
 

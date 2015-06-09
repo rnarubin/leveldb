@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.Slice;
 
 public class CustomUserComparator
         implements UserComparator

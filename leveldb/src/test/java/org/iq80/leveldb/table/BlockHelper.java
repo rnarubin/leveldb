@@ -19,10 +19,11 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map.Entry;
@@ -109,16 +110,16 @@ public final class BlockHelper
 
     public static <K, V> void assertEntryEquals(Entry<K, V> actual, Entry<K, V> expected)
     {
-        if (actual.getKey() instanceof Slice) {
-            assertSliceEquals((Slice) actual.getKey(), (Slice) expected.getKey());
-            assertSliceEquals((Slice) actual.getValue(), (Slice) expected.getValue());
+        if (actual.getKey() instanceof ByteBuffer) {
+            assertByteBufferEquals((ByteBuffer) actual.getKey(), (ByteBuffer) expected.getKey());
+            assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
         }
         assertEquals(actual, expected);
     }
 
-    public static void assertSliceEquals(Slice actual, Slice expected)
+    public static void assertByteBufferEquals(ByteBuffer actual, ByteBuffer expected)
     {
-        assertEquals(actual.toString(UTF_8), expected.toString(UTF_8));
+        assertEquals(actual, expected);
     }
 
     public static String beforeString(Entry<String, ?> expectedEntry)
@@ -135,39 +136,38 @@ public final class BlockHelper
         return key.substring(0, key.length() - 1) + ((char) (lastByte + 1));
     }
 
-    public static Slice before(Entry<Slice, ?> expectedEntry)
+    public static ByteBuffer before(Entry<ByteBuffer, ?> expectedEntry)
     {
-        Slice slice = expectedEntry.getKey().copySlice(0, expectedEntry.getKey().length());
-        int lastByte = slice.length() - 1;
-        slice.setByte(lastByte, slice.getUnsignedByte(lastByte) - 1);
+        ByteBuffer slice = ByteBuffers.copy(expectedEntry.getKey(), MemoryManagers.heap());
+        int lastByte = slice.limit() - 1;
+        slice.put(lastByte, (byte) (slice.get(lastByte) - 1));
         return slice;
     }
 
-    public static Slice after(Entry<Slice, ?> expectedEntry)
+    public static ByteBuffer after(Entry<ByteBuffer, ?> expectedEntry)
     {
-        Slice slice = expectedEntry.getKey().copySlice(0, expectedEntry.getKey().length());
-        int lastByte = slice.length() - 1;
-        slice.setByte(lastByte, slice.getUnsignedByte(lastByte) + 1);
+        ByteBuffer slice = ByteBuffers.copy(expectedEntry.getKey(), MemoryManagers.heap());
+        int lastByte = slice.limit() - 1;
+        slice.put(lastByte, (byte) (slice.get(lastByte) + 1));
         return slice;
     }
 
     public static int estimateEntriesSize(int blockRestartInterval, List<BlockEntry> entries)
     {
         int size = 0;
-        Slice previousKey = null;
+        ByteBuffer previousKey = null;
         int restartBlockCount = 0;
         for (BlockEntry entry : entries) {
             int nonSharedBytes;
             if (restartBlockCount < blockRestartInterval) {
-                nonSharedBytes = entry.getKey().length() - BlockBuilder.calculateSharedBytes(entry.getKey(), previousKey);
+                nonSharedBytes = entry.getKey().remaining()
+                        - ByteBuffers.calculateSharedBytes(entry.getKey(), previousKey);
             }
             else {
-                nonSharedBytes = entry.getKey().length();
+                nonSharedBytes = entry.getKey().remaining();
                 restartBlockCount = 0;
             }
-            size += nonSharedBytes +
-                    entry.getValue().length() +
-                    (SIZE_OF_BYTE * 3); // 3 bytes for sizes
+            size += nonSharedBytes + entry.getValue().remaining() + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
 
             previousKey = entry.getKey();
             restartBlockCount++;
@@ -177,6 +177,6 @@ public final class BlockHelper
 
     static BlockEntry createBlockEntry(String key, String value)
     {
-        return new BlockEntry(Slices.copiedBuffer(key, UTF_8), Slices.copiedBuffer(value, UTF_8));
+        return new BlockEntry(ByteBuffer.wrap(key.getBytes(UTF_8)), ByteBuffer.wrap(value.getBytes(UTF_8)));
     }
 }

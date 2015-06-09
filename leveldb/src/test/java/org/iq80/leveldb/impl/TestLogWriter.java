@@ -20,11 +20,12 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
 import static org.testng.Assert.assertEquals;
@@ -46,7 +47,7 @@ public abstract class TestLogWriter
         File file = File.createTempFile("test", ".log");
         try {
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
-            Slice record = new Slice(recordSize);
+            ByteBuffer record = ByteBuffer.allocate(recordSize);
 
             LogWriter writer = Logs.createLogWriter(file, 10, options);
             writer.addRecord(record, true);
@@ -57,11 +58,11 @@ public abstract class TestLogWriter
             try (@SuppressWarnings("resource")
             FileChannel channel = new FileInputStream(file).getChannel()) {
 
-                LogReader logReader = new LogReader(channel, logMonitor, true, 0);
+                LogReader logReader = new LogReader(channel, logMonitor, true, 0, MemoryManagers.heap());
 
                 int count = 0;
-                for (Slice slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
-                    assertEquals(slice.length(), recordSize);
+                for (ByteBuffer slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
+                    assertEquals(slice.remaining(), recordSize);
                     count++;
                 }
                 assertEquals(count, 1);
