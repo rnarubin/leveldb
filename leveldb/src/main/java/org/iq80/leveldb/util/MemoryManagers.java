@@ -5,28 +5,13 @@ import java.nio.ByteOrder;
 
 import org.iq80.leveldb.MemoryManager;
 
-public enum MemoryManagers
-        implements MemoryManagerFactory
+public class MemoryManagers
 {
-    HEAP
+    private MemoryManagers()
     {
-        @Override
-        public MemoryManager make()
-        {
-            return SingleHeap.INSTANCE;
-        }
-    },
+    }
 
-    DIRECT
-    {
-        @Override
-        public MemoryManager make()
-        {
-            return null;
-        }
-    };
-
-    private enum SingleHeap
+    private enum Heap
             implements MemoryManager
     {
         INSTANCE;
@@ -43,9 +28,14 @@ public enum MemoryManagers
         }
     }
 
+    public static MemoryManager heap()
+    {
+        return Heap.INSTANCE;
+    }
+
     public static MemoryManager sanitize(final MemoryManager userManager)
     {
-        return userManager == null ? HEAP.make() : new MemoryManager()
+        return userManager == null ? heap() : new MemoryManager()
         {
             @Override
             public ByteBuffer allocate(int capacity)

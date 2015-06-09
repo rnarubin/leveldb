@@ -22,6 +22,7 @@ import java.lang.reflect.Field;
 import java.util.Properties;
 
 import org.iq80.leveldb.Options.IOImpl;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -40,11 +41,12 @@ public abstract class OptionsTest
         props.setProperty("leveldb.Options.maxOpenFiles", "456");
         props.setProperty("leveldb.Options.compressionType", "NONE");
         props.setProperty("leveldb.Options.ioImplementation", "FILE");
+        props.setProperty("leveldb.Options.memoryManager", MemoryManagers.class.getName() + ".heap");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "true");
         props.setProperty("leveldb.WriteOptions.sync", "true");
-        reloadOptionsHack(props, "leveldb.Options.", Options.class, "DEFAULT_OPTIONS");
-        reloadOptionsHack(props, "leveldb.ReadOptions.", ReadOptions.class, "DEFAULT_READ_OPTIONS");
-        reloadOptionsHack(props, "leveldb.WriteOptions.", WriteOptions.class, "DEFAULT_WRITE_OPTIONS");
+        reloadOptions(props, "leveldb.Options.", Options.class, "DEFAULT_OPTIONS");
+        reloadOptions(props, "leveldb.ReadOptions.", ReadOptions.class, "DEFAULT_READ_OPTIONS");
+        reloadOptions(props, "leveldb.WriteOptions.", WriteOptions.class, "DEFAULT_WRITE_OPTIONS");
         o = getOptions();
         r = getReadOptions();
         w = getWriteOptions();
@@ -54,6 +56,7 @@ public abstract class OptionsTest
         Assert.assertEquals(o.maxOpenFiles(), 456);
         Assert.assertEquals(o.compressionType(), CompressionType.NONE);
         Assert.assertEquals(o.ioImplemenation(), IOImpl.FILE);
+        Assert.assertEquals(o.memoryManager(), MemoryManagers.heap()); // depends on singleton property of heap instance
         Assert.assertEquals(r.verifyChecksums(), true);
         Assert.assertEquals(w.sync(), true);
 
@@ -63,13 +66,14 @@ public abstract class OptionsTest
         props.setProperty("leveldb.Options.maxOpenFiles", "1000");
         props.setProperty("leveldb.Options.compressionType", "SNAPPY");
         props.setProperty("leveldb.Options.ioImplementation", Options.USE_MMAP_DEFAULT ? "MMAP" : "FILE");
+        props.setProperty("leveldb.Options.memoryManager", "null");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "false");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "false");
         props.setProperty("leveldb.WriteOptions.sync", "false");
 
-        reloadOptionsHack(props, "leveldb.Options.", Options.class, "DEFAULT_OPTIONS");
-        reloadOptionsHack(props, "leveldb.ReadOptions.", ReadOptions.class, "DEFAULT_READ_OPTIONS");
-        reloadOptionsHack(props, "leveldb.WriteOptions.", WriteOptions.class, "DEFAULT_WRITE_OPTIONS");
+        reloadOptions(props, "leveldb.Options.", Options.class, "DEFAULT_OPTIONS");
+        reloadOptions(props, "leveldb.ReadOptions.", ReadOptions.class, "DEFAULT_READ_OPTIONS");
+        reloadOptions(props, "leveldb.WriteOptions.", WriteOptions.class, "DEFAULT_WRITE_OPTIONS");
         o = getOptions();
         r = getReadOptions();
         w = getWriteOptions();
@@ -79,12 +83,13 @@ public abstract class OptionsTest
         Assert.assertEquals(o.maxOpenFiles(), 1000);
         Assert.assertEquals(o.compressionType(), CompressionType.SNAPPY);
         Assert.assertEquals(o.ioImplemenation(), Options.USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE);
+        Assert.assertEquals(o.memoryManager(), null);
         Assert.assertEquals(r.verifyChecksums(), false);
         Assert.assertEquals(w.sync(), false);
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> void reloadOptionsHack(Properties properties, String prefix, Class<T> clazz, String defaultName)
+    private static <T> void reloadOptions(Properties properties, String prefix, Class<T> clazz, String defaultName)
     {
         try {
             Field defaultOptions = clazz.getDeclaredField(defaultName);

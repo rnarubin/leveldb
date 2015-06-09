@@ -83,9 +83,29 @@ class OptionsConfiguration
                                 .invoke(null, splitArg[i]);
                     }
                     catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
-                            | NoSuchMethodException | SecurityException e) {
-                        // failed to parse given argument(s)
-                        break methods;
+                            | NoSuchMethodException | SecurityException failedToParse) {
+                        // failed to parse given argument as primitive/enum
+                        // try to parse as factory method
+                        if ("null".equals(splitArg[i])) {
+                            args[i] = null;
+                            continue;
+                        }
+                        try {
+                            // Unfortunately, we have to rely on runtime type checking, so beware user error
+                            int methodIndex = splitArg[i].lastIndexOf('.');
+                            if (methodIndex < 0) {
+                                // can't parse as class.method
+                                break methods;
+                            }
+                            String methodName = splitArg[i].substring(methodIndex + 1);
+                            String className = splitArg[i].substring(0, methodIndex);
+                            args[i] = Class.forName(className).getDeclaredMethod(methodName).invoke(null);
+                        }
+                        catch (ClassNotFoundException | IllegalAccessException | IllegalArgumentException
+                                | InvocationTargetException | NoSuchMethodException | SecurityException failedToMakeArg) {
+                            // the given argument isn't usable, skip this method name
+                            break methods;
+                        }
                     }
                 }
 
