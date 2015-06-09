@@ -15,10 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.SizeOf;
 
@@ -106,9 +106,18 @@ public class MMapLogWriter
     }
 
     /*
-     * 0: ready for writing /: reserved by someone else
-     * 
-     * data: ------------- /////00000///// ------- filePosition ^ ^ limit buffer offset^ ^buffer limit |___| length, slice |_____________| PAGE_SIZE |_____________| mmapped
+     * 0: ready for writing
+     * /: reserved by someone else
+     *
+     * data: ------------- /////00000///// -------
+     *       filePosition ^               ^ limit
+     *            buffer offset^     ^buffer limit
+     *                          |___|
+     *                      length, slice
+     *                     |_____________|
+     *                        PAGE_SIZE
+     *                     |_____________|
+     *                         mmapped
      */
     private class MappedRegion
     {
@@ -146,28 +155,28 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableByteBuffer put(byte b)
+            public CloseableLogBuffer put(byte b)
             {
                 slice.put(b);
                 return this;
             }
 
             @Override
-            public CloseableByteBuffer putInt(int b)
+            public CloseableLogBuffer putInt(int b)
             {
                 slice.putInt(b);
                 return this;
             }
 
             @Override
-            public CloseableByteBuffer put(byte[] b)
+            public CloseableLogBuffer put(byte[] b)
             {
                 slice.put(b);
                 return this;
             }
 
             @Override
-            public CloseableByteBuffer put(ByteBuffer b)
+            public CloseableLogBuffer put(ByteBuffer b)
             {
                 slice.put(b);
                 return this;
@@ -188,12 +197,20 @@ public class MMapLogWriter
     }
 
     /*
-     * 0: ready for writing +: reserved for writing /: reserved by someone else
-     * 
-     * ------------- /////0000000 +++++++++++ +++++++++++ ... +++++++++++ +++++++++++ 00000////// --------- head.filePosition ^ ^ head.limit tail.filePosition ^ offset^ ^ limit (implicit)
-     * |_________________________________ ... _______________________________| length, slice |___________||___________||___________| ... |___________||___________||___________| PAGE_SIZE PAGE_SIZE
-     * PAGE_SIZE PAGE_SIZE PAGE_SIZE PAGE_SIZE |___________||_________________________ ... _________________________||___________| | mmap and unmap as we go | mmapped already, head mmap for the next
-     * guy, tail
+     * 0: ready for writing
+     * +: reserved for writing
+     * /: reserved by someone else
+     *
+     *      ------------- /////0000000 +++++++++++  +++++++++++  ...  +++++++++++  +++++++++++  00000////// ---------
+     * head.filePosition ^           ^ head.limit                             tail.filePosition ^
+     *                  offset^                                                                     ^ limit (implicit)
+     *                        |_________________________________ ... _______________________________|
+     *                                                      length, slice
+     *                   |___________||___________||___________| ... |___________||___________||___________|
+     *                     PAGE_SIZE    PAGE_SIZE    PAGE_SIZE         PAGE_SIZE    PAGE_SIZE    PAGE_SIZE
+     *                   |___________||_________________________ ... _________________________||___________|
+     *                         |                       mmap and unmap as we go                       |
+     *               mmapped already, head                                               mmap for the next guy, tail
      */
     private class MultiMappedRegion
     {
@@ -239,7 +256,7 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableByteBuffer put(byte b)
+            public CloseableLogBuffer put(byte b)
                     throws IOException
             {
                 if (SizeOf.SIZE_OF_BYTE > currentSlice.remaining()) {
@@ -250,7 +267,7 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableByteBuffer put(byte[] b)
+            public CloseableLogBuffer put(byte[] b)
                     throws IOException
             {
                 if (b.length > currentSlice.remaining()) {
@@ -262,7 +279,7 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableByteBuffer putInt(int b)
+            public CloseableLogBuffer putInt(int b)
                     throws IOException
             {
                 if (SizeOf.SIZE_OF_INT > currentSlice.remaining()) {
@@ -277,7 +294,7 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableByteBuffer put(ByteBuffer b)
+            public CloseableLogBuffer put(ByteBuffer b)
                     throws IOException
             {
                 int rem;

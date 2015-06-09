@@ -140,8 +140,8 @@ public class NativeInteropTest
         File path = getTestDirectory(getClass().getName() + "_" + NEXT_ID.incrementAndGet());
         DB db = firstFactory.open(path, options);
 
-        WriteOptions wo = new WriteOptions().sync(false);
-        ReadOptions ro = new ReadOptions().fillCache(true).verifyChecksums(true);
+        WriteOptions wo = WriteOptions.make().sync(false);
+        ReadOptions ro = ReadOptions.make().fillCache(true).verifyChecksums(true);
         db.put(bytes("Tampa"), bytes("green"));
         db.put(bytes("London"), bytes("red"));
         db.put(bytes("New York"), bytes("blue"));

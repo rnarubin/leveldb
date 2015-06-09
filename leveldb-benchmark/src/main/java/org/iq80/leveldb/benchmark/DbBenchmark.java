@@ -167,25 +167,25 @@ public class DbBenchmark
             boolean known = true;
 
             if (benchmark.equals("fillseq")) {
-                write(new WriteOptions(), SEQUENTIAL, FRESH, num_, valueSize, 1);
+                write(WriteOptions.make(), SEQUENTIAL, FRESH, num_, valueSize, 1);
             }
             else if (benchmark.equals("fillbatch")) {
-                write(new WriteOptions(), SEQUENTIAL, FRESH, num_, valueSize, 1000);
+                write(WriteOptions.make(), SEQUENTIAL, FRESH, num_, valueSize, 1000);
             }
             else if (benchmark.equals("fillrandom")) {
-                write(new WriteOptions(), RANDOM, FRESH, num_, valueSize, 1);
+                write(WriteOptions.make(), RANDOM, FRESH, num_, valueSize, 1);
             }
             else if (benchmark.equals("fillrandomconcurrent")) {
-                write(new WriteOptions(), RANDOM, FRESH, CONCURRENT, num_, valueSize, 1);
+                write(WriteOptions.make(), RANDOM, FRESH, CONCURRENT, num_, valueSize, 1);
             }
             else if (benchmark.equals("overwrite")) {
-                write(new WriteOptions(), RANDOM, EXISTING, num_, valueSize, 1);
+                write(WriteOptions.make(), RANDOM, EXISTING, num_, valueSize, 1);
             }
             else if (benchmark.equals("fillsync")) {
-                write(new WriteOptions().sync(true), RANDOM, FRESH, num_ / 1000, valueSize, 1);
+                write(WriteOptions.make().sync(true), RANDOM, FRESH, num_ / 1000, valueSize, 1);
             }
             else if (benchmark.equals("fill100K")) {
-                write(new WriteOptions(), RANDOM, FRESH, num_ / 1000, 100 * 1000, 1);
+                write(WriteOptions.make(), RANDOM, FRESH, num_ / 1000, 100 * 1000, 1);
             }
             else if (benchmark.equals("readseq")) {
                 readSequential();
@@ -600,7 +600,6 @@ public class DbBenchmark
     }
 
     private void compact()
-            throws IOException
     {
         if(db_ instanceof DbImpl) {
             ((DbImpl)db_).flushMemTable();

@@ -545,7 +545,7 @@ public class DbImpl
         }
     }
 
-    private static final ReadOptions DEFAULT_READ_OPTIONS = new ReadOptions();
+    private static final ReadOptions DEFAULT_READ_OPTIONS = ReadOptions.make();
     @Override
     public byte[] get(byte[] key)
             throws DBException
@@ -612,7 +612,7 @@ public class DbImpl
         return null;
     }
 
-    private static final WriteOptions DEFAULT_WRITE_OPTIONS = new WriteOptions();
+    private static final WriteOptions DEFAULT_WRITE_OPTIONS = WriteOptions.make();
     @Override
     public void put(byte[] key, byte[] value)
             throws DBException
@@ -710,7 +710,7 @@ public class DbImpl
     @Override
     public SeekingIteratorAdapter iterator()
     {
-        return iterator(new ReadOptions());
+        return iterator(ReadOptions.make());
     }
 
     public SeekingIteratorAdapter iterator(ReadOptions readOptions)

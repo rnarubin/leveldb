@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.CloseableByteBuffer;
 import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPool.PooledObject;
@@ -94,7 +93,7 @@ public class FileChannelLogWriter
         }
 
         @Override
-        public CloseableByteBuffer put(byte b)
+        public CloseableLogBuffer put(byte b)
                 throws IOException
         {
             checkCapacity(SizeOf.SIZE_OF_BYTE);
@@ -103,7 +102,7 @@ public class FileChannelLogWriter
         }
 
         @Override
-        public CloseableByteBuffer putInt(int b)
+        public CloseableLogBuffer putInt(int b)
                 throws IOException
         {
             checkCapacity(SizeOf.SIZE_OF_INT);
@@ -122,7 +121,7 @@ public class FileChannelLogWriter
         }
 
         @Override
-        public CloseableByteBuffer put(byte[] b)
+        public CloseableLogBuffer put(byte[] b)
                 throws IOException
         {
             checkCapacity(b.length);
@@ -136,7 +135,7 @@ public class FileChannelLogWriter
         }
 
         @Override
-        public CloseableByteBuffer put(ByteBuffer b)
+        public CloseableLogBuffer put(ByteBuffer b)
                 throws IOException
         {
             checkCapacity(b.remaining());

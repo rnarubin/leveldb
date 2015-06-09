@@ -95,7 +95,7 @@ public class DbImplTest
         try (DbImpl db = new DbImpl(options, this.databaseDir)) {
             Random random = new Random(301);
             for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, new WriteOptions().sync(false));
+                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, WriteOptions.make().sync(false));
                 db.get(randomString(random, 64).getBytes());
                 if ((i % 50000) == 0 && i != 0) {
                     System.out.println(i + " rows written");
@@ -1203,7 +1203,7 @@ public class DbImplTest
 
         public String get(String key, Snapshot snapshot)
         {
-            byte[] slice = db.get(toByteArray(key), new ReadOptions().snapshot(snapshot));
+            byte[] slice = db.get(toByteArray(key), ReadOptions.make().snapshot(snapshot));
             if (slice == null) {
                 return null;
             }

@@ -19,6 +19,7 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBuffers;
+import com.google.common.base.Preconditions;
 import org.iq80.leveldb.util.Closeables;
 
 import java.io.Closeable;
@@ -41,6 +42,8 @@ public class MMapTable
             throws IOException
     {
         super(name, fileChannel, comparator, options.verifyChecksums(), options.memoryManager());
+        long size = fileChannel.size();
+        Preconditions.checkArgument(size <= Integer.MAX_VALUE, "File must be smaller than %s bytes", Integer.MAX_VALUE);
     }
 
     @Override
