@@ -21,10 +21,10 @@ import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBIterator;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.ByteBuffers;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -48,7 +48,7 @@ public class SeekingIteratorAdapter
     @Override
     public void seek(byte[] targetKey)
     {
-        seekingIterator.seek(Slices.wrappedBuffer(targetKey));
+        seekingIterator.seek(ByteBuffer.wrap(targetKey));
     }
 
     @Override
@@ -90,7 +90,7 @@ public class SeekingIteratorAdapter
         throw new UnsupportedOperationException();
     }
 
-    private DbEntry adapt(Entry<Slice, Slice> entry)
+    private DbEntry adapt(Entry<ByteBuffer, ByteBuffer> entry)
     {
         return new DbEntry(entry.getKey(), entry.getValue());
     }
@@ -123,37 +123,30 @@ public class SeekingIteratorAdapter
     public static class DbEntry
             implements Entry<byte[], byte[]>
     {
-        private final Slice key;
-        private final Slice value;
+        private final ByteBuffer key;
+        private final ByteBuffer value;
+        private final byte[] k, v;
 
-        public DbEntry(Slice key, Slice value)
+        public DbEntry(ByteBuffer key, ByteBuffer value)
         {
             Preconditions.checkNotNull(key, "key is null");
             Preconditions.checkNotNull(value, "value is null");
             this.key = key;
             this.value = value;
+            this.k = ByteBuffers.toArray(key);
+            this.v = ByteBuffers.toArray(value);
         }
 
         @Override
         public byte[] getKey()
         {
-            return key.getBytes();
-        }
-
-        public Slice getKeySlice()
-        {
-            return key;
+            return k;
         }
 
         @Override
         public byte[] getValue()
         {
-            return value.getBytes();
-        }
-
-        public Slice getValueSlice()
-        {
-            return value;
+            return v;
         }
 
         @Override

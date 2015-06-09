@@ -229,7 +229,7 @@ public enum VersionEditTag
                 // smallest key
                 ByteBuffers.writeLengthPrefixedBytes(buffer, fileMetaData.getSmallest().encode());
 
-                // smallest key
+                // largest key
                 ByteBuffers.writeLengthPrefixedBytes(buffer, fileMetaData.getLargest().encode());
             }
         }

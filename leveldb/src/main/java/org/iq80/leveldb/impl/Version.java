@@ -23,10 +23,12 @@ import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.InternalTableIterator;
 import org.iq80.leveldb.util.LevelIterator;
-import org.iq80.leveldb.util.Slice;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -165,16 +167,16 @@ public class Version
         return lookupResult;
     }
 
-    int pickLevelForMemTableOutput(Slice smallestUserKey, Slice largestUserKey)
+    int pickLevelForMemTableOutput(ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
     {
         int level = 0;
-        if (!overlapInLevel(0, smallestUserKey, largestUserKey)) {
+        if (!overlapInLevel(0, smallestUserKey, largestUserKey, memory)) {
             // Push to next level if there is no overlap in next level,
             // and the #bytes overlapping in the level after that are limited.
-            InternalKey start = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-            InternalKey limit = new InternalKey(largestUserKey, 0, ValueType.VALUE);
+            InternalKey start = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);
+            InternalKey limit = new InternalKey(largestUserKey, 0, ValueType.VALUE, memory);
             while (level < MAX_MEM_COMPACT_LEVEL) {
-                if (overlapInLevel(level + 1, smallestUserKey, largestUserKey)) {
+                if (overlapInLevel(level + 1, smallestUserKey, largestUserKey, memory)) {
                     break;
                 }
                 long sum = Compaction.totalFileSize(versionSet.getOverlappingInputs(level + 2, start, limit));
@@ -187,16 +189,16 @@ public class Version
         return level;
     }
 
-    public boolean overlapInLevel(int level, Slice smallestUserKey, Slice largestUserKey)
+    public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
     {
         Preconditions.checkPositionIndex(level, levels.size(), "Invalid level");
         Preconditions.checkNotNull(smallestUserKey, "smallestUserKey is null");
         Preconditions.checkNotNull(largestUserKey, "largestUserKey is null");
 
         if (level == 0) {
-            return level0.someFileOverlapsRange(smallestUserKey, largestUserKey);
+            return level0.someFileOverlapsRange(smallestUserKey, largestUserKey, memory);
         }
-        return levels.get(level - 1).someFileOverlapsRange(smallestUserKey, largestUserKey);
+        return levels.get(level - 1).someFileOverlapsRange(smallestUserKey, largestUserKey, memory);
     }
 
     public int numberOfLevels()

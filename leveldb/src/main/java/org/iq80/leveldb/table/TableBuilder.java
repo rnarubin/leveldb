@@ -131,7 +131,7 @@ public class TableBuilder
         Preconditions.checkState(!closed, "table is finished");
 
         if (entryCount > 0) {
-            assert (userComparator.compare(key, lastKey) > 0) : "key must be greater than last key";
+            Preconditions.checkState(userComparator.compare(key, lastKey) > 0, "key must be greater than last key");
         }
 
         // If we just wrote a block, we can now add the handle to index block
@@ -250,7 +250,7 @@ public class TableBuilder
         closed = true;
 
         // write (empty) meta index block
-        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(),
+        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(memory),
                 this.memory);
         // TODO(postrelease): Add stats and other meta blocks
         BlockHandle metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);

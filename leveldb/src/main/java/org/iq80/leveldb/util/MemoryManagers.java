@@ -45,7 +45,6 @@ public enum MemoryManagers
 
     public static MemoryManager sanitize(final MemoryManager userManager)
     {
-        // bypass sanitation for known defaults
         return userManager == null ? HEAP.make() : new MemoryManager()
         {
             @Override

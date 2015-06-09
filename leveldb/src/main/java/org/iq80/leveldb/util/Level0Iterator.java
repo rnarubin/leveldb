@@ -28,6 +28,7 @@ import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.impl.TableCache;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -36,7 +37,7 @@ import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
 public final class Level0Iterator
-        extends AbstractSeekingIterator<InternalKey, Slice>
+        extends AbstractSeekingIterator<InternalKey, ByteBuffer>
         implements InternalIterator
 {
     private final List<InternalTableIterator> inputs;
@@ -85,9 +86,9 @@ public final class Level0Iterator
     }
 
     @Override
-    protected Entry<InternalKey, Slice> getNextElement()
+    protected Entry<InternalKey, ByteBuffer> getNextElement()
     {
-        Entry<InternalKey, Slice> result = null;
+        Entry<InternalKey, ByteBuffer> result = null;
         ComparableIterator nextIterator = priorityQueue.poll();
         if (nextIterator != null) {
             result = nextIterator.next();
@@ -110,14 +111,14 @@ public final class Level0Iterator
     }
 
     private static class ComparableIterator
-            implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
+            implements Iterator<Entry<InternalKey, ByteBuffer>>, Comparable<ComparableIterator>
     {
-        private final SeekingIterator<InternalKey, Slice> iterator;
+        private final SeekingIterator<InternalKey, ByteBuffer> iterator;
         private final Comparator<InternalKey> comparator;
         private final int ordinal;
-        private Entry<InternalKey, Slice> nextElement;
+        private Entry<InternalKey, ByteBuffer> nextElement;
 
-        private ComparableIterator(SeekingIterator<InternalKey, Slice> iterator, Comparator<InternalKey> comparator, int ordinal, Entry<InternalKey, Slice> nextElement)
+        private ComparableIterator(SeekingIterator<InternalKey, ByteBuffer> iterator, Comparator<InternalKey> comparator, int ordinal, Entry<InternalKey, ByteBuffer> nextElement)
         {
             this.iterator = iterator;
             this.comparator = comparator;
@@ -132,13 +133,13 @@ public final class Level0Iterator
         }
 
         @Override
-        public Entry<InternalKey, Slice> next()
+        public Entry<InternalKey, ByteBuffer> next()
         {
             if (nextElement == null) {
                 throw new NoSuchElementException();
             }
 
-            Entry<InternalKey, Slice> result = nextElement;
+            Entry<InternalKey, ByteBuffer> result = nextElement;
             if (iterator.hasNext()) {
                 nextElement = iterator.next();
             }

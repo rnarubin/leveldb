@@ -32,12 +32,12 @@ import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.Finalizer;
 import org.iq80.leveldb.util.InternalTableIterator;
-import org.iq80.leveldb.util.Slice;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.ExecutionException;
 
@@ -86,7 +86,7 @@ public class TableCache
         return new InternalTableIterator(getTable(number).iterator());
     }
 
-    public long getApproximateOffsetOf(FileMetaData file, Slice key)
+    public long getApproximateOffsetOf(FileMetaData file, ByteBuffer key)
     {
         try (Table table = getTable(file.getNumber())) {
             return table.getApproximateOffsetOf(key);

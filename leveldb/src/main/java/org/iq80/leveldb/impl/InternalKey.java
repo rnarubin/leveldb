@@ -28,7 +28,7 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 
 public class InternalKey
 {
-    private final ByteBuffer[] data;
+    private ByteBuffer data;
     private final ByteBuffer userKey;
     private final long sequenceNumber;
     private final ValueType valueType;
@@ -42,10 +42,8 @@ public class InternalKey
         this.userKey = userKey;
         this.sequenceNumber = sequenceNumber;
         this.valueType = valueType;
-        this.data = new ByteBuffer[] {
-                userKey,
-                memory.allocate(SIZE_OF_LONG).putLong(0,
-                        SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType)) };
+        this.data = memory.allocate(userKey.remaining() + 8);
+        this.data.put(userKey).putLong(SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType)).rewind();
     }
 
     public InternalKey(ByteBuffer data)
@@ -56,12 +54,7 @@ public class InternalKey
         long packedSequenceAndType = data.getLong(data.limit() - SIZE_OF_LONG);
         this.sequenceNumber = SequenceNumber.unpackSequenceNumber(packedSequenceAndType);
         this.valueType = SequenceNumber.unpackValueType(packedSequenceAndType);
-        this.data = new ByteBuffer[] { data };
-    }
-
-    public InternalKey(byte[] data)
-    {
-        this(ByteBuffer.wrap(data));
+        this.data = data;
     }
 
     public ByteBuffer getUserKey()
@@ -79,7 +72,7 @@ public class InternalKey
         return valueType;
     }
 
-    public ByteBuffer[] encode()
+    public ByteBuffer encode()
     {
         return this.data;
     }

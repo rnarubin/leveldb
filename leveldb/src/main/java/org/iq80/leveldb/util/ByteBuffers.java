@@ -9,6 +9,7 @@ import java.nio.MappedByteBuffer;
 import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
 
+import org.iq80.leveldb.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -143,13 +144,25 @@ public final class ByteBuffers
         dst.put(src);
     }
 
-    public static void writeLengthPrefixedBytes(GrowingBuffer buffer, ByteBuffer[] srcs)
+    public static int getRemaining(ByteBuffer[] bufs)
     {
         int size = 0;
-        for (ByteBuffer src : srcs) {
-            size += src.remaining();
+        for(ByteBuffer buf : bufs)
+        {
+            size+=buf.remaining();
         }
-        VariableLengthQuantity.writeVariableLengthInt(size, buffer);
+        return size;
+    }
+
+    public static void writeLengthPrefixedBytes(GrowingBuffer buffer, ByteBuffer src)
+    {
+        VariableLengthQuantity.writeVariableLengthInt(src.remaining(), buffer);
+        buffer.put(src);
+    }
+
+    public static void writeLengthPrefixedBytes(GrowingBuffer buffer, ByteBuffer[] srcs)
+    {
+        VariableLengthQuantity.writeVariableLengthInt(getRemaining(srcs), buffer);
         for (ByteBuffer src : srcs) {
             buffer.put(src);
         }
@@ -186,6 +199,11 @@ public final class ByteBuffers
         return src.get() & 0xFF;
     }
 
+    public static int getUnsignedByte(ByteBuffer src, int position)
+    {
+        return src.get(position) & 0xFF;
+    }
+
     public static ByteBuffer duplicateAndAdvance(ByteBuffer src, int length)
     {
         final int oldpos = src.position();
@@ -207,5 +225,28 @@ public final class ByteBuffers
     public static int compare(ByteBuffer a, ByteBuffer b)
     {
         return UTIL.compare(a, a.position(), a.remaining(), b, b.position(), b.remaining());
+    }
+
+    public static ByteBuffer collapse(ByteBuffer[] srcs, MemoryManager memory)
+    {
+        ByteBuffer dst = memory.allocate(getRemaining(srcs));
+        for(ByteBuffer src : srcs)
+        {
+            dst.put(duplicate(src));
+        }
+        dst.flip();
+        return dst;
+    }
+
+    public static ByteBuffer copy(ByteBuffer src, int length, MemoryManager memory)
+    {
+        return memory.allocate(length).put(duplicateByLength(src, src.position(), length));
+    }
+
+    public static byte[] toArray(ByteBuffer src)
+    {
+        byte[] dst = new byte[src.remaining()];
+        src.get(dst);
+        return dst;
     }
 }

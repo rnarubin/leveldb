@@ -32,7 +32,6 @@ import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.MergingIterator;
-import org.iq80.leveldb.util.Slice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -227,9 +226,10 @@ public class VersionSet
         return current.get(key);
     }
 
-    public boolean overlapInLevel(int level, Slice smallestUserKey, Slice largestUserKey)
+    //TODO remove maybe
+    public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
-        return current.overlapInLevel(level, smallestUserKey, largestUserKey);
+        return current.overlapInLevel(level, smallestUserKey, largestUserKey, options.memoryManager());
     }
 
     public int numberOfFilesInLevel(int level)

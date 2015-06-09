@@ -17,15 +17,17 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.Slice;
+import java.nio.ByteBuffer;
+
+import org.iq80.leveldb.MemoryManager;
 
 public class LookupKey
 {
     private final InternalKey key;
 
-    public LookupKey(Slice userKey, long sequenceNumber)
+    public LookupKey(ByteBuffer userKey, long sequenceNumber, MemoryManager memory)
     {
-        key = new InternalKey(userKey, sequenceNumber, ValueType.VALUE);
+        key = new InternalKey(userKey, sequenceNumber, ValueType.VALUE, memory);
     }
 
     public InternalKey getInternalKey()
@@ -33,7 +35,7 @@ public class LookupKey
         return key;
     }
 
-    public Slice getUserKey()
+    public ByteBuffer getUserKey()
     {
         return key.getUserKey();
     }

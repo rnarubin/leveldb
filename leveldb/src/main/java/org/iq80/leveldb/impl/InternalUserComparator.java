@@ -17,8 +17,13 @@
  */
 package org.iq80.leveldb.impl;
 
+import java.nio.ByteBuffer;
+
 import com.google.common.base.Preconditions;
+
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Slice;
 
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
@@ -27,14 +32,16 @@ public class InternalUserComparator
         implements UserComparator
 {
     private final InternalKeyComparator internalKeyComparator;
+    private final MemoryManager memory;
 
-    public InternalUserComparator(InternalKeyComparator internalKeyComparator)
+    public InternalUserComparator(InternalKeyComparator internalKeyComparator, MemoryManager memory)
     {
         this.internalKeyComparator = internalKeyComparator;
+        this.memory = memory;
     }
 
     @Override
-    public int compare(Slice left, Slice right)
+    public int compare(ByteBuffer left, ByteBuffer right)
     {
         return internalKeyComparator.compare(new InternalKey(left), new InternalKey(right));
     }
@@ -46,24 +53,27 @@ public class InternalUserComparator
     }
 
     @Override
-    public Slice findShortestSeparator(
-            Slice start,
-            Slice limit)
+    public ByteBuffer findShortestSeparator(
+            ByteBuffer start,
+            ByteBuffer limit)
     {
         // Attempt to shorten the user portion of the key
-        // ByteBuffer startUserKey = InternalKey.getUserKey(start); etc
-        Slice startUserKey = new InternalKey(start).getUserKey();
-        Slice limitUserKey = new InternalKey(limit).getUserKey();
+        ByteBuffer startUserKey = InternalKey.getUserKey(start);
+        ByteBuffer limitUserKey = InternalKey.getUserKey(limit);
+        //Slice startUserKey = new InternalKey(start).getUserKey();
+        //Slice limitUserKey = new InternalKey(limit).getUserKey();
 
-        Slice shortestSeparator = internalKeyComparator.getUserComparator().findShortestSeparator(startUserKey, limitUserKey);
+        ByteBuffer shortestSeparator = internalKeyComparator.getUserComparator().findShortestSeparator(startUserKey, limitUserKey);
 
         if (internalKeyComparator.getUserComparator().compare(startUserKey, shortestSeparator) < 0) {
             // User key has become larger.  Tack on the earliest possible
             // number to the shortened user key.
-            InternalKey newInternalKey = new InternalKey(shortestSeparator, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+            InternalKey newInternalKey = new InternalKey(shortestSeparator, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);
+            //TODO
             Preconditions.checkState(compare(start, newInternalKey.encode()) < 0); // todo
             Preconditions.checkState(compare(newInternalKey.encode(), limit) < 0); // todo
 
+            //TODO refactor this comparator maybe
             return newInternalKey.encode();
         }
 
@@ -71,15 +81,15 @@ public class InternalUserComparator
     }
 
     @Override
-    public Slice findShortSuccessor(Slice key)
+    public ByteBuffer findShortSuccessor(ByteBuffer key)
     {
-        Slice userKey = new InternalKey(key).getUserKey();
-        Slice shortSuccessor = internalKeyComparator.getUserComparator().findShortSuccessor(userKey);
+        ByteBuffer userKey = new InternalKey(key).getUserKey();
+        ByteBuffer shortSuccessor = internalKeyComparator.getUserComparator().findShortSuccessor(userKey);
 
         if (internalKeyComparator.getUserComparator().compare(userKey, shortSuccessor) < 0) {
             // User key has become larger.  Tack on the earliest possible
             // number to the shortened user key.
-            InternalKey newInternalKey = new InternalKey(shortSuccessor, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+            InternalKey newInternalKey = new InternalKey(shortSuccessor, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);
             Preconditions.checkState(compare(key, newInternalKey.encode()) < 0); // todo
 
             return newInternalKey.encode();

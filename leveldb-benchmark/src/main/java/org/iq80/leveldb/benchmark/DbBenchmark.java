@@ -86,7 +86,7 @@ public class DbBenchmark
         FRESH,
         EXISTING
     }
-    
+
     enum Concurrency
     {
        SERIAL,
@@ -269,7 +269,7 @@ public class DbBenchmark
         printWarnings();
         System.out.printf("------------------------------------------------\n");
     }
-    
+
     void printOptions()
     {
        System.out.println(ReflectionToStringBuilder.toString(defaultOptions(), ToStringStyle.MULTI_LINE_STYLE));
@@ -509,7 +509,7 @@ public class DbBenchmark
     {
        finishedOps(1);
     }
-    
+
     private void finishedOps(int n)
     {
 //        if (histogram) {
@@ -542,7 +542,7 @@ public class DbBenchmark
             System.out.printf("... finished %d ops%30s\r", done_, "");
 
         }
-       
+
     }
 
     private void readSequential()
@@ -605,7 +605,7 @@ public class DbBenchmark
         if(db_ instanceof DbImpl) {
             ((DbImpl)db_).flushMemTable();
             for (int level = 0; level < NUM_LEVELS - 1; level++) {
-                ((DbImpl)db_).compactRange(level, Slices.copiedBuffer("", UTF_8), Slices.copiedBuffer("~", UTF_8));
+                ((DbImpl)db_).compactRange(level, ByteBuffer.wrap("".getBytes(UTF_8)), ByteBuffer.wrap("~".getBytes(UTF_8)));
             }
         }
     }

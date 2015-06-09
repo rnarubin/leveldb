@@ -19,12 +19,19 @@ package org.iq80.leveldb.table;
 
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Slice;
 
 public class BytewiseComparator
         implements UserComparator
 {
+    private final MemoryManager memory;
+
+    public BytewiseComparator(MemoryManager memory)
+    {
+        this.memory = memory;
+    }
     @Override
     public String name()
     {
@@ -44,13 +51,15 @@ public class BytewiseComparator
         int sharedBytes = ByteBuffers.calculateSharedBytes(start, limit);
 
         // Do not shorten if one string is a prefix of the other
-        if (sharedBytes < Math.min(start.length(), limit.length())) {
+        if (sharedBytes < Math.min(start.remaining(), limit.remaining())) {
             // if we can add one to the last shared byte without overflow and the two keys differ by more than
             // one increment at this location.
-            int lastSharedByte = start.getUnsignedByte(sharedBytes);
-            if (lastSharedByte < 0xff && lastSharedByte + 1 < limit.getUnsignedByte(sharedBytes)) {
-                Slice result = start.copySlice(0, sharedBytes + 1);
-                result.setByte(sharedBytes, lastSharedByte + 1);
+            int lastSharedByte = ByteBuffers.getUnsignedByte(start, sharedBytes);
+            if (lastSharedByte < 0xff && lastSharedByte + 1 < ByteBuffers.getUnsignedByte(limit, sharedBytes)) {
+                //Slice result = start.copySlice(0, sharedBytes + 1);
+                //ByteBuffer result = memory.allocate(sharedBytes+1);
+                ByteBuffer result = ByteBuffers.copy(start, sharedBytes+1, memory);
+                result.put(sharedBytes, (byte)(lastSharedByte + 1));
 
                 assert (compare(result, limit) < 0) : "start must be less than last limit";
                 return result;
@@ -63,11 +72,12 @@ public class BytewiseComparator
     public ByteBuffer findShortSuccessor(ByteBuffer key)
     {
         // Find first character that can be incremented
-        for (int i = 0; i < key.length(); i++) {
-            int b = key.getUnsignedByte(i);
+        for (int i = 0; i < key.remaining(); i++) {
+            int b = ByteBuffers.getUnsignedByte(key, i);
             if (b != 0xff) {
-                Slice result = key.copySlice(0, i + 1);
-                result.setByte(i, b + 1);
+                //Slice result = key.copySlice(0, i + 1);
+                ByteBuffer result = ByteBuffers.copy(key, i+1, memory);
+                result.put(i, (byte)(b + 1));
                 return result;
             }
         }

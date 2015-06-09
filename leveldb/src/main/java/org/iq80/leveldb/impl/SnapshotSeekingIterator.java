@@ -20,27 +20,29 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.collect.Maps;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
 import org.iq80.leveldb.util.DbIterator;
-import org.iq80.leveldb.util.Slice;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
 import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.*;
 
 public final class SnapshotSeekingIterator
-        extends AbstractReverseSeekingIterator<Slice, Slice>
+        extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
         implements Closeable
 {
     private final DbIterator iterator;
     private final SnapshotImpl snapshot;
-    private final Comparator<Slice> userComparator;
+    private final Comparator<ByteBuffer> userComparator;
     // indicates the direction in which the iterator was last advanced
     private Direction direction;
-    private Entry<InternalKey, Slice> savedEntry;
+    private Entry<InternalKey, ByteBuffer> savedEntry;
+    private final MemoryManager memory;
 
     protected enum Direction
     {
@@ -50,13 +52,15 @@ public final class SnapshotSeekingIterator
     public SnapshotSeekingIterator(
             DbIterator iterator,
             SnapshotImpl snapshot,
-            Comparator<Slice> userComparator)
+            Comparator<ByteBuffer> userComparator,
+            MemoryManager memory)
     {
         this.iterator = iterator;
         this.snapshot = snapshot;
         this.userComparator = userComparator;
         this.snapshot.getVersion().retain();
         this.savedEntry = null;
+        this.memory = memory;
         seekToFirst();
     }
 
@@ -91,15 +95,15 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected void seekInternal(Slice targetKey)
+    protected void seekInternal(ByteBuffer targetKey)
     {
-        iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
+        iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE, memory));
         findNextUserEntry(false, null);
         direction = REVERSE; // the next user entry has been found, but not yet advanced
     }
 
     @Override
-    protected Entry<Slice, Slice> getNextElement()
+    protected Entry<ByteBuffer, ByteBuffer> getNextElement()
     {
         if (direction == REVERSE) {
             if (!iterator.hasNext()) {
@@ -125,7 +129,7 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected Entry<Slice, Slice> getPrevElement()
+    protected Entry<ByteBuffer, ByteBuffer> getPrevElement()
     {
         if (direction == FORWARD) {
             if (!iterator.hasPrev()) {
@@ -149,28 +153,28 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected Entry<Slice, Slice> peekInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekInternal()
     {
         if (hasNextInternal()) {
-            Entry<InternalKey, Slice> peek = iterator.peek();
+            Entry<InternalKey, ByteBuffer> peek = iterator.peek();
             return Maps.immutableEntry(peek.getKey().getUserKey(), peek.getValue());
         }
         return null;
     }
 
     @Override
-    protected Entry<Slice, Slice> peekPrevInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekPrevInternal()
     {
         if (hasPrevInternal()) {
-            Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+            Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
             return Maps.immutableEntry(peekPrev.getKey().getUserKey(), peekPrev.getValue());
         }
         return null;
     }
 
-    private void findNextUserEntry(boolean skipping, Entry<InternalKey, Slice> skipEntry)
+    private void findNextUserEntry(boolean skipping, Entry<InternalKey, ByteBuffer> skipEntry)
     {
-        Slice skipKey;
+        ByteBuffer skipKey;
         if (skipEntry == null) {
             skipping = false;
             skipKey = null;
@@ -204,7 +208,7 @@ public final class SnapshotSeekingIterator
     {
         ValueType valueType = ValueType.DELETION;
         while (iterator.hasPrev()) {
-            Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+            Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
             InternalKey internalKey = peekPrev.getKey();
             if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
                 if (valueType != ValueType.DELETION

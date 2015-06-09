@@ -22,7 +22,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
-import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.InternalIterator;
 
 import java.nio.ByteBuffer;
@@ -38,13 +37,11 @@ public class MemTable
 {
     private final ConcurrentSkipListMap<InternalKey, ByteBuffer> table;
     private final AtomicLong approximateMemoryUsage = new AtomicLong();
-    private final MemoryManager memory;
     private final Comparator<Entry<InternalKey, ByteBuffer>> iteratorComparator;
 
-    public MemTable(final InternalKeyComparator internalKeyComparator, final MemoryManager memory)
+    public MemTable(final InternalKeyComparator internalKeyComparator)
     {
         this.table = new ConcurrentSkipListMap<InternalKey, ByteBuffer>(internalKeyComparator);
-        this.memory = memory;
         this.iteratorComparator = new Comparator<Entry<InternalKey, ByteBuffer>>()
         {
             public int compare(Entry<InternalKey, ByteBuffer> o1, Entry<InternalKey, ByteBuffer> o2)
@@ -74,9 +71,8 @@ public class MemTable
         return approximateMemoryUsage.getAndAdd(delta);
     }
 
-    public void add(long sequenceNumber, ValueType valueType, ByteBuffer key, ByteBuffer value)
+    public void add(InternalKey internalKey, ByteBuffer value)
     {
-        InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType, memory);
         table.put(internalKey, value);
     }
 

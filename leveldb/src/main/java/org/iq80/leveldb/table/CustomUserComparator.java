@@ -17,7 +17,10 @@
  */
 package org.iq80.leveldb.table;
 
+import java.nio.ByteBuffer;
+
 import org.iq80.leveldb.DBComparator;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Slice;
 
 public class CustomUserComparator
@@ -37,20 +40,20 @@ public class CustomUserComparator
     }
 
     @Override
-    public Slice findShortestSeparator(Slice start, Slice limit)
+    public ByteBuffer findShortestSeparator(ByteBuffer start, ByteBuffer limit)
     {
-        return new Slice(comparator.findShortestSeparator(start.getBytes(), limit.getBytes()));
+        return ByteBuffer.wrap(comparator.findShortestSeparator(ByteBuffers.toArray(start), ByteBuffers.toArray(limit)));
     }
 
     @Override
-    public Slice findShortSuccessor(Slice key)
+    public ByteBuffer findShortSuccessor(ByteBuffer key)
     {
-        return new Slice(comparator.findShortSuccessor(key.getBytes()));
+        return ByteBuffer.wrap(comparator.findShortSuccessor(ByteBuffers.toArray(key)));
     }
 
     @Override
-    public int compare(Slice o1, Slice o2)
+    public int compare(ByteBuffer o1, ByteBuffer o2)
     {
-        return comparator.compare(o1.getBytes(), o2.getBytes());
+        return comparator.compare(ByteBuffers.toArray(o1), ByteBuffers.toArray(o2));
     }
 }

@@ -19,17 +19,18 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.InternalTableIterator;
 import org.iq80.leveldb.util.LevelIterator;
-import org.iq80.leveldb.util.Slice;
 
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 
-import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.collect.Lists.newArrayList;
 import static org.iq80.leveldb.impl.FileMetaData.GET_LARGEST_USER_KEY;
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
@@ -37,7 +38,7 @@ import static org.iq80.leveldb.impl.ValueType.VALUE;
 
 // todo this class should be immutable
 public class Level
-        implements SeekingIterable<InternalKey, Slice>
+        implements SeekingIterable<InternalKey, ByteBuffer>
 {
     private final int levelNumber;
     private final TableCache tableCache;
@@ -133,10 +134,10 @@ public class Level
 
                 if (iterator.hasNext()) {
                     // parse the key in the block
-                    Entry<InternalKey, Slice> entry = iterator.next();
+                    Entry<InternalKey, ByteBuffer> entry = iterator.next();
                     InternalKey internalKey = entry.getKey();
                     Preconditions.checkState(internalKey != null, "Corrupt key for %s", key.getUserKey()
-                            .toString(UTF_8));
+                            .toString());
 
                     // if this is a value key (not a delete) and the keys match, return the value
                     if (key.getUserKey().equals(internalKey.getUserKey())) {
@@ -163,9 +164,9 @@ public class Level
         return insertionPoint;
     }
 
-    public boolean someFileOverlapsRange(Slice smallestUserKey, Slice largestUserKey)
+    public boolean someFileOverlapsRange(ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
     {
-        InternalKey smallestInternalKey = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE);
+        InternalKey smallestInternalKey = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE, memory);
         int index = findFile(smallestInternalKey);
 
         UserComparator userComparator = internalKeyComparator.getUserComparator();
