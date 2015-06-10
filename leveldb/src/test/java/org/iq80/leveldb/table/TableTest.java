@@ -126,7 +126,10 @@ public abstract class TableTest
         Collections.reverse(reverseEntries);
 
         reopenFile();
-        Options options = Options.make().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
+        Options options = Options.make()
+                .blockSize(blockSize)
+                .blockRestartInterval(blockRestartInterval)
+                .memoryManager(MemoryManagers.heap());
         TableBuilder builder = new TableBuilder(options, fileChannel, byteCompare);
 
         for (BlockEntry entry : entries) {

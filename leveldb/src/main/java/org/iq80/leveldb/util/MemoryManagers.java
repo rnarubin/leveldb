@@ -33,6 +33,33 @@ public class MemoryManagers
         return Heap.INSTANCE;
     }
 
+    /**
+     * not intended for external use as naive allocations are generally expensive. useful for testing however
+     */
+    static MemoryManager direct()
+    {
+        return Direct.INSTANCE;
+    }
+
+    private enum Direct
+            implements MemoryManager
+    {
+        INSTANCE;
+
+        @Override
+        public ByteBuffer allocate(int capacity)
+        {
+            return ByteBuffer.allocateDirect(capacity).order(ByteOrder.LITTLE_ENDIAN);
+        }
+
+        @Override
+        public void free(ByteBuffer buffer)
+        {
+            ByteBuffers.freeDirect(buffer);
+        }
+
+    }
+
     public static MemoryManager sanitize(final MemoryManager userManager)
     {
         return userManager == null ? heap() : new MemoryManager()

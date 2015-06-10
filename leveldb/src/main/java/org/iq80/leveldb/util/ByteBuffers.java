@@ -22,7 +22,7 @@ public final class ByteBuffers
     {
     }
 
-    private interface BufferUtil
+    interface BufferUtil
     {
         int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey);
 
@@ -58,7 +58,7 @@ public final class ByteBuffers
         @Override
         public void putZero(ByteBuffer dst, int length)
         {
-            for (; length >= 0; length--) {
+            for (; length > 0; length--) {
                 dst.put((byte) 0);
             }
         }
@@ -225,17 +225,6 @@ public final class ByteBuffers
     public static int compare(ByteBuffer a, ByteBuffer b)
     {
         return UTIL.compare(a, a.position(), a.remaining(), b, b.position(), b.remaining());
-    }
-
-    public static ByteBuffer collapse(ByteBuffer[] srcs, MemoryManager memory)
-    {
-        ByteBuffer dst = memory.allocate(getRemaining(srcs));
-        for(ByteBuffer src : srcs)
-        {
-            dst.put(duplicate(src));
-        }
-        dst.flip();
-        return dst;
     }
 
     public static ByteBuffer copy(ByteBuffer src, int length, MemoryManager memory)
