@@ -61,7 +61,7 @@ public class GrowingBuffer
 
     public ByteBuffer get()
     {
-        ByteBuffer ret = this.buffer.duplicate();
+        ByteBuffer ret = ByteBuffers.duplicate(this.buffer);
         ret.flip();
         return ret;
     }
@@ -72,5 +72,11 @@ public class GrowingBuffer
     private static int nextPowerOf2(final int num)
     {
         return 1 << (Integer.SIZE - Integer.numberOfLeadingZeros(num - 1));
+    }
+
+    @Override
+    public String toString()
+    {
+        return "GrowingBuffer [buffer=" + buffer + "]";
     }
 }

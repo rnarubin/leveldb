@@ -5,6 +5,7 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
@@ -160,6 +161,20 @@ public final class ByteBuffers
         buffer.put(src);
     }
 
+    public static void writeLengthPrefixedBytesTransparent(GrowingBuffer buffer, ByteBuffer src)
+    {
+        src.mark();
+        writeLengthPrefixedBytes(buffer, src);
+        src.reset();
+    }
+
+    public static void writeLengthPrefixedBytesTransparent(ByteBuffer buffer, ByteBuffer src)
+    {
+        src.mark();
+        writeLengthPrefixedBytes(buffer, src);
+        src.reset();
+    }
+
     public static void writeLengthPrefixedBytes(GrowingBuffer buffer, ByteBuffer[] srcs)
     {
         VariableLengthQuantity.writeVariableLengthInt(getRemaining(srcs), buffer);
@@ -174,6 +189,14 @@ public final class ByteBuffers
         return duplicateAndAdvance(src, length);
     }
 
+    /**
+     * buffer duplication which preserves byte order
+     */
+    public static ByteBuffer duplicate(ByteBuffer src)
+    {
+        return src.duplicate().order(src.order());
+    }
+
     public static ByteBuffer duplicate(ByteBuffer src, int position, int limit)
     {
         ByteBuffer ret = duplicate(src);
@@ -184,14 +207,6 @@ public final class ByteBuffers
     public static ByteBuffer duplicateByLength(ByteBuffer src, int position, int length)
     {
         return duplicate(src, position, position + length);
-    }
-
-    /**
-     * buffer duplication which preserves byte order
-     */
-    public static ByteBuffer duplicate(ByteBuffer src)
-    {
-        return src.duplicate().order(src.order());
     }
 
     public static ByteBuffer slice(ByteBuffer src)
@@ -247,8 +262,15 @@ public final class ByteBuffers
     public static byte[] toArray(ByteBuffer src)
     {
         byte[] dst = new byte[src.remaining()];
+        src.mark();
         src.get(dst);
+        src.reset();
         return dst;
+    }
+
+    public static String toString(ByteBuffer src)
+    {
+        return new String(toArray(src), StandardCharsets.UTF_8);
     }
 
     /**

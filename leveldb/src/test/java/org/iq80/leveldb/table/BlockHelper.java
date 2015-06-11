@@ -168,7 +168,7 @@ public final class BlockHelper
                 nonSharedBytes = rem;
                 restartBlockCount = 0;
             }
-            size += nonSharedBytes + rem + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
+            size += nonSharedBytes + entry.getValue().remaining() + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
 
             previousKey = entry.getKey();
             restartBlockCount++;

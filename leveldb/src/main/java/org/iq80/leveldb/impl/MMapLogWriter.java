@@ -137,10 +137,8 @@ public class MMapLogWriter
 
         public CloseableMMapLogBuffer slice(long offset, int length)
         {
-            ByteBuffer ret = mmap.duplicate();
-            ret.position((int) (offset - filePosition));
-            ret.limit(ret.position() + length);
-            return new CloseableMMapLogBuffer(offset, ret.order(ByteOrder.LITTLE_ENDIAN));
+            return new CloseableMMapLogBuffer(offset, ByteBuffers.duplicateByLength(mmap,
+                    (int) (offset - filePosition), length));
         }
 
         private class CloseableMMapLogBuffer

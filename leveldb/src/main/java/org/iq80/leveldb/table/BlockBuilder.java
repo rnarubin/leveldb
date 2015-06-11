@@ -114,8 +114,10 @@ public class BlockBuilder
         Preconditions.checkArgument(lastKey == null || comparator.compare(key, lastKey) > 0, "key must be greater than last key");
 
         int sharedKeyBytes = 0;
-        if (lastKey != null && restartBlockEntryCount < blockRestartInterval) {
-            sharedKeyBytes = ByteBuffers.calculateSharedBytes(key, lastKey);
+        if (restartBlockEntryCount < blockRestartInterval) {
+            if (lastKey != null) {
+                sharedKeyBytes = ByteBuffers.calculateSharedBytes(key, lastKey);
+            }
         }
         else {
             // restart prefix compression

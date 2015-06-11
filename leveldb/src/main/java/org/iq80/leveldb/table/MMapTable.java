@@ -132,8 +132,6 @@ public class MMapTable
 
     public static ByteBuffer read(MappedByteBuffer data, int offset, int length)
     {
-        int newPosition = data.position() + offset;
-        ByteBuffer block = (ByteBuffer) data.duplicate().order(ByteOrder.LITTLE_ENDIAN).clear().limit(newPosition + length).position(newPosition);
-        return block;
+        return ByteBuffers.duplicateByLength(data, data.position() + offset, length);
     }
 }

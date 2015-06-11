@@ -153,7 +153,7 @@ public enum VersionEditTag
                 VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
 
                 // internal key
-                ByteBuffers.writeLengthPrefixedBytes(buffer, entry.getValue().encode());
+                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, entry.getValue().encode());
             }
         }
     },
@@ -227,10 +227,10 @@ public enum VersionEditTag
                 VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getFileSize(), buffer);
 
                 // smallest key
-                ByteBuffers.writeLengthPrefixedBytes(buffer, fileMetaData.getSmallest().encode());
+                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, fileMetaData.getSmallest().encode());
 
                 // largest key
-                ByteBuffers.writeLengthPrefixedBytes(buffer, fileMetaData.getLargest().encode());
+                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, fileMetaData.getLargest().encode());
             }
         }
     };

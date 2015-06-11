@@ -43,7 +43,9 @@ public class InternalKey
         this.sequenceNumber = sequenceNumber;
         this.valueType = valueType;
         this.data = memory.allocate(userKey.remaining() + 8);
+        userKey.mark();
         this.data.put(userKey).putLong(SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType)).rewind();
+        userKey.reset();
     }
 
     public InternalKey(ByteBuffer data)
@@ -124,8 +126,7 @@ public class InternalKey
     {
         StringBuilder sb = new StringBuilder();
         sb.append("InternalKey");
-        // sb.append("{key=").append(getUserKey().toString(UTF_8)); // TODO don't print the real value
-        sb.append("{key=").append(getUserKey().toString());
+        sb.append("{key=").append(ByteBuffers.toString(getUserKey()));
         sb.append(", sequenceNumber=").append(getSequenceNumber());
         sb.append(", valueType=").append(getValueType());
         sb.append('}');

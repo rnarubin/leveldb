@@ -82,6 +82,8 @@ public class LogReader
      */
     private ByteBuffer currentChunk = ByteBuffers.EMPTY_BUFFER;
 
+    private final MemoryManager memory;
+
     public LogReader(FileChannel fileChannel,
             LogMonitor monitor,
             boolean verifyChecksums,
@@ -92,8 +94,9 @@ public class LogReader
         this.monitor = monitor;
         this.verifyChecksums = verifyChecksums;
         this.initialOffset = initialOffset;
-        this.blockScratch = memory.allocate(BLOCK_SIZE);
-        this.recordScratch = new GrowingBuffer(BLOCK_SIZE, memory);
+        this.memory = memory;
+        this.blockScratch = this.memory.allocate(BLOCK_SIZE);
+        this.recordScratch = new GrowingBuffer(BLOCK_SIZE, this.memory);
     }
 
     public long getLastRecordOffset()
@@ -197,7 +200,7 @@ public class LogReader
                         recordScratch.put(currentChunk);
                         lastRecordOffset = prospectiveRecordOffset;
                         // TODO check this copy
-                        return recordScratch.get();
+                        return ByteBuffers.copy(recordScratch.get(), memory);
                     }
                     break;
 
@@ -333,7 +336,8 @@ public class LogReader
 
         }
         blockScratch.flip();
-        currentBlock = ByteBuffers.slice(blockScratch);
+        // TODO check this copy
+        currentBlock = ByteBuffers.copy(blockScratch, this.memory);
         return currentBlock.hasRemaining();
     }
 

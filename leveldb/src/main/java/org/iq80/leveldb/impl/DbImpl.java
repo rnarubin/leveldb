@@ -710,7 +710,7 @@ public class DbImpl
     @Override
     public SeekingIteratorAdapter iterator()
     {
-        return iterator(ReadOptions.make());
+        return iterator(DEFAULT_READ_OPTIONS);
     }
 
     public SeekingIteratorAdapter iterator(ReadOptions readOptions)
@@ -1322,15 +1322,16 @@ public class DbImpl
             public void put(ByteBuffer key, ByteBuffer value)
             {
                 record.put(VALUE.getPersistentId());
-                ByteBuffers.writeLengthPrefixedBytes(record, key);
-                ByteBuffers.writeLengthPrefixedBytes(record, value);
+                ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
+
+                ByteBuffers.writeLengthPrefixedBytesTransparent(record, value);
             }
 
             @Override
             public void delete(ByteBuffer key)
             {
                 record.put(DELETION.getPersistentId());
-                ByteBuffers.writeLengthPrefixedBytes(record, key);
+                ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
             }
         });
         record.flip();
