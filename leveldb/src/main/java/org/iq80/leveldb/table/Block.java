@@ -78,7 +78,7 @@ public class Block
         Preconditions.checkArgument(block.remaining() >= SIZE_OF_INT, "Block is corrupt: size must be at least %s block", SIZE_OF_INT);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
-        block = block.slice();
+        block = ByteBuffers.slice(block);
         this.block = block;
         this.comparator = comparator;
         this.memory = memory;

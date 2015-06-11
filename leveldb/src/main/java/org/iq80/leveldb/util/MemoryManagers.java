@@ -67,9 +67,9 @@ public class MemoryManagers
             @Override
             public ByteBuffer allocate(int capacity)
             {
-                ByteBuffer ret = userManager.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
+                ByteBuffer ret = userManager.allocate(capacity);
                 // for simplicity's sake, make sure we get transparent buffers
-                return ret.position() == 0 && ret.limit() == ret.capacity() ? ret : ret.slice();
+                return (ret.position() == 0 && ret.limit() == ret.capacity() ? ret : ret.slice()).order(ByteOrder.LITTLE_ENDIAN);
             }
 
             @Override

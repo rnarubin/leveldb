@@ -62,6 +62,9 @@ public abstract class Table
         Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH, "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
+        this.refCount = new AtomicInteger(1);
+        this.memory = memory;
+
         this.name = name;
         this.fileChannel = fileChannel;
         this.verifyChecksums = verifyChecksums;
@@ -70,8 +73,6 @@ public abstract class Table
         Footer footer = init();
         indexBlock = readBlock(footer.getIndexBlockHandle());
         metaindexBlockHandle = footer.getMetaindexBlockHandle();
-        this.refCount = new AtomicInteger(1);
-        this.memory = memory;
     }
 
     protected abstract Footer init()

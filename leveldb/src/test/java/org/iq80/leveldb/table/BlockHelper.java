@@ -159,15 +159,16 @@ public final class BlockHelper
         int restartBlockCount = 0;
         for (BlockEntry entry : entries) {
             int nonSharedBytes;
+            int rem = entry.getKey().remaining();
             if (restartBlockCount < blockRestartInterval) {
-                nonSharedBytes = entry.getKey().remaining()
+                nonSharedBytes = previousKey == null ? rem : rem
                         - ByteBuffers.calculateSharedBytes(entry.getKey(), previousKey);
             }
             else {
-                nonSharedBytes = entry.getKey().remaining();
+                nonSharedBytes = rem;
                 restartBlockCount = 0;
             }
-            size += nonSharedBytes + entry.getValue().remaining() + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
+            size += nonSharedBytes + rem + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
 
             previousKey = entry.getKey();
             restartBlockCount++;

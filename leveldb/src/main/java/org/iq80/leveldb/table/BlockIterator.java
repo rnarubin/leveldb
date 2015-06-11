@@ -65,7 +65,7 @@ public class BlockIterator
         this.memory = memory;
         this.data = data;
 
-        this.restartPositions = restartPositions.slice();
+        this.restartPositions = ByteBuffers.slice(restartPositions);
         this.restartCount = this.restartPositions.remaining() / SIZE_OF_INT;
 
         this.comparator = comparator;
@@ -314,12 +314,17 @@ public class BlockIterator
         if (sharedKeyLength > 0) {
             Preconditions.checkState(previousEntry != null,
                     "Entry has a shared key but no previous entry was provided");
-            key.put(ByteBuffers.duplicate(previousEntry.getKey(), 0, sharedKeyLength));
+
+            ByteBuffer prev = previousEntry.getKey();
+            prev.mark();
+            ByteBuffers.putLength(key, prev, sharedKeyLength);
+            prev.reset();
         }
-        key.put(ByteBuffers.duplicateAndAdvance(data, nonSharedKeyLength));
+        ByteBuffers.putLength(key, data, nonSharedKeyLength);
+        key.flip();
 
         // read value
-        ByteBuffer value = ByteBuffers.duplicateAndAdvance(data, valueLength);
+        ByteBuffer value = ByteBuffers.slice(ByteBuffers.duplicateAndAdvance(data, valueLength));
 
         return new BlockEntry(key, value);
     }

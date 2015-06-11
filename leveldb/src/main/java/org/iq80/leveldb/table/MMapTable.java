@@ -54,6 +54,7 @@ public class MMapTable
         assert fsize <= Integer.MAX_VALUE;
         int size = (int) fsize;
         data = fileChannel.map(MapMode.READ_ONLY, 0, size);
+        data.order(ByteOrder.LITTLE_ENDIAN);
         ByteBuffer footerSlice = ByteBuffers.duplicate(data, size - Footer.ENCODED_LENGTH, size);
         return Footer.readFooter(footerSlice);
     }

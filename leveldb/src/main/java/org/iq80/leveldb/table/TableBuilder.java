@@ -140,6 +140,7 @@ public class TableBuilder
 
             ByteBuffer handleEncoding = BlockHandle.writeBlockHandleTo(pendingHandle,
                     memory.allocate(BlockHandle.MAX_ENCODED_LENGTH));
+            handleEncoding.flip();
             indexBlockBuilder.add(shortestSeparator, handleEncoding);
             pendingIndexEntry = false;
         }
@@ -198,6 +199,7 @@ public class TableBuilder
         BlockTrailer blockTrailer = new BlockTrailer(blockCompressionType, crc32c(blockContents, blockCompressionType));
         ByteBuffer trailer = BlockTrailer.writeBlockTrailer(blockTrailer,
                 this.memory.allocate(BlockTrailer.ENCODED_LENGTH));
+        trailer.flip();
 
         // create a handle to this block
         BlockHandle blockHandle = new BlockHandle(position, blockContents.remaining());
@@ -259,6 +261,7 @@ public class TableBuilder
 
             ByteBuffer handleEncoding = BlockHandle.writeBlockHandleTo(pendingHandle,
                     this.memory.allocate(BlockHandle.MAX_ENCODED_LENGTH));
+            handleEncoding.flip();
             indexBlockBuilder.add(shortSuccessor, handleEncoding);
             pendingIndexEntry = false;
         }
@@ -269,6 +272,7 @@ public class TableBuilder
         // write footer
         Footer footer = new Footer(metaindexBlockHandle, indexBlockHandle);
         ByteBuffer footerEncoding = Footer.writeFooter(footer, this.memory.allocate(Footer.ENCODED_LENGTH));
+        footerEncoding.flip();
         position += fileChannel.write(footerEncoding);
     }
 

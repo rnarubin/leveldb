@@ -333,7 +333,7 @@ public class LogReader
 
         }
         blockScratch.flip();
-        currentBlock = blockScratch.slice();
+        currentBlock = ByteBuffers.slice(blockScratch);
         return currentBlock.hasRemaining();
     }
 

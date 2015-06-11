@@ -194,6 +194,11 @@ public final class ByteBuffers
         return src.duplicate().order(src.order());
     }
 
+    public static ByteBuffer slice(ByteBuffer src)
+    {
+        return src.slice().order(src.order());
+    }
+
     public static int readUnsignedByte(ByteBuffer src)
     {
         return src.get() & 0xFF;
@@ -243,6 +248,18 @@ public final class ByteBuffers
     {
         byte[] dst = new byte[src.remaining()];
         src.get(dst);
+        return dst;
+    }
+
+    /**
+     * @return dst
+     */
+    public static ByteBuffer putLength(ByteBuffer dst, ByteBuffer src, int length)
+    {
+        int oldlim = src.limit();
+        src.limit(src.position() + length);
+        dst.put(src);
+        src.limit(oldlim);
         return dst;
     }
 }

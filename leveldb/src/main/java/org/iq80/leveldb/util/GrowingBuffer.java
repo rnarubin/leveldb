@@ -16,12 +16,6 @@ public class GrowingBuffer
         this.buffer = this.memory.allocate(nextPowerOf2(initialSize));
     }
 
-    //TODO: necessary?
-    public MemoryManager getMemoryManager()
-    {
-        return this.memory;
-    }
-
     /**
      * note: returns internal ByteBuffer
      */
@@ -67,8 +61,9 @@ public class GrowingBuffer
 
     public ByteBuffer get()
     {
-        this.buffer.flip();
-        return this.buffer;
+        ByteBuffer ret = this.buffer.duplicate();
+        ret.flip();
+        return ret;
     }
 
     /**

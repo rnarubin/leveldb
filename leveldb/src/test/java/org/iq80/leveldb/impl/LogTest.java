@@ -23,6 +23,7 @@ import com.google.common.collect.Multiset;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.MemoryManagers;
@@ -154,7 +155,7 @@ public abstract class LogTest
         for (int i = 0; i < 10_000; i++) {
             byte[] b = new byte[rand.nextInt(20) + 5];
             rand.nextBytes(b);
-            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), 4000));
+            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), rand.nextInt(2000) + 2000));
         }
 
         testConcurrentLog(records, true, 8);
@@ -167,10 +168,10 @@ public abstract class LogTest
         //larger than page size to test mmap edges
         Random rand = new Random(0);
         List<ByteBuffer> records = new ArrayList<>();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             byte[] b = new byte[rand.nextInt(20) + 5];
             rand.nextBytes(b);
-            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), 200000));
+            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), rand.nextInt(10000) + 10000));
         }
 
         testConcurrentLog(records, true, 8);
@@ -199,7 +200,7 @@ public abstract class LogTest
             throws IOException
     {
         for (ByteBuffer entry : records) {
-            writer.addRecord(entry, true);
+            writer.addRecord(ByteBuffers.duplicate(entry), true);
         }
 
         if (closeWriter) {
@@ -235,7 +236,7 @@ public abstract class LogTest
                 public Void call()
                         throws IOException
                 {
-                    writer.addRecord(s, false);
+                    writer.addRecord(ByteBuffers.duplicate(s), false);
                     return null;
                 }
             });
