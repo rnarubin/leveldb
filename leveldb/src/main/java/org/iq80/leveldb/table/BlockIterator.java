@@ -63,7 +63,7 @@ public class BlockIterator
         Preconditions.checkNotNull(comparator, "comparator is null");
 
         this.memory = memory;
-        this.data = data;
+        this.data = ByteBuffers.duplicate(data);
 
         this.restartPositions = ByteBuffers.slice(restartPositions);
         this.restartCount = this.restartPositions.remaining() / SIZE_OF_INT;

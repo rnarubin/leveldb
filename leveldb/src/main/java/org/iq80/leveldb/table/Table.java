@@ -22,6 +22,7 @@ import com.google.common.base.Throwables;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.impl.SeekingIterable;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.TableIterator;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -86,7 +87,7 @@ public abstract class Table
 
     public Block openBlock(ByteBuffer blockEntry)
     {
-        BlockHandle blockHandle = BlockHandle.readBlockHandle(blockEntry);
+        BlockHandle blockHandle = BlockHandle.readBlockHandle(ByteBuffers.duplicate(blockEntry));
         Block dataBlock;
         try {
             dataBlock = readBlock(blockHandle);

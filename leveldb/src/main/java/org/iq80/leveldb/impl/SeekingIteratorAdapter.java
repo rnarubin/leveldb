@@ -133,8 +133,8 @@ public class SeekingIteratorAdapter
             Preconditions.checkNotNull(value, "value is null");
             this.key = key;
             this.value = value;
-            this.k = ByteBuffers.toArray(key);
-            this.v = ByteBuffers.toArray(value);
+            this.k = ByteBuffers.toArray(ByteBuffers.duplicate(key));
+            this.v = ByteBuffers.toArray(ByteBuffers.duplicate(value));
         }
 
         @Override

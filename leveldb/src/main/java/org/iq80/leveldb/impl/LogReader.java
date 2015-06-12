@@ -164,7 +164,7 @@ public class LogReader
                     recordScratch.clear();
                     prospectiveRecordOffset = physicalRecordOffset;
                     lastRecordOffset = prospectiveRecordOffset;
-                    return currentChunk;
+                    return ByteBuffers.copy(currentChunk, memory);
 
                 case FIRST:
                     if (inFragmentedRecord) {

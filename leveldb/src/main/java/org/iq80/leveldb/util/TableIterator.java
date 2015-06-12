@@ -213,7 +213,7 @@ public final class TableIterator
     private BlockIterator getNextBlock()
     {
         ByteBuffer blockHandle = blockIterator.next().getValue();
-        Block dataBlock = table.openBlock(ByteBuffers.duplicate(blockHandle));
+        Block dataBlock = table.openBlock(blockHandle);
         currentOrigin = NEXT;
         return dataBlock.iterator();
     }
@@ -221,7 +221,7 @@ public final class TableIterator
     private BlockIterator getPrevBlock()
     {
         ByteBuffer blockHandle = blockIterator.prev().getValue();
-        Block dataBlock = table.openBlock(ByteBuffers.duplicate(blockHandle));
+        Block dataBlock = table.openBlock(blockHandle);
         currentOrigin = PREV;
         return dataBlock.iterator();
     }
