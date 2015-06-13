@@ -22,7 +22,9 @@ import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers.BufferUtil;
@@ -32,6 +34,8 @@ import org.testng.annotations.Test;
 
 import com.google.common.base.Function;
 import com.google.common.base.Strings;
+
+import static java.nio.charset.StandardCharsets.US_ASCII;
 
 public abstract class BufferUtilTest
 {
@@ -238,11 +242,16 @@ public abstract class BufferUtilTest
                         0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x18, 0x28, 0x00, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})},
 
-                        /*
-                new Object[] {0xe5ede956, "foobar0".getBytes("ASCII")},
-                new Object[] {0x352441c2, "abc".getBytes("ASCII")},
-                new Object[] { 0x480628c2,
-                        Strings.repeat("the quick brown fox jumped over the lazy dog", 50).getBytes("ASCII") },*/
+                new Object[] { 0xc1d04330, "a".getBytes(US_ASCII) },
+                new Object[] { 0xe2a22936, "ab".getBytes(US_ASCII) },
+                new Object[] { 0x364b3fb7, "abc".getBytes(US_ASCII) },
+                new Object[] { 0x92c80a31, "abcd".getBytes(US_ASCII) },
+                new Object[] { 0xc450d697, "abcde".getBytes(US_ASCII) },
+                new Object[] { 0x53bceff1, "abcdef".getBytes(US_ASCII) },
+                new Object[] { 0xe627f441, "abcdefg".getBytes(US_ASCII) },
+                new Object[] { 0xe443cace, "abcdefghijklmnopqrstuv".getBytes(US_ASCII) },
+                new Object[] { 0x201d71a2, Strings.repeat("abcdefghijklmnopqrstuv", 50).getBytes(US_ASCII) },
+                new Object[] { 0x32612e7e, Strings.repeat("abcdefghijklmnopqrstuv", 500).getBytes(US_ASCII) },
         };
     }
 
@@ -291,8 +300,19 @@ public abstract class BufferUtilTest
     
     private static ByteBuffer[] heapAndDirect(byte[] data)
     {
-        return new ByteBuffer[] { (ByteBuffer) MemoryManagers.heap().allocate(data.length).put(data).flip(),
-                (ByteBuffer) MemoryManagers.direct().allocate(data.length).put(data).flip() };
+        List<ByteBuffer> bufs = new ArrayList<>();
+        bufs.add((ByteBuffer) MemoryManagers.heap().allocate(data.length).put(data).flip());
+        bufs.add((ByteBuffer) MemoryManagers.direct().allocate(data.length).put(data).flip());
+        for (MemoryManager memory : Arrays.asList(MemoryManagers.heap(), MemoryManagers.direct())) {
+            for (int i = 1; i <= 16; i++) {
+                ByteBuffer b = memory.allocate(data.length + i);
+                b.position(i);
+                b.put(data);
+                b.position(i);
+                bufs.add(b);
+            }
+        }
+        return bufs.toArray(new ByteBuffer[bufs.size()]);
     }
 
     private static byte[] arrayOf(int size, byte value)
@@ -362,6 +382,26 @@ public abstract class BufferUtilTest
                 throw new Error(e);
             }
         }
+        @Override
+        protected BufferUtil getUtil()
+        {
+            return util;
+        }
+    }
+
+    public static class UnsafeUtilTest
+            extends BufferUtilTest
+    {
+        private final static BufferUtil util;
+        static {
+            try {
+                util = (BufferUtil) Class.forName("org.iq80.leveldb.util.ByteBuffers$UnsafeUtil").getEnumConstants()[0];
+            }
+            catch (ClassNotFoundException e) {
+                throw new Error(e);
+            }
+        }
+
         @Override
         protected BufferUtil getUtil()
         {

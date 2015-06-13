@@ -1,18 +1,33 @@
 package org.iq80.leveldb.util;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 
 import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
+import sun.misc.Unsafe;
 
 import org.iq80.leveldb.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.iq80.leveldb.util.PureJavaCrc32C.T;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_0_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_1_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_2_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_3_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_4_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_5_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_6_start;
+import static org.iq80.leveldb.util.PureJavaCrc32C.T8_7_start;
 
 @SuppressWarnings("restriction")
 public final class ByteBuffers
@@ -34,7 +49,24 @@ public final class ByteBuffers
         ByteBufferCrc32 crc32();
     }
 
-    private static final BufferUtil UTIL = PureJavaUtil.INSTANCE;
+    private static final BufferUtil UTIL = PureJavaUtil.INSTANCE;// getBestUtil();
+
+    /**
+     * Returns the Unsafe-using util, or falls back to the pure-Java implementation if unable to do so.
+     */
+    private static BufferUtil getBestUtil()
+    {
+        final String UNSAFE_UTIL_NAME = ByteBuffers.class.getName() + "$UnsafeUtil";
+        try {
+            BufferUtil util = (BufferUtil) Class.forName(UNSAFE_UTIL_NAME).getEnumConstants()[0];
+            LOGGER.debug("Successfully loaded unsafe util");
+            return util;
+        }
+        catch (Throwable t) {
+            LOGGER.debug("Failed to load unsafe util, falling back to java impl ({})", t);
+            return PureJavaUtil.INSTANCE;
+        }
+    }
 
     private enum PureJavaUtil
             implements BufferUtil
@@ -88,6 +120,247 @@ public final class ByteBuffers
         {
             return new PureJavaCrc32C();
         }
+    }
+
+    @SuppressWarnings("unused")
+    private enum UnsafeUtil
+            implements BufferUtil
+    {
+        INSTANCE;
+
+        private static final Unsafe unsafe;
+
+        private static final long DIRECT_ADDRESS_FIELD_OFFSET;
+        private static final long BYTE_ARRAY_FIELD_OFFSET;
+        private static final long BYTE_ARRAY_OFFSET_FIELD_OFFSET;
+        private static final boolean BIG_ENDIAN = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
+
+        static {
+            unsafe = (Unsafe) AccessController.doPrivileged(new PrivilegedAction<Object>()
+            {
+                @Override
+                public Object run()
+                {
+                    try {
+                        final Field f = Unsafe.class.getDeclaredField("theUnsafe");
+                        f.setAccessible(true);
+                        return f.get(null);
+                    }
+                    catch (final NoSuchFieldException e) {
+                        // It doesn't matter what we throw;
+                        // it's swallowed in getBestComparer().
+                        throw new Error(e);
+                    }
+                    catch (final IllegalAccessException e) {
+                        throw new Error(e);
+                    }
+                }
+            });
+
+            // sanity check - this should never fail
+            if (unsafe.arrayIndexScale(byte[].class) != 1) {
+                throw new AssertionError();
+            }
+
+            try {
+                DIRECT_ADDRESS_FIELD_OFFSET = getFieldOffset(Buffer.class, "address");
+                BYTE_ARRAY_FIELD_OFFSET = getFieldOffset(ByteBuffer.class, "hb");
+                BYTE_ARRAY_OFFSET_FIELD_OFFSET = getFieldOffset(ByteBuffer.class, "offset");
+            }
+            catch (NoSuchFieldException | SecurityException e) {
+                throw new Error(e);
+            }
+        }
+
+        private static long getFieldOffset(final Class<?> clazz, final String fieldName)
+                throws NoSuchFieldException, SecurityException
+        {
+            final Field field = clazz.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return unsafe.objectFieldOffset(field);
+        }
+
+        @Override
+        public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
+        {
+            // TODO Auto-generated method stub
+            return 0;
+        }
+
+        @Override
+        public void putZero(ByteBuffer dst, int length)
+        {
+            // TODO Auto-generated method stub
+
+        }
+
+        @Override
+        public int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2)
+        {
+            // TODO Auto-generated method stub
+            return 0;
+        }
+
+        @Override
+        public ByteBufferCrc32 crc32()
+        {
+            return new UnsafeCrc32c();
+        }
+
+        private static class UnsafeCrc32c
+                implements ByteBufferCrc32
+        {
+            private int crc;
+
+            public UnsafeCrc32c()
+            {
+                reset();
+            }
+
+            @Override
+            public long getValue()
+            {
+                return (~crc) & 0xffffffffL;
+            }
+
+            public int getIntValue()
+            {
+                return ~crc;
+            }
+
+            @Override
+            public void reset()
+            {
+                crc = 0xffffffff;
+            }
+
+
+            @Override
+            final public void update(int b)
+            {
+                crc = (crc >>> 8) ^ T[T8_0_start + ((crc ^ b) & 0xff)];
+            }
+
+            @Override
+            public void update(byte[] b, int off, int len)
+            {
+                crc = updateArray(crc, b, off + Unsafe.ARRAY_BYTE_BASE_OFFSET, len);
+            }
+
+            private static int updateArray(int localCrc, Object arr, long address, int len)
+            {
+                if(len > 7){
+                    // first align to 8 bytes (or simply complete if len < 8)
+                    final int init = (int) (address & 7);
+                    switch (init) {
+                        case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 6: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 5: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 4: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 3: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 2: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        case 1: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                        default: // case 0, do nothing
+                    }
+                    len -= init;
+                    
+                    while (len > 7) {
+                        long c = unsafe.getLong(arr, address);
+                        if (BIG_ENDIAN) {
+                            // this could probably be done natively with the appropriate shifting.
+                            // but i'm lazy; my apologies to anyone in big endian land
+                            c = Long.reverseBytes(c);
+                        }
+                        final int highlong = (int) (c >>> 32);
+                        localCrc ^= (int) c;
+                        localCrc = (T[T8_7_start +  (localCrc         & 0xff)] ^ T[T8_6_start + ((localCrc >>>  8) & 0xff)]) ^
+                                   (T[T8_5_start + ((localCrc >>> 16) & 0xff)] ^ T[T8_4_start + ((localCrc >>> 24) & 0xff)]) ^
+                                   (T[T8_3_start +  (highlong         & 0xff)] ^ T[T8_2_start + ((highlong >>>  8) & 0xff)]) ^
+                                   (T[T8_1_start + ((highlong >>> 16) & 0xff)] ^ T[T8_0_start + ((highlong >>> 24) & 0xff)]);
+                    
+                        address += 8;
+                        len -= 8;
+                    }
+                }
+
+                switch (len) {
+                    case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 6: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 5: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 4: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 3: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 2: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    case 1: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
+                    default: // case 0, do nothing
+                }
+                return localCrc;
+            }
+
+            private static int updateDirect(int localCrc, long address, int len)
+            {
+                if(len > 7){
+                    // first align to 8 bytes (or simply complete if len < 8)
+                    final int init = (int) (address & 7);
+                    switch (init) {
+                        case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 6: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 5: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 4: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 3: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 2: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        case 1: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                        default: // case 0, do nothing
+                    }
+                    len -= init;
+                    
+                    while (len > 7) {
+                        long c = unsafe.getLong(address);
+                        if (BIG_ENDIAN) {
+                            // this could probably be done natively with the appropriate shifting.
+                            // but i'm lazy; my apologies to anyone in big endian land
+                            c = Long.reverseBytes(c);
+                        }
+                        final int highlong = (int) (c >>> 32);
+                        localCrc ^= (int) c;
+                        localCrc = (T[T8_7_start +  (localCrc         & 0xff)] ^ T[T8_6_start + ((localCrc >>>  8) & 0xff)]) ^
+                                   (T[T8_5_start + ((localCrc >>> 16) & 0xff)] ^ T[T8_4_start + ((localCrc >>> 24) & 0xff)]) ^
+                                   (T[T8_3_start +  (highlong         & 0xff)] ^ T[T8_2_start + ((highlong >>>  8) & 0xff)]) ^
+                                   (T[T8_1_start + ((highlong >>> 16) & 0xff)] ^ T[T8_0_start + ((highlong >>> 24) & 0xff)]);
+                    
+                        address += 8;
+                        len -= 8;
+                    }
+                }
+
+                switch (len) {
+                    case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 6: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 5: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 4: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 3: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 2: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    case 1: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
+                    default: // case 0, do nothing
+                }
+                return localCrc;
+            }
+
+
+            @Override
+            public void update(ByteBuffer b, int off, int len)
+            {
+                if(b.isDirect())
+                {
+                    crc = updateDirect(crc, off + unsafe.getLong(b, DIRECT_ADDRESS_FIELD_OFFSET), len);
+                    
+                }
+                else{
+                    crc = updateArray(crc, unsafe.getObject(b, BYTE_ARRAY_FIELD_OFFSET),
+                            off + unsafe.getInt(b, BYTE_ARRAY_OFFSET_FIELD_OFFSET) + Unsafe.ARRAY_BYTE_BASE_OFFSET, len);
+                }
+            }
+        }
+
     }
 
     public static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN);
