@@ -23,9 +23,11 @@ import com.google.common.base.Throwables;
 import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 //import org.iq80.leveldb.util.PureJavaCrc32C;
 //import org.iq80.leveldb.util.Snappy;
+
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -284,11 +286,9 @@ public class TableBuilder
 
     public static int crc32c(ByteBuffer data, CompressionType type)
     {
-        // TODO FIXME
-        return 0;
-        // PureJavaCrc32C crc32c = new PureJavaCrc32C();
-        // crc32c.update(data.getRawArray(), data.getRawOffset(), data.length());
-        // crc32c.update(type.persistentId() & 0xFF);
-        // return crc32c.getMaskedValue();
+        ByteBufferCrc32 crc32 = ByteBuffers.crc32();
+        crc32.update(data, data.position(), data.remaining());
+        crc32.update(type.persistentId() & 0xFF);
+        return ByteBuffers.maskChecksum(crc32.getIntValue());
     }
 }

@@ -33,9 +33,10 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.impl.DbImpl;
+import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.FileUtils;
-import org.iq80.leveldb.util.PureJavaCrc32C;
 import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
@@ -621,9 +622,9 @@ public class DbBenchmark
         long bytes = 0;
         int crc = 0;
         while (bytes < 1000 * 1048576) {
-            PureJavaCrc32C checksum = new PureJavaCrc32C();
+            ByteBufferCrc32 checksum = ByteBuffers.crc32();
             checksum.update(data, 0, blockSize);
-            crc = checksum.getMaskedValue();
+            crc = ByteBuffers.maskChecksum(checksum.getIntValue());
             finishedSingleOp();
             bytes += blockSize;
         }

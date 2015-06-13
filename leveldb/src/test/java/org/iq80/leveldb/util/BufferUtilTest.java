@@ -18,15 +18,19 @@
 
 package org.iq80.leveldb.util;
 
+import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers.BufferUtil;
 import org.testng.Assert;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+import com.google.common.base.Function;
 import com.google.common.base.Strings;
 
 public abstract class BufferUtilTest
@@ -198,6 +202,127 @@ public abstract class BufferUtilTest
         }
     }
 
+    @Test(dataProvider = "crcs")
+    public void testCrc(int expectedCrc, byte[] data)
+    {
+        for (ByteBuffer b : heapAndDirect(data)) {
+            Assert.assertEquals(expectedCrc, computeCrc(b));
+        }
+    }
+
+    @DataProvider(name = "crcs")
+    public Object[][] data()
+    {
+        return new Object[][] {
+                new Object[] {0x8a9136aa, arrayOf(32, (byte) 0)},
+                new Object[] {0x62a8ab43, arrayOf(32, (byte) 0xff)},
+                new Object[] {0x46dd794e, arrayOf(32, new Function<Integer, Byte>()
+                {
+                    @Override
+                    public Byte apply(Integer position)
+                    {
+                        return (byte) position.intValue();
+                    }
+                })},
+                new Object[] {0x113fdb5c, arrayOf(32, new Function<Integer, Byte>()
+                {
+                    @Override
+                    public Byte apply(Integer position)
+                    {
+                        return (byte) (31 - position);
+                    }
+                })},
+                new Object[] {0xd9963a56, arrayOf(new int[] {
+                        0x01, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00,
+                        0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x18, 0x28, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})},
+
+                        /*
+                new Object[] {0xe5ede956, "foobar0".getBytes("ASCII")},
+                new Object[] {0x352441c2, "abc".getBytes("ASCII")},
+                new Object[] { 0x480628c2,
+                        Strings.repeat("the quick brown fox jumped over the lazy dog", 50).getBytes("ASCII") },*/
+        };
+    }
+
+    @Test
+    public void testProducesDifferentCrcs()
+            throws UnsupportedEncodingException
+    {
+        ByteBuffer[] a = heapAndDirect("a".getBytes("ASCII"));
+        ByteBuffer[] b = heapAndDirect("foo".getBytes("ASCII"));
+
+        Assert.assertFalse(computeCrc(a[0]) == computeCrc(b[0]));
+        Assert.assertFalse(computeCrc(a[1]) == computeCrc(b[1]));
+    }
+
+    @Test
+    public void testComposes()
+            throws UnsupportedEncodingException
+    {
+        ByteBuffer[] a = heapAndDirect("hello ".getBytes("ASCII"));
+        ByteBuffer[] b = heapAndDirect("world".getBytes("ASCII"));
+        ByteBuffer[] c = heapAndDirect("hello world".getBytes("ASCII"));
+
+        {
+            ByteBufferCrc32 crc = util.crc32();
+            crc.update(a[0], 0, 6);
+            crc.update(b[0], 0, 5);
+
+            Assert.assertEquals(crc.getIntValue(), computeCrc(c[0]));
+        }
+
+        {
+            ByteBufferCrc32 crc = util.crc32();
+            crc.update(a[1], 0, 6);
+            crc.update(b[1], 0, 5);
+
+            Assert.assertEquals(crc.getIntValue(), computeCrc(c[1]));
+        }
+    }
+
+    private int computeCrc(ByteBuffer data)
+    {
+        ByteBufferCrc32 crc = util.crc32();
+        crc.update(data, data.position(), data.remaining());
+        return crc.getIntValue();
+    }
+    
+    private static ByteBuffer[] heapAndDirect(byte[] data)
+    {
+        return new ByteBuffer[] { (ByteBuffer) MemoryManagers.heap().allocate(data.length).put(data).flip(),
+                (ByteBuffer) MemoryManagers.direct().allocate(data.length).put(data).flip() };
+    }
+
+    private static byte[] arrayOf(int size, byte value)
+    {
+        byte[] result = new byte[size];
+        Arrays.fill(result, value);
+        return result;
+    }
+
+    @SuppressWarnings("ConstantConditions")
+    private static byte[] arrayOf(int size, Function<Integer, Byte> generator)
+    {
+        byte[] result = new byte[size];
+        for (int i = 0; i < result.length; ++i) {
+            result[i] = generator.apply(i);
+        }
+
+        return result;
+    }
+
+    private static byte[] arrayOf(int[] bytes)
+    {
+        byte[] result = new byte[bytes.length];
+        for (int i = 0; i < result.length; ++i) {
+            result[i] = (byte) bytes[i];
+        }
+
+        return result;
+    }
+
     private MemoryManager bigEndianWrapper(final MemoryManager memory)
     {
         return new MemoryManager()
@@ -252,29 +377,36 @@ public abstract class BufferUtilTest
     {
         private static final BufferUtil util = new BufferUtil()
         {
-                @Override
-                public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
-                {
-                    return ByteBuffers.calculateSharedBytes(leftKey, rightKey);
-                }
+            @Override
+            public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
+            {
+                return ByteBuffers.calculateSharedBytes(leftKey, rightKey);
+            }
 
-                @Override
-                public void putZero(ByteBuffer dst, int length)
-                {
-                    ByteBuffers.putZero(dst, length);
-                }
+            @Override
+            public void putZero(ByteBuffer dst, int length)
+            {
+                ByteBuffers.putZero(dst, length);
+            }
 
-                @Override
-                public int compare(ByteBuffer buffer1,
-                        int offset1,
-                        int length1,
-                        ByteBuffer buffer2,
-                        int offset2,
-                        int length2)
-                {
-                    return ByteBuffers.compare(ByteBuffers.duplicate(buffer1, offset1, offset1+length1), ByteBuffers.duplicate(buffer2, offset2, offset2+length2));
-                }
-            };
+            @Override
+            public int compare(ByteBuffer buffer1,
+                    int offset1,
+                    int length1,
+                    ByteBuffer buffer2,
+                    int offset2,
+                    int length2)
+            {
+                return ByteBuffers.compare(ByteBuffers.duplicate(buffer1, offset1, offset1 + length1),
+                        ByteBuffers.duplicate(buffer2, offset2, offset2 + length2));
+            }
+
+            @Override
+            public ByteBufferCrc32 crc32()
+            {
+                return ByteBuffers.crc32();
+            }
+        };
 
         @Override
         protected BufferUtil getUtil()
@@ -283,5 +415,4 @@ public abstract class BufferUtilTest
         }
     }
 }
-
 

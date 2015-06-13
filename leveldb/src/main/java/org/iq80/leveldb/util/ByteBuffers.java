@@ -30,6 +30,8 @@ public final class ByteBuffers
         void putZero(ByteBuffer dst, int length);
 
         int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2);
+
+        ByteBufferCrc32 crc32();
     }
 
     private static final BufferUtil UTIL = PureJavaUtil.INSTANCE;
@@ -79,6 +81,12 @@ public final class ByteBuffers
                 }
             }
             return length1 - length2;
+        }
+
+        @Override
+        public ByteBufferCrc32 crc32()
+        {
+            return new PureJavaCrc32C();
         }
     }
 
@@ -259,13 +267,17 @@ public final class ByteBuffers
         return copy(src, src.remaining(), memory);
     }
 
-    public static byte[] toArray(ByteBuffer src)
+    public static byte[] toArray(ByteBuffer src, byte[] dst)
     {
-        byte[] dst = new byte[src.remaining()];
         src.mark();
         src.get(dst);
         src.reset();
         return dst;
+    }
+
+    public static byte[] toArray(ByteBuffer src)
+    {
+        return toArray(src, new byte[src.remaining()]);
     }
 
     public static String toString(ByteBuffer src)
@@ -283,5 +295,34 @@ public final class ByteBuffers
         dst.put(src);
         src.limit(oldlim);
         return dst;
+    }
+
+    public static ByteBufferCrc32 crc32()
+    {
+        return UTIL.crc32();
+    }
+
+    private static final int MASK_DELTA = 0xa282ead8;
+
+    /**
+     * Return a masked representation of crc.
+     * <p/>
+     * Motivation: it is problematic to compute the CRC of a string that
+     * contains embedded CRCs.  Therefore we recommend that CRCs stored
+     * somewhere (e.g., in files) should be masked before being stored.
+     */
+    public static int maskChecksum(int crc)
+    {
+        // Rotate right by 15 bits and add a constant.
+        return ((crc >>> 15) | (crc << 17)) + MASK_DELTA;
+    }
+
+    /**
+     * Return the crc whose masked representation is masked_crc.
+     */
+    public static int unmaskChecksum(int maskedCrc)
+    {
+        int rot = maskedCrc - MASK_DELTA;
+        return ((rot >>> 17) | (rot << 15));
     }
 }

@@ -18,6 +18,8 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPools;
 
@@ -55,17 +57,9 @@ public final class Logs
 
     public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)
     {
-        // TODO FIXME
-        return 0;
-        // return getChunkChecksum(chunkTypeId, slice.getRawArray(), slice.getRawOffset(), slice.length());
+        ByteBufferCrc32 crc32 = ByteBuffers.crc32();
+        crc32.update(chunkTypeId);
+        crc32.update(data, data.position(), data.remaining());
+        return ByteBuffers.maskChecksum(crc32.getIntValue());
     }
-
-    // public static int getChunkChecksum(int chunkTypeId, byte[] buffer, int offset, int length)
-    // {
-    // // Compute the crc of the record type and the payload.
-    // PureJavaCrc32C crc32C = new PureJavaCrc32C();
-    // crc32C.update(chunkTypeId);
-    // crc32C.update(buffer, offset, length);
-    // return crc32C.getMaskedValue();
-    // }
 }

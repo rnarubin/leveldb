@@ -133,6 +133,7 @@ public class MMapLogWriter
             this.offset = new AtomicLong(filePosition);
             this.limit = filePosition + PAGE_SIZE;
             this.mmap = fileChannel.map(MapMode.READ_WRITE, filePosition, PAGE_SIZE);
+            this.mmap.order(ByteOrder.LITTLE_ENDIAN);
         }
 
         public CloseableMMapLogBuffer slice(long offset, int length)
