@@ -20,7 +20,6 @@ package org.iq80.leveldb.util;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,17 +50,27 @@ public abstract class BufferUtilTest
         testCompare("abcd", "", 4);
         testCompare("abcd", "abcdefg", -3);
 
-        testCompare("abcdefgh", "zbcdefgh", 'a' - 'z');
-        testCompare("abcdefgh", "aqcdefgh", 'b' - 'q');
-        testCompare("abcdefgh", "abtdefgh", 'c' - 't');
-        testCompare("abcdefgh", "abcjefgh", 'd' - 'j');
-        testCompare("abcdefgh", "abcdbfgh", 'e' - 'b');
-        testCompare("abcdefgh", "abcdewgh", 'f' - 'w');
-        testCompare("abcdefgh", "abcdef&h", 'g' - '&');
-        testCompare("abcdefgh", "abcdefgg", 'h' - 'g');
+        testCompare("5#c+efgh", "z#c+efgh", '5' - 'z');
+        testCompare("5#c+efgh", "5qc+efgh", '#' - 'q');
+        testCompare("5#c+efgh", "5#t+efgh", 'c' - 't');
+        testCompare("5#c+efgh", "5#cjefgh", '+' - 'j');
+        testCompare("5#c+efgh", "5#c+#fgh", 'e' - '#');
+        testCompare("5#c+efgh", "5#c+ewgh", 'f' - 'w');
+        testCompare("5#c+efgh", "5#c+ef&h", 'g' - '&');
+        testCompare("5#c+efgh", "5#c+efgg", 'h' - 'g');
 
-        testCompare("abcdefghijkl", "abcdefghijml", 'k' - 'm');
+        testCompare("abcdefghi", "abcdefghr", 'i' - 'r');
+        testCompare("abcdefghij", "abcdefghin", 'j' - 'n');
+        testCompare("abcdefghijk", "abcdefghijm", 'k' - 'm');
+        testCompare("abcdefghijkl", "abcdefghijko", 'l' - 'o');
 
+        for (int i = 0; i < 26; i++) {
+            StringBuilder sb = new StringBuilder();
+            for (char c = 'a'; c < 'a' + i; c++) {
+                sb.append(c);
+            }
+            testCompare(sb.toString(), sb.toString(), 0);
+        }
         testCompare("00abcdefghijkl", "00000abc$efghijkl", 2, 6, 5, 9, 'd' - '$');
         testCompare("00abcdefghijkl", "00000abc$efghijkl", 7, 4, 10, 4, 0);
         testCompare(Strings.repeat("0", 15) + Strings.repeat("abcdefghijkl", 567),
@@ -127,83 +136,6 @@ public abstract class BufferUtilTest
         Assert.assertEquals(util.calculateSharedBytes(buf(b, heap), buf(a, direct)), expected);
         Assert.assertEquals(util.calculateSharedBytes(buf(a, direct), buf(b, direct)), expected);
         Assert.assertEquals(util.calculateSharedBytes(buf(b, direct), buf(a, direct)), expected);
-    }
-
-    @Test
-    public void testPutZero()
-    {
-        testPutZero(MemoryManagers.heap());
-        testPutZero(MemoryManagers.direct());
-    }
-
-    private void testPutZero(MemoryManager memory)
-    {
-        {
-            MemoryManager bm = bigEndianWrapper(memory);
-            final ByteBuffer b = bm.allocate(8).putLong(0xdeadbeef12345678L);
-            b.rewind();
-
-            {
-                ByteBuffer dst = ByteBuffers.copy(b, bm);
-                util.putZero(dst, 2);
-                Assert.assertEquals(dst.position(), 2);
-                dst.rewind();
-                Assert.assertEquals(dst.getLong(), 0x0000beef12345678L);
-            }
-            {
-                ByteBuffer dst = ByteBuffers.copy(b, bm);
-                dst.position(5);
-                util.putZero(dst, 1);
-                Assert.assertEquals(dst.position(), 6);
-                dst.rewind();
-                Assert.assertEquals(dst.getLong(), 0xdeadbeef12005678L);
-            }
-            {
-                ByteBuffer dst = ByteBuffers.copy(b, bm);
-                dst.position(3);
-                util.putZero(dst, 5);
-                Assert.assertEquals(dst.position(), 8);
-                dst.rewind();
-                Assert.assertEquals(dst.getLong(), 0xdeadbe0000000000L);
-            }
-            bm.free(b);
-        }
-        {
-            ByteBuffer b = memory.allocate(12345);
-            while (b.hasRemaining()) {
-                b.put((byte) 0xff);
-            }
-            b.rewind();
-            b.position(17);
-            util.putZero(b, 53);
-            b.position(167);
-            util.putZero(b, 391);
-            b.position(1000);
-            util.putZero(b, 11300);
-
-            for (int i = 0; i < 17; i++) {
-                Assert.assertEquals((byte) 0xff, b.get(i));
-            }
-            for (int i = 17; i < 17 + 53; i++) {
-                Assert.assertEquals((byte) 0x00, b.get(i));
-            }
-            for (int i = 17 + 53; i < 167; i++) {
-                Assert.assertEquals((byte) 0xff, b.get(i));
-            }
-            for (int i = 167; i < 167 + 391; i++) {
-                Assert.assertEquals((byte) 0x00, b.get(i));
-            }
-            for (int i = 167 + 391; i < 1000; i++) {
-                Assert.assertEquals((byte) 0xff, b.get(i));
-            }
-            for (int i = 1000; i < 1000 + 11300; i++) {
-                Assert.assertEquals((byte) 0x00, b.get(i));
-            }
-            for (int i = 1000 + 11300; i < b.limit(); i++) {
-                Assert.assertEquals((byte) 0xff, b.get(i));
-            }
-            memory.free(b);
-        }
     }
 
     @Test(dataProvider = "crcs")
@@ -322,7 +254,6 @@ public abstract class BufferUtilTest
         return result;
     }
 
-    @SuppressWarnings("ConstantConditions")
     private static byte[] arrayOf(int size, Function<Integer, Byte> generator)
     {
         byte[] result = new byte[size];
@@ -341,24 +272,6 @@ public abstract class BufferUtilTest
         }
 
         return result;
-    }
-
-    private MemoryManager bigEndianWrapper(final MemoryManager memory)
-    {
-        return new MemoryManager()
-        {
-            @Override
-            public ByteBuffer allocate(int capacity)
-            {
-                return memory.allocate(capacity).order(ByteOrder.BIG_ENDIAN);
-            }
-
-            @Override
-            public void free(ByteBuffer buffer)
-            {
-                memory.free(buffer);
-            }
-        };
     }
 
     private static ByteBuffer buf(String s, MemoryManager memory)
@@ -421,12 +334,6 @@ public abstract class BufferUtilTest
             public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
             {
                 return ByteBuffers.calculateSharedBytes(leftKey, rightKey);
-            }
-
-            @Override
-            public void putZero(ByteBuffer dst, int length)
-            {
-                ByteBuffers.putZero(dst, length);
             }
 
             @Override

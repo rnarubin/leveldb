@@ -19,6 +19,8 @@ import org.iq80.leveldb.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.primitives.UnsignedBytes;
+
 import static org.iq80.leveldb.util.PureJavaCrc32C.T;
 import static org.iq80.leveldb.util.PureJavaCrc32C.T8_0_start;
 import static org.iq80.leveldb.util.PureJavaCrc32C.T8_1_start;
@@ -41,8 +43,6 @@ public final class ByteBuffers
     interface BufferUtil
     {
         int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey);
-
-        void putZero(ByteBuffer dst, int length);
 
         int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2);
 
@@ -78,24 +78,13 @@ public final class ByteBuffers
         {
             int sharedKeyBytes = 0;
             final int lpos = leftKey.position(), rpos = rightKey.position();
-
-            if (leftKey != null && rightKey != null) {
-                int minSharedKeyBytes = Math.min(leftKey.remaining(), rightKey.remaining());
-                while (sharedKeyBytes < minSharedKeyBytes
-                        && leftKey.get(lpos + sharedKeyBytes) == rightKey.get(rpos + sharedKeyBytes)) {
-                    sharedKeyBytes++;
-                }
+            int maxSharedKeyBytes = Math.min(leftKey.remaining(), rightKey.remaining());
+            while (sharedKeyBytes < maxSharedKeyBytes
+                    && leftKey.get(lpos + sharedKeyBytes) == rightKey.get(rpos + sharedKeyBytes)) {
+                sharedKeyBytes++;
             }
 
             return sharedKeyBytes;
-        }
-
-        @Override
-        public void putZero(ByteBuffer dst, int length)
-        {
-            for (; length > 0; length--) {
-                dst.put((byte) 0);
-            }
         }
 
         @Override
@@ -122,6 +111,10 @@ public final class ByteBuffers
         }
     }
 
+    /*
+     * parts of this code are borrowed and adapted from Guava's {@link UnsignedBytes} and Apache's <a href=
+     * "https://svn.apache.org/repos/asf/cassandra/trunk/src/java/org/apache/cassandra/utils/FastByteComparisons.java" >FastByteComparisons</a>
+     */
     @SuppressWarnings("unused")
     private enum UnsafeUtil
             implements BufferUtil
@@ -146,12 +139,9 @@ public final class ByteBuffers
                         f.setAccessible(true);
                         return f.get(null);
                     }
-                    catch (final NoSuchFieldException e) {
+                    catch (final NoSuchFieldException | IllegalAccessException e) {
                         // It doesn't matter what we throw;
-                        // it's swallowed in getBestComparer().
-                        throw new Error(e);
-                    }
-                    catch (final IllegalAccessException e) {
+                        // it's swallowed in get().
                         throw new Error(e);
                     }
                 }
@@ -163,6 +153,7 @@ public final class ByteBuffers
             }
 
             try {
+                //access to private fields (and hb for read only buffers)
                 DIRECT_ADDRESS_FIELD_OFFSET = getFieldOffset(Buffer.class, "address");
                 BYTE_ARRAY_FIELD_OFFSET = getFieldOffset(ByteBuffer.class, "hb");
                 BYTE_ARRAY_OFFSET_FIELD_OFFSET = getFieldOffset(ByteBuffer.class, "offset");
@@ -180,25 +171,256 @@ public final class ByteBuffers
             return unsafe.objectFieldOffset(field);
         }
 
-        @Override
-        public int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
+        private static Object byteArray(ByteBuffer b)
         {
-            // TODO Auto-generated method stub
-            return 0;
+            return unsafe.getObject(b, BYTE_ARRAY_FIELD_OFFSET);
+        }
+
+        private static long byteAddress(ByteBuffer b)
+        {
+            return unsafe.getInt(b, BYTE_ARRAY_OFFSET_FIELD_OFFSET) + Unsafe.ARRAY_BYTE_BASE_OFFSET;
+        }
+
+        private static long directAddress(ByteBuffer b)
+        {
+            return unsafe.getLong(b, DIRECT_ADDRESS_FIELD_OFFSET);
         }
 
         @Override
-        public void putZero(ByteBuffer dst, int length)
+        public int calculateSharedBytes(ByteBuffer left, ByteBuffer right)
         {
-            // TODO Auto-generated method stub
+            int maxSharedKeyBytes = Math.min(left.remaining(), right.remaining());
+            if (left.isDirect()) {
+                if (right.isDirect()) {
+                    return sharedDirectDirect(left.position() + directAddress(left),
+                                              right.position() + directAddress(right),
+                                              maxSharedKeyBytes);
+                }
+                else {
+                    return sharedArrayDirect(byteArray(right), right.position() + byteAddress(right),
+                                             left.position() + directAddress(left),
+                                             maxSharedKeyBytes);
+                }
+            }
+            else if(right.isDirect()){
+                return sharedArrayDirect(byteArray(left), left.position() + byteAddress(left),
+                                         right.position() + directAddress(right),
+                                         maxSharedKeyBytes);
+            }
+            return sharedArrayArray(byteArray(left), left.position() + byteAddress(left),
+                                    byteArray(right), right.position() + byteAddress(right),
+                                    maxSharedKeyBytes);
+        }
 
+        private static int sharedArrayArray(Object arr1, long address1, Object arr2, long address2, int len)
+        {
+            int shared = 0;
+            while (len > 7) {
+                final long diff = unsafe.getLong(arr1, address1 + shared) ^ unsafe.getLong(arr2, address2 + shared);
+                if (diff != 0) {
+                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 8;
+                len -= 8;
+            }
+
+            while (len > 3) {
+                final int diff = unsafe.getInt(arr1, address1 + shared) ^ unsafe.getInt(arr2, address2 + shared);
+                if (diff != 0) {
+                    // TODO somethines wrong here, check bit for bit
+                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 4;
+                len -= 4;
+            }
+            
+            switch(len){
+                case 3: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(arr2, address2+shared)) return shared; else shared++;
+                case 2: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(arr2, address2+shared)) return shared; else shared++;
+                case 1: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(arr2, address2+shared)) return shared; else shared++;
+                default:
+            }
+            return shared;
+        }
+
+        private static int sharedArrayDirect(Object arr1, long address1, long address2, int len)
+        {
+            int shared = 0;
+            while (len > 7) {
+                final long diff = unsafe.getLong(arr1, address1 + shared) ^ unsafe.getLong(address2 + shared);
+                if (diff != 0) {
+                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 8;
+                len -= 8;
+            }
+
+            while (len > 3) {
+                final int diff = unsafe.getInt(arr1, address1 + shared) ^ unsafe.getInt(address2 + shared);
+                if (diff != 0) {
+                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 4;
+                len -= 4;
+            }
+            
+            switch(len){
+                case 3: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                case 2: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                case 1: if(unsafe.getByte(arr1, address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                default:
+            }
+            return shared;
+        }
+
+        private static int sharedDirectDirect(long address1, long address2, int len)
+        {
+            int shared = 0;
+            while (len > 7) {
+                final long diff = unsafe.getLong(address1 + shared) ^ unsafe.getLong(address2 + shared);
+                if (diff != 0) {
+                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 8;
+                len -= 8;
+            }
+
+            while (len > 3) {
+                final int diff = unsafe.getInt(address1 + shared) ^ unsafe.getInt(address2 + shared);
+                if (diff != 0) {
+                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                }
+                shared += 4;
+                len -= 4;
+            }
+            
+            switch(len){
+                case 3: if(unsafe.getByte(address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                case 2: if(unsafe.getByte(address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                case 1: if(unsafe.getByte(address1+shared) != unsafe.getByte(address2+shared)) return shared; else shared++;
+                default:
+            }
+            return shared;
         }
 
         @Override
         public int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2, int length2)
         {
-            // TODO Auto-generated method stub
-            return 0;
+            if (buffer1.isDirect()) {
+                if (buffer2.isDirect()) {
+                    return compareDirectDirect(offset1 + directAddress(buffer1), length1,
+                                               offset2 + directAddress(buffer2), length2);
+                }
+                else {
+                    return -compareArrayDirect(byteArray(buffer2), offset2 + byteAddress(buffer2), length2,
+                                                                   offset1 + directAddress(buffer1), length1);
+                }
+            }
+            else if(buffer2.isDirect()){
+                return compareArrayDirect(byteArray(buffer1), offset1 + byteAddress(buffer1), length1,
+                                                              offset2 + directAddress(buffer2), length2);
+            }
+            return compareArrayArray(byteArray(buffer1), offset1 + byteAddress(buffer1), length1,
+                                     byteArray(buffer2), offset2 + byteAddress(buffer2), length2);
+        }
+
+        private static int compareArrayArray(Object arr1, long address1, int len1, Object arr2, long address2, int len2)
+        {
+            final int len = Math.min(len1, len2);
+            int i;
+            for (i = 0; i < (len & ~7); i += 8) {
+                final long l = unsafe.getLong(arr1, address1 + i);
+                final long r = unsafe.getLong(arr2, address2 + i);
+                final long diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            for (; i < (len & ~3); i += 4) {
+                final int l = unsafe.getInt(arr1, address1 + i);
+                final int r = unsafe.getInt(arr2, address2 + i);
+                final int diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            
+            int result;
+            switch(len-i){
+                case 3: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(arr2, address2+i++))) != 0) return result;
+                case 2: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(arr2, address2+i++))) != 0) return result;
+                case 1: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(arr2, address2+i++))) != 0) return result;
+                default:
+            }
+            return len1 - len2;
+        }
+
+        private static int compareArrayDirect(Object arr1, long address1, int len1, long address2, int len2)
+        {
+            final int len = Math.min(len1, len2);
+            int i;
+            for (i = 0; i < (len & ~7); i += 8) {
+                final long l = unsafe.getLong(arr1, address1 + i);
+                final long r = unsafe.getLong(address2 + i);
+                final long diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            for (; i < (len & ~3); i += 4) {
+                final int l = unsafe.getInt(arr1, address1 + i);
+                final int r = unsafe.getInt(address2 + i);
+                final int diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            
+            int result;
+            switch(len-i){
+                case 3: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                case 2: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                case 1: if((result = UnsignedBytes.compare(unsafe.getByte(arr1, address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                default:
+            }
+            return len1 - len2;
+        }
+
+        private static int compareDirectDirect(long address1, int len1, long address2, int len2)
+        {
+            final int len = Math.min(len1, len2);
+            int i;
+            for (i = 0; i < (len & ~7); i += 8) {
+                final long l = unsafe.getLong(address1 + i);
+                final long r = unsafe.getLong(address2 + i);
+                final long diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            for (; i < (len & ~3); i += 4) {
+                final int l = unsafe.getInt(address1 + i);
+                final int r = unsafe.getInt(address2 + i);
+                final int diff = l ^ r;
+                if (diff != 0) {
+                    final int shift = (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) & ~7;
+                    return (int) (((l >>> shift) & 0xff) - ((r >>> shift) & 0xff));
+                }
+            }
+            
+            int result;
+            switch(len-i){
+                case 3: if((result = UnsignedBytes.compare(unsafe.getByte(address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                case 2: if((result = UnsignedBytes.compare(unsafe.getByte(address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                case 1: if((result = UnsignedBytes.compare(unsafe.getByte(address1+i), unsafe.getByte(address2+i++))) != 0) return result;
+                default:
+            }
+            return len1 - len2;
         }
 
         @Override
@@ -268,7 +490,8 @@ public final class ByteBuffers
                         long c = unsafe.getLong(arr, address);
                         if (BIG_ENDIAN) {
                             // this could probably be done natively with the appropriate shifting.
-                            // but i'm lazy; my apologies to anyone in big endian land
+                            // but i'm lazy and this is intrinsified by hotspot so i'll call it close enough.
+                            // my apologies to everyone in big endian land
                             c = Long.reverseBytes(c);
                         }
                         final int highlong = (int) (c >>> 32);
@@ -351,12 +574,10 @@ public final class ByteBuffers
             {
                 if(b.isDirect())
                 {
-                    crc = updateDirect(crc, off + unsafe.getLong(b, DIRECT_ADDRESS_FIELD_OFFSET), len);
-                    
+                    crc = updateDirect(crc, off + directAddress(b), len);
                 }
                 else{
-                    crc = updateArray(crc, unsafe.getObject(b, BYTE_ARRAY_FIELD_OFFSET),
-                            off + unsafe.getInt(b, BYTE_ARRAY_OFFSET_FIELD_OFFSET) + Unsafe.ARRAY_BYTE_BASE_OFFSET, len);
+                    crc = updateArray(crc, byteArray(b), off + byteAddress(b), len);
                 }
             }
         }
@@ -514,13 +735,10 @@ public final class ByteBuffers
 
     public static int calculateSharedBytes(ByteBuffer leftKey, ByteBuffer rightKey)
     {
+        if (leftKey == null || rightKey == null) {
+            return 0;
+        }
         return UTIL.calculateSharedBytes(leftKey, rightKey);
-    }
-
-    public static ByteBuffer putZero(ByteBuffer dst, int length)
-    {
-        UTIL.putZero(dst, length);
-        return dst;
     }
 
     public static int compare(ByteBuffer a, ByteBuffer b)
