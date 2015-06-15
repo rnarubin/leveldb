@@ -168,10 +168,15 @@ public abstract class LogTest
         //larger than page size to test mmap edges
         Random rand = new Random(0);
         List<ByteBuffer> records = new ArrayList<>();
-        for (int i = 0; i < 1000; i++) {
-            byte[] b = new byte[rand.nextInt(20) + 5];
+        ByteBuffer buf = ByteBuffer.allocate(2 * 1024 * 1024);
+        while (buf.hasRemaining()) {
+            byte[] b = new byte[1024];
             rand.nextBytes(b);
-            records.add(toByteBuffer(new String(b, StandardCharsets.UTF_8), rand.nextInt(10000) + 10000));
+            buf.put(b);
+        }
+        buf.flip();
+        for (int i = 0; i < 1000; i++) {
+            records.add(ByteBuffers.duplicateByLength(buf, 0, rand.nextInt(1_000_000) + 1_000_000));
         }
 
         testConcurrentLog(records, true, 8);
