@@ -49,7 +49,7 @@ public final class ByteBuffers
         ByteBufferCrc32 crc32();
     }
 
-    private static final BufferUtil UTIL = PureJavaUtil.INSTANCE;// getBestUtil();
+    private static final BufferUtil UTIL = getBestUtil();
 
     /**
      * Returns the Unsafe-using util, or falls back to the pure-Java implementation if unable to do so.
@@ -218,7 +218,7 @@ public final class ByteBuffers
             while (len > 7) {
                 final long diff = unsafe.getLong(arr1, address1 + shared) ^ unsafe.getLong(arr2, address2 + shared);
                 if (diff != 0) {
-                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 8;
                 len -= 8;
@@ -227,8 +227,7 @@ public final class ByteBuffers
             while (len > 3) {
                 final int diff = unsafe.getInt(arr1, address1 + shared) ^ unsafe.getInt(arr2, address2 + shared);
                 if (diff != 0) {
-                    // TODO somethines wrong here, check bit for bit
-                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 4;
                 len -= 4;
@@ -249,7 +248,7 @@ public final class ByteBuffers
             while (len > 7) {
                 final long diff = unsafe.getLong(arr1, address1 + shared) ^ unsafe.getLong(address2 + shared);
                 if (diff != 0) {
-                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 8;
                 len -= 8;
@@ -258,7 +257,7 @@ public final class ByteBuffers
             while (len > 3) {
                 final int diff = unsafe.getInt(arr1, address1 + shared) ^ unsafe.getInt(address2 + shared);
                 if (diff != 0) {
-                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 4;
                 len -= 4;
@@ -279,7 +278,7 @@ public final class ByteBuffers
             while (len > 7) {
                 final long diff = unsafe.getLong(address1 + shared) ^ unsafe.getLong(address2 + shared);
                 if (diff != 0) {
-                    return shared + (BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Long.numberOfLeadingZeros(diff) : Long.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 8;
                 len -= 8;
@@ -288,7 +287,7 @@ public final class ByteBuffers
             while (len > 3) {
                 final int diff = unsafe.getInt(address1 + shared) ^ unsafe.getInt(address2 + shared);
                 if (diff != 0) {
-                    return shared + (BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3;
+                    return shared + ((BIG_ENDIAN ? Integer.numberOfLeadingZeros(diff) : Integer.numberOfTrailingZeros(diff)) >>> 3);
                 }
                 shared += 4;
                 len -= 4;
@@ -472,7 +471,7 @@ public final class ByteBuffers
             private static int updateArray(int localCrc, Object arr, long address, int len)
             {
                 if(len > 7){
-                    // first align to 8 bytes (or simply complete if len < 8)
+                    // first align to 8 bytes
                     final int init = (int) (address & 7);
                     switch (init) {
                         case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(arr, address++)) & 0xff)];
@@ -522,7 +521,7 @@ public final class ByteBuffers
             private static int updateDirect(int localCrc, long address, int len)
             {
                 if(len > 7){
-                    // first align to 8 bytes (or simply complete if len < 8)
+                    // first align to 8 bytes
                     final int init = (int) (address & 7);
                     switch (init) {
                         case 7: localCrc = (localCrc >>> 8) ^ T[T8_0_start + ((localCrc ^ unsafe.getByte(address++)) & 0xff)];
