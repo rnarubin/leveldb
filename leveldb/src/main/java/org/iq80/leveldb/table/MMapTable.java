@@ -18,8 +18,11 @@
 package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
+
 import com.google.common.base.Preconditions;
+
 import org.iq80.leveldb.util.Closeables;
 
 import java.io.Closeable;
@@ -97,20 +100,19 @@ public class MMapTable
                 (int) blockHandle.getOffset() + blockHandle.getDataSize(),
                 BlockTrailer.ENCODED_LENGTH));
 
-// todo re-enable crc check when ported to support direct buffers
-//        // only verify check sums if explicitly asked by the user
-//        if (verifyChecksums) {
-//            // checksum data and the compression type in the trailer
-//            PureJavaCrc32C checksum = new PureJavaCrc32C();
-//            checksum.update(data.getRawArray(), data.getRawOffset(), blockHandle.getDataSize() + 1);
-//            int actualCrc32c = checksum.getMaskedValue();
-//
-//            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
-//        }
+        // only verify check sums if explicitly asked by the user
+        if (verifyChecksums) {
+            // checksum data and the compression type in the trailer
+            ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            checksum.update(data, (int) blockHandle.getOffset(), blockHandle.getDataSize() + 1);
+            int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
+
+            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
+        }
 
         // decompress data
         ByteBuffer uncompressedData;
-        ByteBuffer uncompressedBuffer = read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
+        ByteBuffer compressedData = read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
         // if (blockTrailer.getCompressionType() == SNAPPY) {
         // synchronized (MMapTable.class) {
         // int uncompressedLength = uncompressedLength(uncompressedBuffer);
@@ -124,7 +126,7 @@ public class MMapTable
         // }
         // }
         // else {
-        uncompressedData = uncompressedBuffer;
+        uncompressedData = compressedData;
         // }
 
         return new Block(uncompressedData, comparator, memory);

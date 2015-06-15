@@ -18,7 +18,10 @@
 package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
+
+import com.google.common.base.Preconditions;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -50,19 +53,19 @@ public class FileChannelTable
     {
         // read block trailer
         ByteBuffer readBuffer = read(blockHandle.getOffset(), blockHandle.getDataSize() + BlockTrailer.ENCODED_LENGTH);
-        ByteBuffer uncompressedBuffer = ByteBuffers.duplicateAndAdvance(readBuffer, blockHandle.getDataSize());
+        final int dataStart = readBuffer.position();
+        ByteBuffer compressedData = ByteBuffers.duplicateAndAdvance(readBuffer, blockHandle.getDataSize());
         BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(readBuffer);
 
-// todo re-enable crc check when ported to support direct buffers
-//        // only verify check sums if explicitly asked by the user
-//        if (verifyChecksums) {
-//            // checksum data and the compression type in the trailer
-//            PureJavaCrc32C checksum = new PureJavaCrc32C();
-//            checksum.update(data.getRawArray(), data.getRawOffset(), blockHandle.getDataSize() + 1);
-//            int actualCrc32c = checksum.getMaskedValue();
-//
-//            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
-//        }
+        // only verify check sums if explicitly asked by the user
+        if (verifyChecksums) {
+            // checksum data and the compression type in the trailer
+            ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            checksum.update(readBuffer, dataStart, blockHandle.getDataSize() + 1);
+            int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
+
+            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
+        }
 
         // decompress data
 
@@ -80,7 +83,7 @@ public class FileChannelTable
         // }
         // }
         // else {
-        uncompressedData = uncompressedBuffer;
+        uncompressedData = compressedData;
         // }
 
         return new Block(uncompressedData, comparator, memory);
