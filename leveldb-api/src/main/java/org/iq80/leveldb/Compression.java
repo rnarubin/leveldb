@@ -23,9 +23,8 @@ import java.nio.ByteBuffer;
 public interface Compression
 {
     /**
-     * Compress the content of the {@code src} buffer, writing the compressed output to the {@code dst} buffer.
-     * After compression, the {@code dst} buffer's limit should be at the end of the compressed data set, and its
-     * position should retain its original value
+     * Compress the content of the {@code src} buffer, writing the compressed output to the {@code dst} buffer
+     * starting at {@code dst.position()}
      * 
      * @param src
      *            Buffer containing uncompressed data
@@ -36,9 +35,8 @@ public interface Compression
     int compress(ByteBuffer src, ByteBuffer dst);
 
     /**
-     * Uncompress the content of the {@code src} buffer, writing the uncompressed output to the {@code dst} buffer.
-     * After decompression, the {@code dst} buffer's limit should be at the end of the uncompressed data set, and its
-     * position should retain its original value
+     * Uncompress the content of the {@code src} buffer, writing the uncompressed output to the {@code dst} buffer
+     * starting at {@code dst.position()}
      * 
      * @param src
      *            Buffer containing compressed data

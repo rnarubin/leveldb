@@ -23,6 +23,7 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.util.Snappy;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -129,7 +130,8 @@ public abstract class TableTest
         Options options = Options.make()
                 .blockSize(blockSize)
                 .blockRestartInterval(blockRestartInterval)
-                .memoryManager(MemoryManagers.heap());
+                .memoryManager(MemoryManagers.heap())
+                .compression(Snappy.instance());
         TableBuilder builder = new TableBuilder(options, fileChannel, byteCompare);
 
         for (BlockEntry entry : entries) {
@@ -222,7 +224,8 @@ public abstract class TableTest
         {
             return new FileChannelTable(name, fileChannel, comparator, Options.make()
                     .verifyChecksums(verifyChecksums)
-                    .memoryManager(MemoryManagers.heap()));
+                    .memoryManager(MemoryManagers.heap())
+                    .compression(Snappy.instance()));
         }
     }
 
@@ -238,7 +241,8 @@ public abstract class TableTest
         {
             return new MMapTable(name, fileChannel, comparator, Options.make()
                     .verifyChecksums(verifyChecksums)
-                    .memoryManager(MemoryManagers.heap()));
+                    .memoryManager(MemoryManagers.heap())
+                    .compression(Snappy.instance()));
         }
     }
 }

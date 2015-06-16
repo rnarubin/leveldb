@@ -25,10 +25,6 @@ import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
-//import org.iq80.leveldb.util.PureJavaCrc32C;
-//import org.iq80.leveldb.util.Snappy;
-
-
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,14 +74,6 @@ public class TableBuilder
     private long position;
 
     private final MemoryManager memory;
-    private static final ThreadLocal<ByteBuffer> compressedOutput = new ThreadLocal<ByteBuffer>()
-    {
-        @Override
-        public ByteBuffer initialValue()
-        {
-            return ByteBuffer.allocateDirect(256 * 1024);
-        }
-    };
 
     public TableBuilder(Options options, FileChannel fileChannel, UserComparator userComparator)
     {
@@ -192,21 +180,18 @@ public class TableBuilder
         byte compressionId = 0;
         // attempt to compress the block
         if (compression != null) {
-            ByteBuffer compressedContents = compressedOutput.get();
             // include space for packing the block trailer
-            final int space = compression.maxCompressedLength(raw) + BlockTrailer.ENCODED_LENGTH;
-            if (compressedContents.capacity() < space) {
-                ByteBuffers.freeDirect(compressedContents);
-                compressedContents = ByteBuffer.allocateDirect(space);
-                compressedOutput.set(compressedContents);
-            }
-            compressedContents.clear();
+            ByteBuffer compressedContents = memory.allocate(compression.maxCompressedLength(raw)
+                    + BlockTrailer.ENCODED_LENGTH);
 
             try {
-                int compressedSize = compression.compress(ByteBuffers.duplicate(raw), compressedContents);
+                // can't trust user code, duplicate buffers
+                int compressedSize = compression.compress(ByteBuffers.duplicate(raw),
+                        ByteBuffers.duplicate(compressedContents));
 
                 // Don't use the compressed data if compressed less than 12.5%,
                 if (compressedSize < raw.remaining() - (raw.remaining() / 8)) {
+                    compressedContents.limit(compressedContents.position() + compressedSize);
                     blockContents = compressedContents;
                     compressionId = compression.persistentId();
                 }
