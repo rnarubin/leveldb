@@ -21,7 +21,6 @@ import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Maps.immutableEntry;
 import static java.util.Arrays.asList;
-import static org.iq80.leveldb.CompressionType.NONE;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.table.BlockHelper.afterString;
 import static org.iq80.leveldb.table.BlockHelper.assertReverseSequence;
@@ -495,7 +494,7 @@ public class DbImplTest
     public void testSparseMerge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compression(null), databaseDir);
 
         fillLevels(db, "A", "Z");
 
@@ -536,7 +535,7 @@ public class DbImplTest
     public void testApproximateSizes()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000).compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000).compression(null), databaseDir);
 
         assertBetween(db.size("", "xyz"), 0, 0);
         db.reopen();
@@ -578,7 +577,7 @@ public class DbImplTest
     public void testApproximateSizesMixOfSmallAndLarge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compression(null), databaseDir);
         Random random = new Random(301);
         String big1 = randomString(random, 100000);
         db.put(key(0), randomString(random, 10000));

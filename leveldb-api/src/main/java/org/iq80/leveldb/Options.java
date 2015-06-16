@@ -17,6 +17,8 @@
  */
 package org.iq80.leveldb;
 
+import java.util.Objects;
+
 public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
@@ -69,15 +71,19 @@ public class Options
     private int maxOpenFiles = 1000;
     private int blockRestartInterval = 16;
     private int blockSize = 4 * 1024;
-    private CompressionType compressionType = CompressionType.NONE;// CompressionType.SNAPPY;
     private boolean verifyChecksums = true;
     private boolean paranoidChecks = false;
-    private DBComparator comparator;
+    private DBComparator comparator = null;
     private Logger logger = null;
     private long cacheSize = 0;
     private boolean throttleLevel0 = true;
     private IOImpl io = USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE;
     private MemoryManager mem = null;
+
+    // it's hard to keep the api/impl distinction clean with non-null defaults.
+    // this is a compromise i've made for legacy support
+    @SuppressWarnings("deprecation")
+    private Compression compression = CompressionType.SNAPPY;
 
     static void checkArgNotNull(Object value, String name)
     {
@@ -151,17 +157,43 @@ public class Options
         this.blockSize = blockSize;
         return this;
     }
-
-    public CompressionType compressionType()
+    
+    public Compression compression(){
+        return compression;
+    }
+    
+    /**
+     * @param compression
+     *            may be null to indicate no compression
+     */
+    public Options compression(Compression compression)
     {
-        return compressionType;
+        if (compression != null && compression.persistentId() == 0) {
+            throw new IllegalArgumentException("User specified compression may not use persistent id of 0");
+        }
+        this.compression = compression;
+        return this;
     }
 
+    /**
+     * @deprecated use {@link Options#compression}
+     */
+    public CompressionType compressionType()
+    {
+        if (Objects.equals(compression, CompressionType.NONE))
+            return CompressionType.NONE;
+        if (Objects.equals(compression, CompressionType.SNAPPY))
+            return CompressionType.SNAPPY;
+        throw new IllegalStateException("requested legacy compression type when none was specified");
+    }
+
+    /**
+     * @deprecated use {@link Options#compression(Compression)}
+     */
     public Options compressionType(CompressionType compressionType)
     {
         checkArgNotNull(compressionType, "compressionType");
-        this.compressionType = compressionType;
-        return this;
+        return compression(compressionType);
     }
 
     public boolean verifyChecksums()

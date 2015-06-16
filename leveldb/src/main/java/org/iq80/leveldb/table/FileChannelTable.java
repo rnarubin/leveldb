@@ -34,7 +34,7 @@ public class FileChannelTable
     public FileChannelTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
             throws IOException
     {
-        super(name, fileChannel, comparator, options.verifyChecksums(), options.memoryManager());
+        super(name, fileChannel, comparator, options);
     }
 
     @Override
@@ -46,7 +46,6 @@ public class FileChannelTable
         return Footer.readFooter(footerData);
     }
 
-    @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod", "NonPrivateFieldAccessedInSynchronizedContext"})
     @Override
     protected Block readBlock(BlockHandle blockHandle)
             throws IOException
@@ -67,26 +66,7 @@ public class FileChannelTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        // decompress data
-
-        ByteBuffer uncompressedData;
-        // if (blockTrailer.getCompressionType() == SNAPPY) {
-        // synchronized (FileChannelTable.class) {
-        // int uncompressedLength = uncompressedLength(uncompressedBuffer);
-        // if (uncompressedScratch.capacity() < uncompressedLength) {
-        // uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
-        // }
-        // uncompressedScratch.clear();
-        //
-        // Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
-        // uncompressedData = Slices.copiedBuffer(uncompressedScratch);
-        // }
-        // }
-        // else {
-        uncompressedData = compressedData;
-        // }
-
-        return new Block(uncompressedData, comparator, memory);
+        return new Block(uncompressIfNecessary(compressedData, blockTrailer.getCompressionId()), comparator, memory);
     }
 
     private ByteBuffer read(long offset, int length)

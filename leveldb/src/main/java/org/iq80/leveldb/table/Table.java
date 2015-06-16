@@ -20,12 +20,15 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.Snappy;
 import org.iq80.leveldb.util.TableIterator;
-import org.iq80.leveldb.util.VariableLengthQuantity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,13 +51,13 @@ public abstract class Table
     protected final Block indexBlock;
     protected final BlockHandle metaindexBlockHandle;
     protected final MemoryManager memory;
+    private final Compression compression;
     private final AtomicInteger refCount;
 
     public Table(String name,
             FileChannel fileChannel,
             Comparator<ByteBuffer> comparator,
-            boolean verifyChecksums,
-            MemoryManager memory)
+            Options options)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");
@@ -64,11 +67,12 @@ public abstract class Table
         Preconditions.checkNotNull(comparator, "comparator is null");
 
         this.refCount = new AtomicInteger(1);
-        this.memory = memory;
+        this.memory = options.memoryManager();
+        this.compression = options.compression();
 
         this.name = name;
         this.fileChannel = fileChannel;
-        this.verifyChecksums = verifyChecksums;
+        this.verifyChecksums = options.verifyChecksums();
         this.comparator = comparator;
 
         Footer footer = init();
@@ -98,17 +102,34 @@ public abstract class Table
         return dataBlock;
     }
 
-    // TODO FIXME
-    protected static ByteBuffer uncompressedScratch = ByteBuffer.allocateDirect(4 * 1024 * 1024);
+    protected ByteBuffer uncompressIfNecessary(ByteBuffer compressedData, byte compressionId)
+    {
+        if (compressionId == 0) {
+            // not compressed
+            return compressedData;
+        }
+        if (compression != null && compressionId == compression.persistentId()) {
+            // id matches user compression
+            return uncompress(compression, compressedData, memory);
+        }
+        if (compressionId == 1) {
+            // id matches Snappy, but not user comparator, implying legacy data
+            return uncompress(Snappy.instance(), compressedData, memory);
+        }
+        else {
+            throw new DBException("Unknown compression identifier: " + compressionId);
+        }
+    }
+
+    private static ByteBuffer uncompress(Compression compression, ByteBuffer compressedData, MemoryManager memory)
+    {
+        ByteBuffer dst = memory.allocate(compression.maxUncompressedLength(compressedData));
+        compression.uncompress(compressedData, dst);
+        return dst;
+    }
 
     protected abstract Block readBlock(BlockHandle blockHandle)
             throws IOException;
-
-    protected int uncompressedLength(ByteBuffer data)
-    {
-        int length = VariableLengthQuantity.readVariableLengthInt(data.duplicate());
-        return length;
-    }
 
     /**
      * Given a key, return an approximate byte offset in the file where
@@ -145,7 +166,7 @@ public abstract class Table
         return sb.toString();
     }
 
-    public Table retain()
+    public final Table retain()
     {
         int count;
         do {
@@ -160,7 +181,7 @@ public abstract class Table
         return this;
     }
 
-    public void release()
+    public final void release()
     {
         if (refCount.decrementAndGet() == 0) {
             try {

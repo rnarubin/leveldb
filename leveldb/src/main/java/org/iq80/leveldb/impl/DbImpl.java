@@ -22,7 +22,6 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
-import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBException;
@@ -124,14 +123,7 @@ public class DbImpl
     {
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
-        this.options = Options.copy(userOptions);
-
-        this.options.memoryManager(MemoryManagers.sanitize(this.options.memoryManager()));
-
-        if (this.options.compressionType() == CompressionType.SNAPPY && !Snappy.available()) {
-            // Disable snappy if it's not available.
-            this.options.compressionType(CompressionType.NONE);
-        }
+        this.options = sanitizeOptions(userOptions);
 
         this.databaseDir = databaseDir;
 
@@ -245,6 +237,25 @@ public class DbImpl
         finally {
             mutex.unlock();
         }
+    }
+
+    // deprecated wrt user-facing api
+    @SuppressWarnings("deprecation")
+    private static Options sanitizeOptions(Options userOptions)
+    {
+        Options ret = Options.copy(userOptions);
+        ret.memoryManager(MemoryManagers.sanitize(ret.memoryManager()));
+
+        if (ret.compression() != null) {
+            if (ret.compression().equals(org.iq80.leveldb.CompressionType.SNAPPY)) {
+                // Disable snappy if it's not available.
+                ret.compression(Snappy.available() ? Snappy.instance() : null);
+            }
+
+            // should be sanitized by options insertion as well
+            Preconditions.checkArgument(ret.compression().persistentId() != 0, "User compression cannot use id 0");
+        }
+        return ret;
     }
 
     @Override

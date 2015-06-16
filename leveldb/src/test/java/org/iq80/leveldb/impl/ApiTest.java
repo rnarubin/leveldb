@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBFactory;
@@ -87,7 +86,7 @@ public class ApiTest
     public void testCompaction()
             throws IOException, DBException
     {
-        Options options = Options.make().createIfMissing(true).compressionType(CompressionType.NONE);
+        Options options = Options.make().createIfMissing(true).compression(null);
 
         File path = getTestDirectory("testCompaction");
         DB db = factory.open(path, options);

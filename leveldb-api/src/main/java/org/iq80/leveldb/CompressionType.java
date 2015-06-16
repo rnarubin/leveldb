@@ -17,34 +17,47 @@
  */
 package org.iq80.leveldb;
 
+import java.nio.ByteBuffer;
+
+/**
+ * @deprecated use e.g. {@link Snappy#instance} or {@code null} in conjunction with {@link Options#compression(Compression)}
+ */
 public enum CompressionType
+        implements Compression
 {
-    NONE((byte) 0x00), SNAPPY((byte) 0x01);
+    NONE, SNAPPY;
 
-    private static final CompressionType[] indexedTypes = new CompressionType[2];
-    static {
-        for (CompressionType type : CompressionType.values()) {
-            indexedTypes[type.persistentId] = type;
-        }
-    }
+    /*
+     * this class remains mostly as a stub to bridge the api/impl packages for Options' non-null default compression
+     */
 
-    public static CompressionType getCompressionTypeByPersistentId(int persistentId)
-    {
-        if (persistentId < 0 || persistentId >= indexedTypes.length) {
-            throw new IllegalArgumentException("Unknown persistentId " + persistentId);
-        }
-        return indexedTypes[persistentId];
-    }
-
-    private final byte persistentId;
-
-    CompressionType(byte persistentId)
-    {
-        this.persistentId = persistentId;
-    }
-
+    @Override
     public byte persistentId()
     {
-        return persistentId;
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int compress(ByteBuffer src, ByteBuffer dst)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int uncompress(ByteBuffer src, ByteBuffer dst)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int maxUncompressedLength(ByteBuffer compressed)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int maxCompressedLength(ByteBuffer uncompressed)
+    {
+        throw new UnsupportedOperationException();
     }
 }

@@ -69,7 +69,7 @@ public class Footer
     private static final ByteBuffer zeros;
     static {
         ByteBuffer b = ByteBuffer.allocateDirect(ENCODED_LENGTH - SIZE_OF_LONG);
-        for (int i = 0; b.hasRemaining(); i++) {
+        while (b.hasRemaining()) {
             b.put((byte) 0);
         }
         b.flip();

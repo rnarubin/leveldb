@@ -20,6 +20,9 @@ package org.iq80.leveldb.util;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.DBException;
+
 /**
  * <p>
  * A Snappy abstraction which attempts uses the iq80 implementation and falls back
@@ -43,25 +46,37 @@ public final class Snappy
     }
 
     public interface SPI
+            extends Compression
     {
-        int uncompress(ByteBuffer compressed, ByteBuffer uncompressed)
-                throws IOException;
-
-        int uncompress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-                throws IOException;
-
-        int compress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-                throws IOException;
-
         byte[] compress(String text)
                 throws IOException;
-
-        int maxCompressedLength(int length);
     }
 
     public static class XerialSnappy
             implements SPI
     {
+        // xerial snappy requires either double direct buffers or double arrays for [un]compression.
+        // cache a spare buffer to swap in if the given pairs are mismatched
+        private static final ThreadLocal<ByteBuffer> scratch = new ThreadLocal<ByteBuffer>(){
+            @Override
+            public synchronized ByteBuffer initialValue()
+            {
+                return ByteBuffer.allocateDirect(4096);
+            }
+        };
+
+        private static ByteBuffer getDirectBuffer(int size)
+        {
+            ByteBuffer buf = scratch.get();
+            if (buf.capacity() < size) {
+                ByteBuffers.freeDirect(buf);
+                buf = ByteBuffer.allocateDirect(size);
+                scratch.set(buf);
+            }
+            buf.clear();
+            return buf;
+        }
+
         static {
             // Make sure that the JNI libs are fully loaded.
             try {
@@ -73,24 +88,79 @@ public final class Snappy
         }
 
         @Override
+        public int compress(ByteBuffer uncompressed, ByteBuffer compressed)
+        {
+            assert !compressed.isReadOnly();
+            try {
+                if (uncompressed.isDirect()) {
+                    if (compressed.isDirect()) {
+                        return org.xerial.snappy.Snappy.compress(uncompressed, compressed);
+                    }
+                    else{
+                        ByteBuffer direct = getDirectBuffer(maxCompressedLength(uncompressed));
+                        final int length = org.xerial.snappy.Snappy.compress(uncompressed, direct);
+                        compressed.mark();
+                        compressed.put(direct).reset().limit(compressed.position() + length);
+                        return length;
+                    }
+                }
+                else {
+                    assert !uncompressed.isReadOnly(); // this i prohibit just because it's another permutation that would make my life more difficult (the backing array, if any, is inaccessible)
+                    if (compressed.isDirect()) {
+                        ByteBuffer direct = getDirectBuffer(uncompressed.remaining());
+                        uncompressed.mark();
+                        direct.put(uncompressed).flip();
+                        uncompressed.reset();
+                        return org.xerial.snappy.Snappy.compress(direct, compressed);
+                    }
+                    else {
+                        return org.xerial.snappy.Snappy.compress(uncompressed.array(), uncompressed.arrayOffset()
+                                + uncompressed.position(), uncompressed.remaining(), compressed.array(),
+                                compressed.arrayOffset() + compressed.position());
+                    }
+                }
+            }
+            catch (IOException e) {
+                throw new DBException(e);
+            }
+        }
+
+        @Override
         public int uncompress(ByteBuffer compressed, ByteBuffer uncompressed)
-                throws IOException
         {
-            return org.xerial.snappy.Snappy.uncompress(compressed, uncompressed);
-        }
-
-        @Override
-        public int uncompress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-                throws IOException
-        {
-            return org.xerial.snappy.Snappy.uncompress(input, inputOffset, length, output, outputOffset);
-        }
-
-        @Override
-        public int compress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-                throws IOException
-        {
-            return org.xerial.snappy.Snappy.compress(input, inputOffset, length, output, outputOffset);
+            assert !compressed.isReadOnly();
+            try {
+                if (compressed.isDirect()) {
+                    if (uncompressed.isDirect()) {
+                        return org.xerial.snappy.Snappy.uncompress(compressed, uncompressed);
+                    }
+                    else {
+                        ByteBuffer direct = getDirectBuffer(maxUncompressedLength(compressed));
+                        final int length = org.xerial.snappy.Snappy.compress(compressed, direct);
+                        uncompressed.mark();
+                        uncompressed.put(direct).reset().limit(uncompressed.position() + length);
+                        return length;
+                    }
+                }
+                else {
+                    assert !uncompressed.isReadOnly();
+                    if (uncompressed.isDirect()) {
+                        ByteBuffer direct = getDirectBuffer(compressed.remaining());
+                        compressed.mark();
+                        direct.put(compressed).flip();
+                        compressed.reset();
+                        return org.xerial.snappy.Snappy.uncompress(direct, uncompressed);
+                    }
+                    else {
+                        return org.xerial.snappy.Snappy.uncompress(compressed.array(), compressed.arrayOffset()
+                                + compressed.position(), compressed.remaining(), uncompressed.array(),
+                                uncompressed.arrayOffset() + uncompressed.position());
+                    }
+                }
+            }
+            catch (IOException e) {
+                throw new DBException(e);
+            }
         }
 
         @Override
@@ -101,12 +171,25 @@ public final class Snappy
         }
 
         @Override
-        public int maxCompressedLength(int length)
+        public int maxUncompressedLength(ByteBuffer compressed)
         {
-            return org.xerial.snappy.Snappy.maxCompressedLength(length);
+            return Snappy.maxUncompressedLength(compressed);
+        }
+
+        @Override
+        public int maxCompressedLength(ByteBuffer buf)
+        {
+            return org.xerial.snappy.Snappy.maxCompressedLength(buf.remaining());
+        }
+
+        @Override
+        public byte persistentId()
+        {
+            return 1;
         }
     }
 
+    /*
     public static class IQ80Snappy
             implements SPI
     {
@@ -122,7 +205,6 @@ public final class Snappy
 
         @Override
         public int uncompress(ByteBuffer compressed, ByteBuffer uncompressed)
-                throws IOException
         {
             byte[] input;
             int inputOffset;
@@ -166,17 +248,10 @@ public final class Snappy
         }
 
         @Override
-        public int uncompress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
+        public int compress(ByteBuffer uncompressed, ByteBuffer compressed)
                 throws IOException
         {
             return org.iq80.snappy.Snappy.uncompress(input, inputOffset, length, output, outputOffset);
-        }
-
-        @Override
-        public int compress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-                throws IOException
-        {
-            return org.iq80.snappy.Snappy.compress(input, inputOffset, length, output, outputOffset);
         }
 
         @Override
@@ -196,13 +271,59 @@ public final class Snappy
         {
             return org.iq80.snappy.Snappy.maxCompressedLength(length);
         }
+
+        @Override
+        public int maxUncompressedLength(ByteBuffer compressed)
+        {
+            // TODO Auto-generated method stub
+            return 0;
+        }
+
+        @Override
+        public int maxCompressedLength(ByteBuffer uncompressed)
+        {
+            // TODO Auto-generated method stub
+            return 0;
+
+    private static int maxCompressedLength(int length)
+    {
+        // Compressed data can be defined as:
+        //    compressed := item* literal*
+        //    item       := literal* copy
+        //
+        // The trailing literal sequence has a space blowup of at most 62/60
+        // since a literal of length 60 needs one tag byte + one extra byte
+        // for length information.
+        //
+        // Item blowup is trickier to measure.  Suppose the "copy" op copies
+        // 4 bytes of data.  Because of a special check in the encoding code,
+        // we produce a 4-byte copy only if the offset is < 65536.  Therefore
+        // the copy op takes 3 bytes to encode, and this type of item leads
+        // to at most the 62/60 blowup for representing literals.
+        //
+        // Suppose the "copy" op copies 5 bytes of data.  If the offset is big
+        // enough, it will take 5 bytes to encode the copy op.  Therefore the
+        // worst case here is a one-byte literal followed by a five-byte copy.
+        // I.e., 6 bytes of input turn into 7 bytes of "compressed" data.
+        //
+        // This last factor dominates the blowup, so the final estimate is:
+        return 32 + length + (length / 6);
     }
+        }
+
+        @Override
+        public byte persistentId()
+        {
+            // TODO Auto-generated method stub
+            return 0;
+        }
+    }*/
 
     private static final SPI SNAPPY;
 
     static {
         SPI attempt = null;
-        String[] factories = System.getProperty("leveldb.snappy", "iq80,xerial").split(",");
+        String[] factories = System.getProperty("leveldb.snappy", "xerial,iq80").split(",");
         for (int i = 0; i < factories.length && attempt == null; i++) {
             String name = factories[i];
             try {
@@ -226,32 +347,13 @@ public final class Snappy
         return SNAPPY != null;
     }
 
-    public static void uncompress(ByteBuffer compressed, ByteBuffer uncompressed)
-            throws IOException
+    public static Compression instance()
     {
-        SNAPPY.uncompress(compressed, uncompressed);
+        return SNAPPY;
     }
 
-    public static void uncompress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-            throws IOException
+    private static int maxUncompressedLength(ByteBuffer compressed)
     {
-        SNAPPY.uncompress(input, inputOffset, length, output, outputOffset);
-    }
-
-    public static int compress(byte[] input, int inputOffset, int length, byte[] output, int outputOffset)
-            throws IOException
-    {
-        return SNAPPY.compress(input, inputOffset, length, output, outputOffset);
-    }
-
-    public static byte[] compress(String text)
-            throws IOException
-    {
-        return SNAPPY.compress(text);
-    }
-
-    public static int maxCompressedLength(int length)
-    {
-        return SNAPPY.maxCompressedLength(length);
+        return VariableLengthQuantity.readVariableLengthInt(ByteBuffers.duplicate(compressed));
     }
 }

@@ -19,29 +19,22 @@ package org.iq80.leveldb.table;
 
 import java.nio.ByteBuffer;
 
-import com.google.common.base.Preconditions;
-
-import org.iq80.leveldb.CompressionType;
-import org.iq80.leveldb.util.ByteBuffers;
-
 public class BlockTrailer
 {
     public static final int ENCODED_LENGTH = 5;
 
-    private final CompressionType compressionType;
+    private final byte compressionId;
     private final int crc32c;
 
-    public BlockTrailer(CompressionType compressionType, int crc32c)
+    public BlockTrailer(byte compressionId, int crc32c)
     {
-        Preconditions.checkNotNull(compressionType, "compressionType is null");
-
-        this.compressionType = compressionType;
+        this.compressionId = compressionId;
         this.crc32c = crc32c;
     }
 
-    public CompressionType getCompressionType()
+    public byte getCompressionId()
     {
-        return compressionType;
+        return compressionId;
     }
 
     public int getCrc32c()
@@ -50,41 +43,11 @@ public class BlockTrailer
     }
 
     @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-
-        BlockTrailer that = (BlockTrailer) o;
-
-        if (crc32c != that.crc32c) {
-            return false;
-        }
-        if (compressionType != that.compressionType) {
-            return false;
-        }
-
-        return true;
-    }
-
-    @Override
-    public int hashCode()
-    {
-        int result = compressionType.hashCode();
-        result = 31 * result + crc32c;
-        return result;
-    }
-
-    @Override
     public String toString()
     {
         StringBuilder sb = new StringBuilder();
         sb.append("BlockTrailer");
-        sb.append("{compressionType=").append(compressionType);
+        sb.append("{compressionId=").append(compressionId);
         sb.append(", crc32c=0x").append(Integer.toHexString(crc32c));
         sb.append('}');
         return sb.toString();
@@ -92,14 +55,14 @@ public class BlockTrailer
 
     public static BlockTrailer readBlockTrailer(ByteBuffer buffer)
     {
-        CompressionType compressionType = CompressionType.getCompressionTypeByPersistentId(ByteBuffers.readUnsignedByte(buffer));
+        byte compressionType = buffer.get();
         int crc32c = buffer.getInt();
         return new BlockTrailer(compressionType, crc32c);
     }
 
     public static ByteBuffer writeBlockTrailer(BlockTrailer blockTrailer, ByteBuffer buffer)
     {
-        buffer.put((byte) blockTrailer.getCompressionType().persistentId());
+        buffer.put(blockTrailer.getCompressionId());
         buffer.putInt(blockTrailer.getCrc32c());
         return buffer;
     }

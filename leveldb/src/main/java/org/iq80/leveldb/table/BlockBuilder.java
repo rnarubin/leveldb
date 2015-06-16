@@ -158,6 +158,10 @@ public class BlockBuilder
             else {
                 block.putInt(0);
             }
+
+            // include space for the trailer rather than writing fragmented buffers
+            // this space will be used if compression is not performed
+            block.ensureSpace(BlockTrailer.ENCODED_LENGTH);
         }
         return block.get();
     }

@@ -44,7 +44,7 @@ public class MMapTable
     public MMapTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
             throws IOException
     {
-        super(name, fileChannel, comparator, options.verifyChecksums(), options.memoryManager());
+        super(name, fileChannel, comparator, options);
         long size = fileChannel.size();
         Preconditions.checkArgument(size <= Integer.MAX_VALUE, "File must be smaller than %s bytes", Integer.MAX_VALUE);
     }
@@ -90,7 +90,6 @@ public class MMapTable
         }
     }
 
-    @SuppressWarnings({"NonPrivateFieldAccessedInSynchronizedContext", "AssignmentToStaticFieldFromInstanceMethod"})
     @Override
     protected Block readBlock(BlockHandle blockHandle)
             throws IOException
@@ -110,26 +109,9 @@ public class MMapTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        // decompress data
-        ByteBuffer uncompressedData;
-        ByteBuffer compressedData = read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
-        // if (blockTrailer.getCompressionType() == SNAPPY) {
-        // synchronized (MMapTable.class) {
-        // int uncompressedLength = uncompressedLength(uncompressedBuffer);
-        // if (uncompressedScratch.capacity() < uncompressedLength) {
-        // uncompressedScratch = ByteBuffer.allocateDirect(uncompressedLength);
-        // }
-        // uncompressedScratch.clear();
-        //
-        // Snappy.uncompress(uncompressedBuffer, uncompressedScratch);
-        // uncompressedData = Slices.copiedBuffer(uncompressedScratch);
-        // }
-        // }
-        // else {
-        uncompressedData = compressedData;
-        // }
-
-        return new Block(uncompressedData, comparator, memory);
+        return new Block(uncompressIfNecessary(
+                read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize()),
+                blockTrailer.getCompressionId()), comparator, memory);
     }
 
     public static ByteBuffer read(MappedByteBuffer data, int offset, int length)
