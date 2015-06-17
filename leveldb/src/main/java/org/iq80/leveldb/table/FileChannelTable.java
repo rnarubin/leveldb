@@ -73,11 +73,12 @@ public class FileChannelTable
             throws IOException
     {
         ByteBuffer uncompressedBuffer = memory.allocate(length);
+        uncompressedBuffer.mark();
         fileChannel.read(uncompressedBuffer, offset);
         if (uncompressedBuffer.hasRemaining()) {
             throw new IOException("Could not read all the data");
         }
-        uncompressedBuffer.rewind();
+        uncompressedBuffer.reset();
         return uncompressedBuffer;
     }
 }

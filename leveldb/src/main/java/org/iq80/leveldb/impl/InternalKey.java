@@ -44,7 +44,11 @@ public class InternalKey
         this.valueType = valueType;
         this.data = memory.allocate(userKey.remaining() + 8);
         userKey.mark();
-        this.data.put(userKey).putLong(SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType)).rewind();
+        this.data.mark();
+        this.data.put(userKey)
+                .putLong(SequenceNumber.packSequenceAndValueType(sequenceNumber, valueType))
+                .limit(this.data.position())
+                .reset();
         userKey.reset();
     }
 

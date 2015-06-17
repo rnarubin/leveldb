@@ -1325,6 +1325,7 @@ public class DbImpl
     {
         final ByteBuffer record = options.memoryManager().allocate(
                 SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
+        record.mark();
         record.putLong(sequenceBegin);
         record.putInt(updates.size());
         updates.forEach(new Handler()
@@ -1345,7 +1346,7 @@ public class DbImpl
                 ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
             }
         });
-        record.flip();
+        record.limit(record.position()).reset();
         return record;
     }
 

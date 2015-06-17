@@ -747,8 +747,9 @@ public final class ByteBuffers
 
     public static ByteBuffer copy(ByteBuffer src, int length, MemoryManager memory)
     {
-        ByteBuffer ret = memory.allocate(length).put(duplicateByLength(src, src.position(), length));
-        ret.rewind();
+        ByteBuffer ret = memory.allocate(length);
+        ret.mark();
+        ret.put(duplicateByLength(src, src.position(), length)).limit(ret.position()).reset();
         return ret;
     }
 

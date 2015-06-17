@@ -96,6 +96,7 @@ public class LogReader
         this.initialOffset = initialOffset;
         this.memory = memory;
         this.blockScratch = this.memory.allocate(BLOCK_SIZE);
+        this.blockScratch.mark();
         this.recordScratch = new GrowingBuffer(BLOCK_SIZE, this.memory);
     }
 
@@ -314,7 +315,7 @@ public class LogReader
         }
 
         // clear the block
-        blockScratch.clear();
+        blockScratch.reset();
 
         // read the next full block
         while (blockScratch.hasRemaining()) {
@@ -335,7 +336,7 @@ public class LogReader
             }
 
         }
-        blockScratch.flip();
+        blockScratch.limit(blockScratch.position()).reset();
         // TODO check this copy
         currentBlock = ByteBuffers.copy(blockScratch, this.memory);
         return currentBlock.hasRemaining();

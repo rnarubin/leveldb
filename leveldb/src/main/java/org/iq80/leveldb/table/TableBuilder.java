@@ -140,9 +140,10 @@ public class TableBuilder
 
             ByteBuffer shortestSeparator = userComparator.findShortestSeparator(lastKey, key);
 
-            ByteBuffer handleEncoding = BlockHandle.writeBlockHandleTo(pendingHandle,
-                    memory.allocate(BlockHandle.MAX_ENCODED_LENGTH));
-            handleEncoding.flip();
+            ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+            handleEncoding.mark();
+            BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
+            handleEncoding.limit(handleEncoding.position()).reset();
             indexBlockBuilder.add(shortestSeparator, handleEncoding);
             pendingIndexEntry = false;
         }
@@ -242,11 +243,14 @@ public class TableBuilder
 
         // add last handle to index block
         if (pendingIndexEntry) {
+            // TODO handle handle manually
             ByteBuffer shortSuccessor = userComparator.findShortSuccessor(lastKey);
 
-            ByteBuffer handleEncoding = BlockHandle.writeBlockHandleTo(pendingHandle,
-                    this.memory.allocate(BlockHandle.MAX_ENCODED_LENGTH));
-            handleEncoding.flip();
+            ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+            handleEncoding.mark();
+            BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
+            handleEncoding.limit(handleEncoding.position()).reset();
+
             indexBlockBuilder.add(shortSuccessor, handleEncoding);
             pendingIndexEntry = false;
         }

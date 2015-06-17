@@ -311,6 +311,7 @@ public class BlockIterator
 
         // read key
         ByteBuffer key = this.memory.allocate(sharedKeyLength + nonSharedKeyLength);
+        key.mark();
         if (sharedKeyLength > 0) {
             Preconditions.checkState(previousEntry != null,
                     "Entry has a shared key but no previous entry was provided");
@@ -321,7 +322,7 @@ public class BlockIterator
             prev.reset();
         }
         ByteBuffers.putLength(key, data, nonSharedKeyLength);
-        key.flip();
+        key.limit(key.position()).reset();
 
         // read value
         ByteBuffer value = ByteBuffers.slice(ByteBuffers.duplicateAndAdvance(data, valueLength));

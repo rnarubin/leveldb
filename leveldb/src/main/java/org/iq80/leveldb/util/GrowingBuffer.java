@@ -9,11 +9,13 @@ public class GrowingBuffer
 {
     private final MemoryManager memory;
     private ByteBuffer buffer;
+    private int oldpos;
 
     public GrowingBuffer(final int initialSize, MemoryManager memory)
     {
         this.memory = memory;
         this.buffer = this.memory.allocate(nextPowerOf2(initialSize));
+        this.oldpos = this.buffer.position();
     }
 
     /**
@@ -24,8 +26,9 @@ public class GrowingBuffer
         final int deficit = length - this.buffer.remaining();
         if (deficit > 0) {
             ByteBuffer oldBuffer = this.buffer;
+            oldBuffer.limit(oldBuffer.position()).position(this.oldpos);
             this.buffer = this.memory.allocate(nextPowerOf2(oldBuffer.capacity() + deficit));
-            oldBuffer.flip();
+            this.oldpos = this.buffer.position();
             this.buffer.put(oldBuffer);
         }
         return this.buffer;
@@ -51,7 +54,7 @@ public class GrowingBuffer
 
     public int filled()
     {
-        return this.buffer.position();
+        return this.buffer.position() - this.oldpos;
     }
 
     public void clear()
@@ -61,9 +64,7 @@ public class GrowingBuffer
 
     public ByteBuffer get()
     {
-        ByteBuffer ret = ByteBuffers.duplicate(this.buffer);
-        ret.flip();
-        return ret;
+        return ByteBuffers.duplicate(this.buffer, this.oldpos, this.buffer.position());
     }
 
     /**

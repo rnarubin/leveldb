@@ -124,7 +124,9 @@ public abstract class Table
     private static ByteBuffer uncompress(Compression compression, ByteBuffer compressedData, MemoryManager memory)
     {
         ByteBuffer dst = memory.allocate(compression.maxUncompressedLength(compressedData));
-        compression.uncompress(compressedData, dst);
+        final int oldpos = dst.position();
+        final int length = compression.uncompress(compressedData, dst);
+        dst.limit(oldpos + length).position(oldpos);
         return dst;
     }
 
