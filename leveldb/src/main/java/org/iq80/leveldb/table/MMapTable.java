@@ -23,9 +23,6 @@ import org.iq80.leveldb.util.ByteBuffers;
 
 import com.google.common.base.Preconditions;
 
-import org.iq80.leveldb.util.Closeables;
-
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -65,27 +62,26 @@ public class MMapTable
     @Override
     public Callable<?> closer()
     {
-        return new Closer(name, fileChannel, data);
+        return new Closer(data, super.closer());
     }
 
     private static class Closer
             implements Callable<Void>
     {
-        // private final String name;
-        private final Closeable closeable;
         private final MappedByteBuffer data;
+        private final Callable<?> parent;
 
-        public Closer(String name, Closeable closeable, MappedByteBuffer data)
+        public Closer(MappedByteBuffer data, Callable<?> parent)
         {
-            this.closeable = closeable;
             this.data = data;
+            this.parent = parent;
         }
 
         public Void call()
-                throws IOException
+                throws Exception
         {
             ByteBuffers.unmap(data);
-            Closeables.closeQuietly(closeable);
+            parent.call();
             return null;
         }
     }

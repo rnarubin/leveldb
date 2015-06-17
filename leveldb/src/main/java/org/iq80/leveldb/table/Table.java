@@ -198,43 +198,29 @@ public abstract class Table
         release();
     }
 
-    @Override
-    public void finalize()
-            throws Throwable
-    {
-        if (refCount.get() != 0) {
-            LOGGER.warn("table finalized with {} open refs", refCount.get());
-        }
-        try {
-            closer().call();
-        }
-        catch (Exception e) {
-            LOGGER.warn("exception in finalizing table", e);
-            throw e;
-        }
-        finally {
-            super.finalize();
-        }
-    }
-
     public Callable<?> closer()
     {
-        return new Closer(fileChannel);
+        return new Closer(fileChannel, refCount);
     }
 
     private static class Closer
             implements Callable<Void>
     {
         private final Closeable closeable;
+        private final AtomicInteger refCount;
 
-        public Closer(Closeable closeable)
+        public Closer(Closeable closeable, AtomicInteger refCount)
         {
             this.closeable = closeable;
+            this.refCount = refCount;
         }
 
         @Override
         public Void call()
         {
+            if (refCount.get() != 0) {
+                LOGGER.warn("table finalized with {} open refs", refCount.get());
+            }
             Closeables.closeQuietly(closeable);
             return null;
         }
