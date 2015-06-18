@@ -20,6 +20,7 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.IntVector;
@@ -45,7 +46,8 @@ public class BlockBuilder
 
     public BlockBuilder(int estimatedSize,
             int blockRestartInterval,
-            Comparator<ByteBuffer> comparator,
+            InternalKeyComparator comparator,
+            //Comparator<ByteBuffer> comparator,
             MemoryManager memory)
     {
         Preconditions.checkArgument(estimatedSize >= 0, "estimatedSize is negative");
@@ -98,12 +100,6 @@ public class BlockBuilder
                 SIZE_OF_INT;                               // restart position size
     }
 
-    public void add(BlockEntry blockEntry)
-    {
-        Preconditions.checkNotNull(blockEntry, "blockEntry is null");
-        add(blockEntry.getKey(), blockEntry.getValue());
-    }
-
     public void add(ByteBuffer key, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
@@ -144,6 +140,29 @@ public class BlockBuilder
         // update state
         entryCount++;
         restartBlockEntryCount++;
+    }
+
+    public void addHandle(UserComparator userComparator, ByteBuffer lastKey, ByteBuffer key, BlockHandle handle)
+    {
+        ByteBuffer blockbuf = block.ensureSpace(lastKey.remaining());
+        blockbuf.mark();
+        blockbuf.put(ByteBuffers.duplicate(lastKey)).limit(blockbuf.position()).reset();
+        ByteBuffer shortestSeparator = userComparator.findShortestSeparator(blockbuf, key);
+        blockbuf.position(blockbuf.limit()).limit(blockbuf.capacity());
+
+        ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+        handleEncoding.mark();
+        BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
+        handleEncoding.limit(handleEncoding.position()).reset();
+        indexBlockBuilder.add(shortestSeparator, handleEncoding);
+
+        // ByteBuffer shortestSeparator = userComparator.findShortestSeparator(lastKey, key);
+        //
+        // ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+        // handleEncoding.mark();
+        // BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
+        // handleEncoding.limit(handleEncoding.position()).reset();
+        // indexBlockBuilder.add(shortestSeparator, handleEncoding);
     }
 
     public ByteBuffer finish()

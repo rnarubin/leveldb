@@ -21,33 +21,40 @@ import java.nio.ByteBuffer;
 
 import com.google.common.base.Preconditions;
 
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.SizeOf;
 
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 
-public class InternalUserComparator
-        implements UserComparator
+public class InternalKeyBufferComparator
+        implements DBBufferComparator
 {
-    private final InternalKeyComparator internalKeyComparator;
+    private final DBBufferComparator userComparator;
     private final MemoryManager memory;
 
-    public InternalUserComparator(InternalKeyComparator internalKeyComparator, MemoryManager memory)
+    public InternalKeyBufferComparator(DBBufferComparator userComparator, MemoryManager memory)
     {
-        this.internalKeyComparator = internalKeyComparator;
+        this.userComparator = userComparator;
         this.memory = memory;
     }
 
     @Override
     public int compare(ByteBuffer left, ByteBuffer right)
     {
-        return internalKeyComparator.compare(new InternalKey(left), new InternalKey(right));
+        int result = userComparator.compare(InternalKey.getUserKey(left), InternalKey.getUserKey(right));
+        if (result != 0) {
+            return result;
+        }
+        long leftSeq = SequenceNumber.unpackSequenceNumber(left.getLong(left.limit() - SizeOf.SIZE_OF_LONG));
+        long rightSeq = SequenceNumber.unpackSequenceNumber(right.getLong(right.limit() - SizeOf.SIZE_OF_LONG));
+        return Long.compare(rightSeq, leftSeq);
     }
 
     @Override
     public String name()
     {
-        return internalKeyComparator.name();
+        return userComparator.name();
     }
 
     @Override
@@ -61,9 +68,9 @@ public class InternalUserComparator
         //Slice startUserKey = new InternalKey(start).getUserKey();
         //Slice limitUserKey = new InternalKey(limit).getUserKey();
 
-        ByteBuffer shortestSeparator = internalKeyComparator.getUserComparator().findShortestSeparator(startUserKey, limitUserKey);
+        ByteBuffer shortestSeparator = userComparator.findShortestSeparator(startUserKey, limitUserKey);
 
-        if (internalKeyComparator.getUserComparator().compare(startUserKey, shortestSeparator) < 0) {
+        if (userComparator.compare(startUserKey, shortestSeparator) < 0) {
             // User key has become larger.  Tack on the earliest possible
             // number to the shortened user key.
             InternalKey newInternalKey = new InternalKey(shortestSeparator, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);
@@ -81,10 +88,10 @@ public class InternalUserComparator
     @Override
     public ByteBuffer findShortSuccessor(ByteBuffer key)
     {
-        ByteBuffer userKey = new InternalKey(key).getUserKey();
-        ByteBuffer shortSuccessor = internalKeyComparator.getUserComparator().findShortSuccessor(userKey);
+        ByteBuffer userKey = InternalKey.getUserKey(key);
+        ByteBuffer shortSuccessor = userComparator.findShortSuccessor(userKey);
 
-        if (internalKeyComparator.getUserComparator().compare(userKey, shortSuccessor) < 0) {
+        if (userComparator.compare(userKey, shortSuccessor) < 0) {
             // User key has become larger.  Tack on the earliest possible
             // number to the shortened user key.
             InternalKey newInternalKey = new InternalKey(shortSuccessor, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);

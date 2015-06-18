@@ -78,6 +78,7 @@ public final class Level0Iterator
     private void resetPriorityQueue(Comparator<InternalKey> comparator)
     {
         int i = 0;
+        priorityQueue.clear();
         for (InternalTableIterator input : inputs) {
             if (input.hasNext()) {
                 priorityQueue.add(new ComparableIterator(input, comparator, i++, input.next()));

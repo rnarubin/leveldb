@@ -21,6 +21,7 @@ import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -35,6 +36,7 @@ import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 import static org.iq80.leveldb.impl.Logs.getChunkChecksum;
 
 public class LogReader
+        implements Closeable
 {
     private final FileChannel fileChannel;
 
@@ -70,7 +72,7 @@ public class LogReader
     /**
      * Scratch buffer for current block.  The currentBlock is sliced off the underlying buffer.
      */
-    private final ByteBuffer blockScratch;
+    private ByteBuffer blockScratch;
 
     /**
      * The current block records are being read from.
@@ -263,6 +265,7 @@ public class LogReader
         if (length > currentBlock.remaining()) {
             int dropSize = currentBlock.remaining() + HEADER_SIZE;
             reportCorruption(dropSize, "Invalid chunk length");
+            memory.free(currentBlock);
             currentBlock = ByteBuffers.EMPTY_BUFFER;
             return BAD_CHUNK;
         }
@@ -271,6 +274,7 @@ public class LogReader
         if (chunkType == ZERO_TYPE && length == 0) {
             // Skip zero length record without reporting any drops since
             // such records are produced by the writing code.
+            memory.free(currentBlock);
             currentBlock = ByteBuffers.EMPTY_BUFFER;
             return BAD_CHUNK;
         }
@@ -292,6 +296,7 @@ public class LogReader
                 // fragment of a real log record that just happens to look
                 // like a valid log record.
                 int dropSize = currentBlock.remaining() + HEADER_SIZE;
+                memory.free(currentBlock);
                 currentBlock = ByteBuffers.EMPTY_BUFFER;
                 reportCorruption(dropSize, "Invalid chunk checksum");
                 return BAD_CHUNK;
@@ -329,6 +334,7 @@ public class LogReader
                 endOfBufferOffset += bytesRead;
             }
             catch (IOException e) {
+                memory.free(currentBlock);
                 currentBlock = ByteBuffers.EMPTY_BUFFER;
                 reportDrop(BLOCK_SIZE, e);
                 eof = true;
@@ -338,7 +344,10 @@ public class LogReader
         }
         blockScratch.limit(blockScratch.position()).reset();
         // TODO check this copy
-        currentBlock = ByteBuffers.copy(blockScratch, this.memory);
+        memory.free(currentBlock);
+        currentBlock = blockScratch;// ByteBuffers.copy(blockScratch, this.memory);
+        blockScratch = memory.allocate(BLOCK_SIZE);
+        blockScratch.mark();
         return currentBlock.hasRemaining();
     }
 
@@ -362,5 +371,17 @@ public class LogReader
         if (monitor != null) {
             monitor.corruption(bytes, reason);
         }
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        recordScratch.close();
+        memory.free(blockScratch);
+        if (currentBlock != ByteBuffers.EMPTY_BUFFER) {
+            memory.free(currentBlock);
+        }
+        fileChannel.close();
     }
 }

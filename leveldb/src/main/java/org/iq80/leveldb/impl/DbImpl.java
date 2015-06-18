@@ -23,8 +23,10 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.iq80.leveldb.DB;
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.LegacyComparatorWrapper;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -36,7 +38,6 @@ import org.iq80.leveldb.impl.Filename.FileType;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
 import org.iq80.leveldb.table.BytewiseComparator;
-import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.ByteBuffers;
@@ -128,12 +129,8 @@ public class DbImpl
         this.databaseDir = databaseDir;
 
         //use custom comparator if set
-        DBComparator comparator = options.comparator();
-        UserComparator userComparator;
-        if (comparator != null) {
-            userComparator = new CustomUserComparator(comparator);
-        }
-        else {
+        DBBufferComparator userComparator = options.bufferComparator();
+        if (userComparator == null) {
             userComparator = new BytewiseComparator(options.memoryManager());
         }
         internalKeyComparator = new InternalKeyComparator(userComparator);
@@ -156,8 +153,8 @@ public class DbImpl
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalUserComparator(internalKeyComparator, options.memoryManager()),
-                options);
+        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalKeyBufferComparator(userComparator,
+                options.memoryManager()), options);
 
         // create the version set
 
@@ -504,11 +501,11 @@ public class DbImpl
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
         File file = new File(databaseDir, Filename.logFileName(fileNumber));
-        try (@SuppressWarnings("resource")
-        // closing channel closes FD
-        FileChannel channel = new FileInputStream(file).getChannel()) {
-            LogMonitor logMonitor = LogMonitors.logMonitor();
-            LogReader logReader = new LogReader(channel, logMonitor, true, 0, options.memoryManager());
+
+        LogMonitor logMonitor = LogMonitors.logMonitor();
+        try (FileInputStream fileInput = new FileInputStream(file);
+                LogReader logReader = new LogReader(fileInput.getChannel(), logMonitor, true, 0,
+                        options.memoryManager())) {
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
 
@@ -526,6 +523,7 @@ public class DbImpl
 
                 // read entries
                 WriteBatchImpl writeBatch = readWriteBatch(record, updateSize);
+                options.memoryManager().free(record);
 
                 // apply entries to memTable
                 if (memTable == null) {
@@ -733,7 +731,8 @@ public class DbImpl
 
             // filter any entries not visible in our snapshot
             SnapshotImpl snapshot = getSnapshot(readOptions);
-            SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator, snapshot, internalKeyComparator.getUserComparator(), options.memoryManager());
+            SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator, snapshot,
+                    internalKeyComparator.getDBBufferComparator(), options.memoryManager());
             return new SeekingIteratorAdapter(snapshotIterator);
         }
         finally {
@@ -969,7 +968,8 @@ public class DbImpl
             // channel is closed
             FileChannel channel = new FileOutputStream(file).getChannel();
             try {
-                TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalUserComparator(internalKeyComparator, options.memoryManager()));
+                TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalKeyBufferComparator(
+                        internalKeyComparator, options.memoryManager()));
 
                 for (Entry<InternalKey, ByteBuffer> entry : data) {
                     // update keys
@@ -1139,7 +1139,8 @@ public class DbImpl
 
             File file = new File(databaseDir, Filename.tableFileName(fileNumber));
             compactionState.outfile = new FileOutputStream(file).getChannel();
-            compactionState.builder = new TableBuilder(options, compactionState.outfile, new InternalUserComparator(internalKeyComparator, options.memoryManager()));
+            compactionState.builder = new TableBuilder(options, compactionState.outfile,
+                    new InternalKeyBufferComparator(internalKeyComparator, options.memoryManager()));
         }
         finally {
             mutex.unlock();
@@ -1301,12 +1302,15 @@ public class DbImpl
             entries++;
             ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
             if (valueType == VALUE) {
-                ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
-                ByteBuffer value = ByteBuffers.readLengthPrefixedBytes(record);
+                // only called in case of log recovery, buffer copying tolerable
+                ByteBuffer key = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
+                        options.memoryManager());
+                ByteBuffer value = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
+                        options.memoryManager());
                 writeBatch.put(key, value);
             }
             else if (valueType == DELETION) {
-                ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
+                ByteBuffer key = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record), options.memoryManager());
                 writeBatch.delete(key);
             }
             else {

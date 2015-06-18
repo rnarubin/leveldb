@@ -15,18 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.table;
+
+package org.iq80.leveldb;
 
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 
-// todo this interface needs more thought
-public interface UserComparator
-        extends Comparator<ByteBuffer>
+public interface DBBufferComparator extends Comparator<ByteBuffer>
 {
+    /**
+     * The name of the comparator. Used to check for comparator mismatches
+     * (i.e., a DB created with one comparator is accessed using a different comparator)
+     */
     String name();
 
+    /**
+     * If <code>start < limit</code>, returns a short key in [start,limit).
+     * Simple comparator implementations should return start unchanged.
+     */
     ByteBuffer findShortestSeparator(ByteBuffer start, ByteBuffer limit);
 
+    /**
+     * returns a 'short key' where the 'short key' >= key.
+     * Simple comparator implementations should return key unchanged.
+     */
     ByteBuffer findShortSuccessor(ByteBuffer key);
 }
+
+

@@ -23,10 +23,10 @@ import com.google.common.collect.Multiset;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
-import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -216,20 +216,22 @@ public abstract class LogTest
         // test readRecord
         @SuppressWarnings("resource")
         FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel();
-        try {
-            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, MemoryManagers.heap());
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager();
+                LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
+
             for (ByteBuffer expected : records) {
                 ByteBuffer actual = reader.readRecord();
                 assertEquals(actual, expected);
+                strictMemory.free(actual);
             }
             assertNull(reader.readRecord());
         }
         finally {
+            // TODO check quiet close
             Closeables.closeQuietly(fileChannel);
         }
     }
 
-    @SuppressWarnings("resource")
     private void testConcurrentLog(List<ByteBuffer> record, boolean closeWriter, int threads)
             throws InterruptedException, ExecutionException, IOException
     {
@@ -256,10 +258,13 @@ public abstract class LogTest
             writer.close();
         }
 
-        try (FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel()) {
-            LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, MemoryManagers.heap());
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager();
+                FileInputStream fileInput = new FileInputStream(writer.getFile());
+                LogReader reader = new LogReader(fileInput.getChannel(), NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
+
             for (ByteBuffer actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
                 Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
+                strictMemory.free(actual);
             }
             Assert.assertEquals(recordBag.size(), 0, "Not all added slices found in log");
         }

@@ -1,11 +1,14 @@
 
 package org.iq80.leveldb.util;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.MemoryManager;
 
 public class GrowingBuffer
+        implements Closeable
 {
     private final MemoryManager memory;
     private ByteBuffer buffer;
@@ -23,15 +26,16 @@ public class GrowingBuffer
      */
     public ByteBuffer ensureSpace(int length)
     {
-        final int deficit = length - this.buffer.remaining();
+        final int deficit = length - buffer.remaining();
         if (deficit > 0) {
-            ByteBuffer oldBuffer = this.buffer;
-            oldBuffer.limit(oldBuffer.position()).position(this.oldpos);
-            this.buffer = this.memory.allocate(nextPowerOf2(oldBuffer.capacity() + deficit));
-            this.oldpos = this.buffer.position();
-            this.buffer.put(oldBuffer);
+            ByteBuffer oldBuffer = buffer;
+            oldBuffer.limit(oldBuffer.position()).position(oldpos);
+            buffer = memory.allocate(nextPowerOf2(oldBuffer.capacity() + deficit));
+            oldpos = buffer.position();
+            buffer.put(oldBuffer);
+            memory.free(oldBuffer);
         }
-        return this.buffer;
+        return buffer;
     }
 
     public GrowingBuffer put(ByteBuffer src)
@@ -54,17 +58,17 @@ public class GrowingBuffer
 
     public int filled()
     {
-        return this.buffer.position() - this.oldpos;
+        return buffer.position() - oldpos;
     }
 
     public void clear()
     {
-        this.buffer.clear();
+        buffer.clear();
     }
 
     public ByteBuffer get()
     {
-        return ByteBuffers.duplicate(this.buffer, this.oldpos, this.buffer.position());
+        return ByteBuffers.duplicate(buffer, oldpos, buffer.position());
     }
 
     /**
@@ -79,5 +83,12 @@ public class GrowingBuffer
     public String toString()
     {
         return "GrowingBuffer [buffer=" + buffer + "]";
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        memory.free(buffer);
     }
 }

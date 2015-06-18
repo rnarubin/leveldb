@@ -28,7 +28,7 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.MergingIterator;
@@ -39,7 +39,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -110,16 +109,16 @@ public class VersionSet
             edit.setNextFileNumber(nextFileNumber.get());
             edit.setLastSequenceNumber(lastSequence.get());
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
-            try {
+            long fileNum;
+            try (LogWriter log = Logs.createLogWriter(
+                    new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
+                    GrowingBuffer record = edit.encode(options.memoryManager())) {
+                fileNum = log.getFileNumber();
                 writeSnapshot(log);
-                log.addRecord(edit.encode(options.memoryManager()), true);
-            }
-            finally {
-               log.close();
+                log.addRecord(record.get(), true);
             }
 
-            Filename.setCurrentFile(databaseDir, log.getFileNumber());
+            Filename.setCurrentFile(databaseDir, fileNum);
         }
     }
 
@@ -295,8 +294,9 @@ public class VersionSet
             }
 
             // Write new record to MANIFEST log
-            ByteBuffer record = edit.encode(options.memoryManager());
-            descriptorLog.addRecord(record, true);
+            try (GrowingBuffer record = edit.encode(options.memoryManager())) {
+                descriptorLog.addRecord(record.get(), true);
+            }
 
             // If we just created a new descriptor file, install it by writing a
             // new CURRENT file that points to it.
@@ -333,8 +333,9 @@ public class VersionSet
         // Save files
         edit.addFiles(current.getFiles());
 
-        ByteBuffer record = edit.encode(options.memoryManager());
-        log.addRecord(record, true);
+        try (GrowingBuffer record = edit.encode(options.memoryManager())) {
+            log.addRecord(record.get(), true);
+        }
     }
 
     public void recover()
@@ -352,8 +353,9 @@ public class VersionSet
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        try (@SuppressWarnings("resource")
-        FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
+        try (FileInputStream fileInput = new FileInputStream(new File(databaseDir, currentName));
+                LogReader reader = new LogReader(fileInput.getChannel(), throwExceptionMonitor(), true, 0,
+                        options.memoryManager())) {
 
             // read log edit log
             Long nextFileNumber = null;
@@ -362,10 +364,10 @@ public class VersionSet
             Long prevLogNumber = null;
             Builder builder = new Builder(this, current);
 
-            LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0, options.memoryManager());
             for (ByteBuffer record = reader.readRecord(); record != null; record = reader.readRecord()) {
                 // read version edit
                 VersionEdit edit = new VersionEdit(record);
+                options.memoryManager().free(record);
 
                 // verify comparator
                 // todo implement user comparator

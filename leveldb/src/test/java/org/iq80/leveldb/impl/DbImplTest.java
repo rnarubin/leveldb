@@ -37,21 +37,26 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -66,9 +71,13 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import com.google.common.base.FinalizablePhantomReference;
+import com.google.common.base.FinalizableReferenceQueue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
 
@@ -1027,7 +1036,12 @@ public class DbImplTest
             throws Exception
     {
         for (DbStringWrapper db : opened) {
-            db.close();
+            try {
+                db.close();
+            }
+            finally {
+                db.memory.close();
+            }
         }
         opened.clear();
         FileUtils.deleteRecursively(databaseDir);
@@ -1168,27 +1182,83 @@ public class DbImplTest
         }
     }
 
+    public static class StrictMemoryManager
+            implements MemoryManager, Closeable
+    {
+        private final FinalizableReferenceQueue phantomQueue = new FinalizableReferenceQueue();
+        private final Set<FinalizablePhantomReference<ByteBuffer>> refSet = Sets.newConcurrentHashSet();
+        private final Map<ByteBuffer, AtomicBoolean> bufMap = new MapMaker().weakKeys().makeMap();
+        private volatile Throwable backgroundException = null;
+
+        @Override
+        public ByteBuffer allocate(int capacity)
+        {
+            final ByteBuffer buf = ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
+            final AtomicBoolean freed = new AtomicBoolean(false);
+            bufMap.put(buf, freed);
+            refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
+            {
+                @Override
+                public void finalizeReferent()
+                {
+                    refSet.remove(this);
+                    if (!freed.get()) {
+                        backgroundException = new IllegalStateException("buffer GC without free");
+                    }
+                }
+            });
+            return buf;
+        }
+
+        @Override
+        public void free(ByteBuffer buffer)
+        {
+            AtomicBoolean freed = bufMap.get(buffer);
+            if (freed == null) {
+                throw new IllegalStateException("free called on buffer from foreign source");
+            }
+            if (!freed.compareAndSet(false, true)) {
+                throw new IllegalStateException("double free");
+            }
+
+            // force data corruption on use-after-free
+            Arrays.fill(buffer.array(), (byte) 0xff);
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            phantomQueue.close();
+            if (backgroundException != null) {
+                // Throwables.propagate(backgroundException);
+            }
+            for (Entry<ByteBuffer, AtomicBoolean> entry : bufMap.entrySet()) {
+                if (!entry.getValue().get()) {
+                    // throw new IllegalStateException("buffer not freed before closing memory manager");
+                }
+            }
+        }
+
+    }
+
     private class DbStringWrapper
     {
         private final Options options;
         private final File databaseDir;
         private DbImpl db;
+        private final StrictMemoryManager memory;
 
         private DbStringWrapper(Options options, File databaseDir)
                 throws IOException
         {
-            this.options = options.verifyChecksums(true).createIfMissing(true).errorIfExists(true);
+            this.options = options.verifyChecksums(true)
+                    .createIfMissing(true)
+                    .errorIfExists(true)
+                    .memoryManager(memory = new StrictMemoryManager());
             this.databaseDir = databaseDir;
             this.db = new DbImpl(options, databaseDir);
             opened.add(this);
-        }
-
-        private DbStringWrapper()
-        {
-            //crash and burn
-            options = null;
-            databaseDir = null;
-            db = null;
         }
 
         public String get(String key)

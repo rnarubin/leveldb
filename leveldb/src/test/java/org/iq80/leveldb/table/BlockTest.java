@@ -119,7 +119,7 @@ public class BlockTest
         BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, MemoryManagers.heap());
 
         for (BlockEntry entry : entries) {
-            builder.add(entry);
+            builder.add(entry.getKey(), entry.getValue());
         }
 
         assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));

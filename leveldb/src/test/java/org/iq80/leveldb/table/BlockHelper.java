@@ -138,7 +138,7 @@ public final class BlockHelper
 
     public static ByteBuffer before(Entry<ByteBuffer, ?> expectedEntry)
     {
-        ByteBuffer slice = ByteBuffers.copy(expectedEntry.getKey(), MemoryManagers.heap());
+        ByteBuffer slice = ByteBuffers.heapCopy(expectedEntry.getKey());
         int lastByte = slice.limit() - 1;
         slice.put(lastByte, (byte) (slice.get(lastByte) - 1));
         return slice;
@@ -146,7 +146,7 @@ public final class BlockHelper
 
     public static ByteBuffer after(Entry<ByteBuffer, ?> expectedEntry)
     {
-        ByteBuffer slice = ByteBuffers.copy(expectedEntry.getKey(), MemoryManagers.heap());
+        ByteBuffer slice = ByteBuffers.heapCopy(expectedEntry.getKey());
         int lastByte = slice.limit() - 1;
         slice.put(lastByte, (byte) (slice.get(lastByte) + 1));
         return slice;

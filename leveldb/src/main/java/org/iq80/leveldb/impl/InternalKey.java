@@ -28,6 +28,7 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 
 public class InternalKey
 {
+    public static final InternalKey MINIMUM_KEY = new InternalKey();
     private ByteBuffer data;
     private final ByteBuffer userKey;
     private final long sequenceNumber;
@@ -61,6 +62,13 @@ public class InternalKey
         this.sequenceNumber = SequenceNumber.unpackSequenceNumber(packedSequenceAndType);
         this.valueType = SequenceNumber.unpackValueType(packedSequenceAndType);
         this.data = data;
+    }
+
+    private InternalKey()
+    {
+        this.data = this.userKey = ByteBuffers.EMPTY_BUFFER;
+        this.sequenceNumber = 0;
+        this.valueType = ValueType.getValueTypeByPersistentId((byte) 0);
     }
 
     public ByteBuffer getUserKey()

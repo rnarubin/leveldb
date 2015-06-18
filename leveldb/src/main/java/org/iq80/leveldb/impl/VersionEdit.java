@@ -157,13 +157,13 @@ public class VersionEdit
         deletedFiles.put(level, fileNumber);
     }
 
-    public ByteBuffer encode(MemoryManager memory)
+    public GrowingBuffer encode(MemoryManager memory)
     {
         GrowingBuffer buffer = new GrowingBuffer(4096, memory);
         for (VersionEditTag versionEditTag : VersionEditTag.values()) {
             versionEditTag.writeValue(buffer, this);
         }
-        return buffer.get();
+        return buffer;
     }
 
     @Override

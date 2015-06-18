@@ -15,19 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.table;
+package org.iq80.leveldb;
 
 import java.nio.ByteBuffer;
 
-import org.iq80.leveldb.DBComparator;
-import org.iq80.leveldb.util.ByteBuffers;
-
-public class CustomUserComparator
-        implements UserComparator
+@SuppressWarnings("deprecation")
+class LegacyComparatorWrapper
+        implements DBBufferComparator
 {
-    private final DBComparator comparator;
+    final DBComparator comparator;
 
-    public CustomUserComparator(DBComparator comparator)
+    public LegacyComparatorWrapper(DBComparator comparator)
     {
         this.comparator = comparator;
     }
@@ -41,18 +39,25 @@ public class CustomUserComparator
     @Override
     public ByteBuffer findShortestSeparator(ByteBuffer start, ByteBuffer limit)
     {
-        return ByteBuffer.wrap(comparator.findShortestSeparator(ByteBuffers.toArray(start), ByteBuffers.toArray(limit)));
+        return ByteBuffer.wrap(comparator.findShortestSeparator(toArray(start), toArray(limit)));
     }
 
     @Override
     public ByteBuffer findShortSuccessor(ByteBuffer key)
     {
-        return ByteBuffer.wrap(comparator.findShortSuccessor(ByteBuffers.toArray(key)));
+        return ByteBuffer.wrap(comparator.findShortSuccessor(toArray(key)));
     }
 
     @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
-        return comparator.compare(ByteBuffers.toArray(o1), ByteBuffers.toArray(o2));
+        return comparator.compare(toArray(o1), toArray(o2));
+    }
+
+    private static byte[] toArray(ByteBuffer b)
+    {
+        byte[] arr = new byte[b.remaining()];
+        b.get(arr);
+        return arr;
     }
 }

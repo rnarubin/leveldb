@@ -20,13 +20,12 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
-import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
@@ -55,15 +54,15 @@ public abstract class TestLogWriter
 
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
 
-            try (@SuppressWarnings("resource")
-            FileChannel channel = new FileInputStream(file).getChannel()) {
-
-                LogReader logReader = new LogReader(channel, logMonitor, true, 0, MemoryManagers.heap());
+            try (StrictMemoryManager strictMemory = new StrictMemoryManager();
+                    FileInputStream fileInput = new FileInputStream(file);
+                    LogReader logReader = new LogReader(fileInput.getChannel(), logMonitor, true, 0, strictMemory)) {
 
                 int count = 0;
                 for (ByteBuffer slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
                     assertEquals(slice.remaining(), recordSize);
                     count++;
+                    strictMemory.free(slice);
                 }
                 assertEquals(count, 1);
             }

@@ -758,6 +758,11 @@ public final class ByteBuffers
         return copy(src, src.remaining(), memory);
     }
 
+    public static ByteBuffer heapCopy(ByteBuffer src)
+    {
+        return copy(src, MemoryManagers.heap());
+    }
+
     public static byte[] toArray(ByteBuffer src, byte[] dst)
     {
         src.mark();

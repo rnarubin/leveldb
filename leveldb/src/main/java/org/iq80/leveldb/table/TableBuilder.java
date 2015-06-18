@@ -23,9 +23,11 @@ import com.google.common.base.Throwables;
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,8 +55,8 @@ public class TableBuilder
     private final FileChannel fileChannel;
     private final BlockBuilder dataBlockBuilder;
     private final BlockBuilder indexBlockBuilder;
-    private ByteBuffer lastKey;
-    private final UserComparator userComparator;
+    private InternalKey lastKey;
+    private final InternalKeyComparator internalKeyComparator;
 
     private long entryCount;
 
@@ -75,7 +77,7 @@ public class TableBuilder
 
     private final MemoryManager memory;
 
-    public TableBuilder(Options options, FileChannel fileChannel, UserComparator userComparator)
+    public TableBuilder(Options options, FileChannel fileChannel, InternalKeyComparator internalKeyComparator)
     {
         Preconditions.checkNotNull(options, "options is null");
         Preconditions.checkNotNull(fileChannel, "fileChannel is null");
@@ -88,21 +90,21 @@ public class TableBuilder
 
         this.memory = options.memoryManager();
         this.fileChannel = fileChannel;
-        this.userComparator = userComparator;
+        this.internalKeyComparator = internalKeyComparator;
 
         blockRestartInterval = options.blockRestartInterval();
         blockSize = options.blockSize();
         compression = options.compression();
 
         dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE), blockRestartInterval,
-                userComparator, this.memory);
+                internalKeyComparator, this.memory);
 
         // with expected 50% compression
         int expectedNumberOfBlocks = 1024;
         indexBlockBuilder = new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1,
-                userComparator, this.memory);
+                internalKeyComparator, this.memory);
 
-        lastKey = ByteBuffers.EMPTY_BUFFER;
+        lastKey = InternalKey.MINIMUM_KEY;
     }
 
     public long getEntryCount()
@@ -115,14 +117,7 @@ public class TableBuilder
         return position + dataBlockBuilder.currentSizeEstimate();
     }
 
-    public void add(BlockEntry blockEntry)
-            throws IOException
-    {
-        Preconditions.checkNotNull(blockEntry, "blockEntry is null");
-        add(blockEntry.getKey(), blockEntry.getValue());
-    }
-
-    public void add(ByteBuffer key, ByteBuffer value)
+    public void add(InternalKey key, ByteBuffer value)
             throws IOException
     {
         Preconditions.checkNotNull(key, "key is null");
@@ -131,20 +126,14 @@ public class TableBuilder
         Preconditions.checkState(!closed, "table is finished");
 
         if (entryCount > 0) {
-            Preconditions.checkState(userComparator.compare(key, lastKey) > 0, "key must be greater than last key");
+            Preconditions.checkState(internalKeyComparator.compare(key, lastKey) > 0,
+                    "key must be greater than last key");
         }
 
         // If we just wrote a block, we can now add the handle to index block
         if (pendingIndexEntry) {
             Preconditions.checkState(dataBlockBuilder.isEmpty(), "Internal error: Table has a pending index entry but data block builder is empty");
-
-            ByteBuffer shortestSeparator = userComparator.findShortestSeparator(lastKey, key);
-
-            ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
-            handleEncoding.mark();
-            BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
-            handleEncoding.limit(handleEncoding.position()).reset();
-            indexBlockBuilder.add(shortestSeparator, handleEncoding);
+            indexBlockBuilder.addHandle(internalKeyComparator, lastKey, key, pendingHandle);
             pendingIndexEntry = false;
         }
 

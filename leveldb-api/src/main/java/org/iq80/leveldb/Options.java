@@ -73,7 +73,7 @@ public class Options
     private int blockSize = 4 * 1024;
     private boolean verifyChecksums = true;
     private boolean paranoidChecks = false;
-    private DBComparator comparator = null;
+    private DBBufferComparator comparator = null;
     private Logger logger = null;
     private long cacheSize = 0;
     private boolean throttleLevel0 = true;
@@ -218,15 +218,36 @@ public class Options
         return this;
     }
 
-    public DBComparator comparator()
+    public DBBufferComparator bufferComparator()
     {
         return comparator;
     }
 
-    public Options comparator(DBComparator comparator)
+    public Options bufferComparator(DBBufferComparator comparator)
     {
         this.comparator = comparator;
         return this;
+    }
+
+    /**
+     * @deprecated use {@link Options#bufferComparator()}
+     */
+    public DBComparator comparator()
+    {
+        if (comparator == null)
+            return null;
+        if (comparator instanceof LegacyComparatorWrapper)
+            return ((LegacyComparatorWrapper) comparator).comparator;
+        else
+            throw new IllegalStateException("requested legacy comparator when none was specified");
+    }
+
+    /**
+     * @deprecated use {@link Options#bufferComparator(DBBufferComparator)}
+     */
+    public Options comparator(DBComparator comparator)
+    {
+        return bufferComparator(new LegacyComparatorWrapper(comparator));
     }
 
     /**

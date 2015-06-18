@@ -138,7 +138,8 @@ public enum VersionEditTag
             int level = VariableLengthQuantity.readVariableLengthInt(buffer);
 
             // internal key
-            InternalKey internalKey = new InternalKey(ByteBuffers.readLengthPrefixedBytes(buffer));
+            // store on heap to leverage GC and make our lives easier
+            InternalKey internalKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             versionEdit.setCompactPointer(level, internalKey);
         }
@@ -202,10 +203,11 @@ public enum VersionEditTag
             long fileSize = VariableLengthQuantity.readVariableLengthLong(buffer);
 
             // smallest key
-            InternalKey smallestKey = new InternalKey(ByteBuffers.readLengthPrefixedBytes(buffer));
+            // store on heap to leverage GC and make our lives easier. these keys make up only a small portion of all data
+            InternalKey smallestKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             // largest key
-            InternalKey largestKey = new InternalKey(ByteBuffers.readLengthPrefixedBytes(buffer));
+            InternalKey largestKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             versionEdit.addFile(level, fileNumber, fileSize, smallestKey, largestKey);
         }

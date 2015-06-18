@@ -18,7 +18,8 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.primitives.Longs;
-import org.iq80.leveldb.table.UserComparator;
+
+import org.iq80.leveldb.DBBufferComparator;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -27,14 +28,14 @@ import java.util.Iterator;
 public class InternalKeyComparator
         implements Comparator<InternalKey>
 {
-    private final UserComparator userComparator;
+    private final DBBufferComparator userComparator;
 
-    public InternalKeyComparator(UserComparator userComparator)
+    public InternalKeyComparator(DBBufferComparator userComparator)
     {
         this.userComparator = userComparator;
     }
 
-    public UserComparator getUserComparator()
+    public DBBufferComparator getDBBufferComparator()
     {
         return userComparator;
     }

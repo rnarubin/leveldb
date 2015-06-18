@@ -19,11 +19,12 @@ package org.iq80.leveldb.table;
 
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 
 public class BytewiseComparator
-        implements UserComparator
+        implements DBBufferComparator
 {
     private final MemoryManager memory;
 

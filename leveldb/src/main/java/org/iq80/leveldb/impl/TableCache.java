@@ -29,7 +29,6 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.table.FileChannelTable;
 import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
-import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.Finalizer;
 import org.iq80.leveldb.util.InternalTableIterator;
 
@@ -48,7 +47,7 @@ public class TableCache
 
     public TableCache(final File databaseDir,
             int tableCacheSize,
-            final UserComparator userComparator,
+            final InternalKeyBufferComparator userComparator,
             final Options options)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
@@ -128,7 +127,10 @@ public class TableCache
         private final Table table;
         private FileChannel fileChannel;
 
-        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, Options options)
+        private TableAndFile(File databaseDir,
+                long fileNumber,
+                InternalKeyBufferComparator userComparator,
+                Options options)
                 throws IOException
         {
             String tableFileName = Filename.tableFileName(fileNumber);

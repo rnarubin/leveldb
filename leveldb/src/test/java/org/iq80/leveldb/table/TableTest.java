@@ -135,7 +135,7 @@ public abstract class TableTest
         TableBuilder builder = new TableBuilder(options, fileChannel, byteCompare);
 
         for (BlockEntry entry : entries) {
-            builder.add(entry);
+            builder.add(entry.getKey(), entry.getValue());
         }
         builder.finish();
 
