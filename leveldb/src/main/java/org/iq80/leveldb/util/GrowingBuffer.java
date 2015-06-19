@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.impl.InternalKey;
 
 public class GrowingBuffer
         implements Closeable
@@ -53,6 +54,16 @@ public class GrowingBuffer
     public GrowingBuffer putInt(int val)
     {
         ensureSpace(SizeOf.SIZE_OF_INT).putInt(val);
+        return this;
+    }
+
+    public GrowingBuffer writeLengthPrefixedKey(InternalKey key)
+    {
+        // 5 for max size of variable length int
+        final int writeSize = key.getEncodedSize() + 5;
+        ByteBuffer dst = ensureSpace(writeSize);
+        VariableLengthQuantity.writeVariableLengthInt(writeSize, dst);
+        key.writeToBuffer(dst);
         return this;
     }
 

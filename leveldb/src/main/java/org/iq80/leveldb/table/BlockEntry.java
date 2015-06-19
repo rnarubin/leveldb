@@ -22,6 +22,8 @@ import com.google.common.base.Preconditions;
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 
+import org.iq80.leveldb.impl.InternalKey;
+
 /**
  * Binary Structure
  * <table summary="record format">
@@ -69,12 +71,12 @@ import java.util.Map.Entry;
  * </table>
  */
 public class BlockEntry
-        implements Entry<ByteBuffer, ByteBuffer>
+        implements Entry<InternalKey, ByteBuffer>
 {
-    private final ByteBuffer key;
+    private final InternalKey key;
     private final ByteBuffer value;
 
-    public BlockEntry(ByteBuffer key, ByteBuffer value)
+    public BlockEntry(InternalKey key, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
         Preconditions.checkNotNull(value, "value is null");
@@ -83,7 +85,7 @@ public class BlockEntry
     }
 
     @Override
-    public ByteBuffer getKey()
+    public InternalKey getKey()
     {
         return key;
     }

@@ -18,6 +18,7 @@
 package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 
@@ -31,7 +32,7 @@ import java.util.Comparator;
 public class FileChannelTable
         extends Table
 {
-    public FileChannelTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
+    public FileChannelTable(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
         super(name, fileChannel, comparator, options);

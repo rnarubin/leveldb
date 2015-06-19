@@ -30,13 +30,12 @@ import org.iq80.leveldb.table.FileChannelTable;
 import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.util.Finalizer;
-import org.iq80.leveldb.util.InternalTableIterator;
+import org.iq80.leveldb.util.TableIterator;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.ExecutionException;
 
@@ -47,7 +46,7 @@ public class TableCache
 
     public TableCache(final File databaseDir,
             int tableCacheSize,
-            final InternalKeyBufferComparator userComparator,
+            final InternalKeyComparator userComparator,
             final Options options)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
@@ -75,17 +74,17 @@ public class TableCache
                 });
     }
 
-    public InternalTableIterator newIterator(FileMetaData file)
+    public TableIterator newIterator(FileMetaData file)
     {
         return newIterator(file.getNumber());
     }
 
-    public InternalTableIterator newIterator(long number)
+    public TableIterator newIterator(long number)
     {
-        return new InternalTableIterator(getTable(number).iterator());
+        return getTable(number).iterator();
     }
 
-    public long getApproximateOffsetOf(FileMetaData file, ByteBuffer key)
+    public long getApproximateOffsetOf(FileMetaData file, InternalKey key)
     {
         try (Table table = getTable(file.getNumber())) {
             return table.getApproximateOffsetOf(key);
@@ -129,7 +128,7 @@ public class TableCache
 
         private TableAndFile(File databaseDir,
                 long fileNumber,
-                InternalKeyBufferComparator userComparator,
+ InternalKeyComparator userComparator,
                 Options options)
                 throws IOException
         {

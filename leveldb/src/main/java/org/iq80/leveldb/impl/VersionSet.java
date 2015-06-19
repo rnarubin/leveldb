@@ -27,10 +27,10 @@ import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.MergingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -209,7 +209,7 @@ public class VersionSet
             if (!c.getInputs()[which].isEmpty()) {
                 if (c.getLevel() + which == 0) {
                     List<FileMetaData> files = c.getInputs()[which];
-                    list.add(new Level0Iterator(tableCache, files, internalKeyComparator));
+                    list.add(Level0.createLevel0Iterator(tableCache, files, internalKeyComparator));
                 }
                 else {
                     // Create concatenating iterator for the files from this level
@@ -221,14 +221,15 @@ public class VersionSet
     }
 
     public LookupResult get(LookupKey key)
+            throws IOException
     {
         return current.get(key);
     }
 
-    //TODO remove maybe
+    // TODO remove maybe
     public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
-        return current.overlapInLevel(level, smallestUserKey, largestUserKey, options.memoryManager());
+        return current.overlapInLevel(level, smallestUserKey, largestUserKey);
     }
 
     public int numberOfFilesInLevel(int level)
@@ -634,7 +635,7 @@ public class VersionSet
         ImmutableList.Builder<FileMetaData> files = ImmutableList.builder();
         ByteBuffer userBegin = begin.getUserKey();
         ByteBuffer userEnd = end.getUserKey();
-        UserComparator userComparator = internalKeyComparator.getUserComparator();
+        DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
         for (FileMetaData fileMetaData : current.getFiles(level)) {
             if (userComparator.compare(fileMetaData.getLargest().getUserKey(), userBegin) < 0 ||
                     userComparator.compare(fileMetaData.getSmallest().getUserKey(), userEnd) > 0) {

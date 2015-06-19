@@ -139,7 +139,8 @@ public enum VersionEditTag
 
             // internal key
             // store on heap to leverage GC and make our lives easier
-            InternalKey internalKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+            InternalKey internalKey = new EncodedInternalKey(
+                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             versionEdit.setCompactPointer(level, internalKey);
         }
@@ -154,7 +155,7 @@ public enum VersionEditTag
                 VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
 
                 // internal key
-                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, entry.getValue().encode());
+                buffer.writeLengthPrefixedKey(entry.getValue());
             }
         }
     },
@@ -204,10 +205,12 @@ public enum VersionEditTag
 
             // smallest key
             // store on heap to leverage GC and make our lives easier. these keys make up only a small portion of all data
-            InternalKey smallestKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+            InternalKey smallestKey = new EncodedInternalKey(
+                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             // largest key
-            InternalKey largestKey = new InternalKey(ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+            InternalKey largestKey = new EncodedInternalKey(
+                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
 
             versionEdit.addFile(level, fileNumber, fileSize, smallestKey, largestKey);
         }
@@ -229,10 +232,10 @@ public enum VersionEditTag
                 VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getFileSize(), buffer);
 
                 // smallest key
-                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, fileMetaData.getSmallest().encode());
+                buffer.writeLengthPrefixedKey(fileMetaData.getSmallest());
 
                 // largest key
-                ByteBuffers.writeLengthPrefixedBytesTransparent(buffer, fileMetaData.getLargest().encode());
+                buffer.writeLengthPrefixedKey(fileMetaData.getLargest());
             }
         }
     };

@@ -18,12 +18,18 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Lists;
 
-import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.InternalTableIterator;
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.impl.MemTable.MemTableIterator;
+import org.iq80.leveldb.util.DbIterator;
+import org.iq80.leveldb.util.InternalIterator;
+import org.iq80.leveldb.util.LevelIterator;
+import org.iq80.leveldb.util.TableIterator;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
@@ -72,6 +78,7 @@ public class Level0
     }
 
     public LookupResult get(LookupKey key, ReadStats readStats)
+            throws IOException
     {
         if (files.isEmpty()) {
             return null;
@@ -90,7 +97,7 @@ public class Level0
         readStats.clear();
         for (FileMetaData fileMetaData : fileMetaDataList) {
             // open the iterator
-            try (InternalTableIterator iterator = tableCache.newIterator(fileMetaData)) {
+            try (InternalIterator iterator = tableCache.newIterator(fileMetaData)) {
                 // seek to the key
                 iterator.seek(key.getInternalKey());
 
@@ -123,12 +130,12 @@ public class Level0
         return null;
     }
 
-    public boolean someFileOverlapsRange(ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
+    public boolean someFileOverlapsRange(ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
-        InternalKey smallestInternalKey = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE, memory);
+        InternalKey smallestInternalKey = new TransientInternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE);
         int index = findFile(smallestInternalKey);
 
-        UserComparator userComparator = internalKeyComparator.getUserComparator();
+        DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
         return ((index < files.size()) &&
                 userComparator.compare(largestUserKey, files.get(index).getSmallest().getUserKey()) >= 0);
     }
@@ -165,6 +172,18 @@ public class Level0
     {
         // todo remove mutation
         files.add(fileMetaData);
+    }
+
+    public static InternalIterator createLevel0Iterator(TableCache tableCache,
+            List<FileMetaData> files,
+            InternalKeyComparator internalKeyComparator)
+    {
+        Builder<TableIterator> builder = ImmutableList.builder();
+        for (FileMetaData file : files) {
+            builder.add(tableCache.newIterator(file));
+        }
+        return new DbIterator((MemTableIterator) null, (MemTableIterator) null, builder.build(),
+                Collections.<LevelIterator> emptyList(), internalKeyComparator);
     }
 
     @Override

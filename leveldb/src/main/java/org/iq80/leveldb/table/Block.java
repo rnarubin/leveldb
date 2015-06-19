@@ -20,6 +20,7 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 
@@ -63,16 +64,16 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
  * </table>
  */
 public class Block
-        implements SeekingIterable<ByteBuffer, ByteBuffer>
+        implements SeekingIterable<InternalKey, ByteBuffer>
 {
     private final ByteBuffer block;
-    private final Comparator<ByteBuffer> comparator;
+    private final Comparator<InternalKey> comparator;
 
     private final ByteBuffer data;
     private final ByteBuffer restartPositions;
     private final MemoryManager memory;
 
-    public Block(ByteBuffer block, Comparator<ByteBuffer> comparator, MemoryManager memory)
+    public Block(ByteBuffer block, Comparator<InternalKey> comparator, MemoryManager memory)
     {
         Preconditions.checkNotNull(block, "block is null");
         Preconditions.checkArgument(block.remaining() >= SIZE_OF_INT, "Block is corrupt: size must be at least %s block", SIZE_OF_INT);

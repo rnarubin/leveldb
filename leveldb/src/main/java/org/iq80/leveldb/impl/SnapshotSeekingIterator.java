@@ -20,7 +20,6 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.collect.Maps;
 
-import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
 import org.iq80.leveldb.util.DbIterator;
 
@@ -42,25 +41,19 @@ public final class SnapshotSeekingIterator
     // indicates the direction in which the iterator was last advanced
     private Direction direction;
     private Entry<InternalKey, ByteBuffer> savedEntry;
-    private final MemoryManager memory;
 
     protected enum Direction
     {
         FORWARD, REVERSE
     }
 
-    public SnapshotSeekingIterator(
-            DbIterator iterator,
-            SnapshotImpl snapshot,
-            Comparator<ByteBuffer> userComparator,
-            MemoryManager memory)
+    public SnapshotSeekingIterator(DbIterator iterator, SnapshotImpl snapshot, Comparator<ByteBuffer> userComparator)
     {
         this.iterator = iterator;
         this.snapshot = snapshot;
         this.userComparator = userComparator;
         this.snapshot.getVersion().retain();
         this.savedEntry = null;
-        this.memory = memory;
         seekToFirst();
     }
 
@@ -97,7 +90,7 @@ public final class SnapshotSeekingIterator
     @Override
     protected void seekInternal(ByteBuffer targetKey)
     {
-        iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE, memory));
+        iterator.seek(new TransientInternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
         findNextUserEntry(false, null);
         direction = REVERSE; // the next user entry has been found, but not yet advanced
     }

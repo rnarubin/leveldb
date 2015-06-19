@@ -47,7 +47,6 @@ public class BlockBuilder
     public BlockBuilder(int estimatedSize,
             int blockRestartInterval,
             InternalKeyComparator comparator,
-            //Comparator<ByteBuffer> comparator,
             MemoryManager memory)
     {
         Preconditions.checkArgument(estimatedSize >= 0, "estimatedSize is negative");

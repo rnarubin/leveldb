@@ -37,7 +37,7 @@ public final class LevelIterator
     private final TableCache tableCache;
     private final List<FileMetaData> files;
     private final InternalKeyComparator comparator;
-    private InternalTableIterator current;
+    private TableIterator current;
     private CurrentOrigin currentOrigin = NONE; // see TableIterator for explanation of this enum's functionality
     private int index;
 
@@ -231,19 +231,19 @@ public final class LevelIterator
         return currentHasPrev;
     }
 
-    private InternalTableIterator openFile(int i)
+    private TableIterator openFile(int i)
     {
         closeCurrent();
         return tableCache.newIterator(files.get(i));
     }
 
-    private InternalTableIterator openNextFile()
+    private TableIterator openNextFile()
     {
         currentOrigin = NEXT;
         return openFile(index++);
     }
 
-    private InternalTableIterator openPrevFile()
+    private TableIterator openPrevFile()
     {
         currentOrigin = PREV;
         return openFile(--index);

@@ -30,16 +30,20 @@ public interface DBBufferComparator extends Comparator<ByteBuffer>
     String name();
 
     /**
-     * If <code>start < limit</code>, returns a short key in [start,limit).
-     * Simple comparator implementations should return start unchanged.
+     * If <code>start < limit</code>, mutate {@code start} to be a short key in [start,limit).
+     * Simple comparator implementations may leave {@code start} unchanged.
+     * 
+     * @return true iff start was mutated
      */
-    ByteBuffer findShortestSeparator(ByteBuffer start, ByteBuffer limit);
+    boolean findShortestSeparator(ByteBuffer start, ByteBuffer limit);
 
     /**
-     * returns a 'short key' where the 'short key' >= key.
-     * Simple comparator implementations should return key unchanged.
+     * mutate {@code key} to be a 'short key' where the 'short key' >= key.
+     * Simple comparator implementations may leave {@code key} unchanged.
+     * 
+     * @return true iff key was mutated
      */
-    ByteBuffer findShortSuccessor(ByteBuffer key);
+    boolean findShortSuccessor(ByteBuffer key);
 }
 
 

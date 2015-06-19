@@ -18,6 +18,7 @@
 package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 
@@ -38,7 +39,7 @@ public class MMapTable
 {
     private MappedByteBuffer data;
 
-    public MMapTable(String name, FileChannel fileChannel, Comparator<ByteBuffer> comparator, Options options)
+    public MMapTable(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
         super(name, fileChannel, comparator, options);

@@ -17,19 +17,19 @@
  */
 package org.iq80.leveldb.util;
 
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.table.Block;
 import org.iq80.leveldb.table.BlockIterator;
 import org.iq80.leveldb.table.Table;
 
-import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 
 import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
 
 public final class TableIterator
-        extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
-        implements Closeable
+        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
+        implements InternalIterator
 {
     private final Table table;
     private final BlockIterator blockIterator;
@@ -92,7 +92,7 @@ public final class TableIterator
     }
 
     @Override
-    protected void seekInternal(ByteBuffer targetKey)
+    protected void seekInternal(InternalKey targetKey)
     {
         // seek the index to the block containing the key
         blockIterator.seek(targetKey);
@@ -121,7 +121,7 @@ public final class TableIterator
     }
 
     @Override
-    protected Entry<ByteBuffer, ByteBuffer> getNextElement()
+    protected Entry<InternalKey, ByteBuffer> getNextElement()
     {
         // note: it must be here & not where 'current' is assigned,
         // because otherwise we'll have called inputs.next() before throwing
@@ -131,19 +131,19 @@ public final class TableIterator
     }
 
     @Override
-    protected Entry<ByteBuffer, ByteBuffer> getPrevElement()
+    protected Entry<InternalKey, ByteBuffer> getPrevElement()
     {
         return currentHasPrev() ? current.prev() : null;
     }
 
     @Override
-    protected Entry<ByteBuffer, ByteBuffer> peekInternal()
+    protected Entry<InternalKey, ByteBuffer> peekInternal()
     {
         return currentHasNext() ? current.peek() : null;
     }
 
     @Override
-    protected Entry<ByteBuffer, ByteBuffer> peekPrevInternal()
+    protected Entry<InternalKey, ByteBuffer> peekPrevInternal()
     {
         return currentHasPrev() ? current.peekPrev() : null;
     }

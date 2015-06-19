@@ -37,15 +37,29 @@ class LegacyComparatorWrapper
     }
 
     @Override
-    public ByteBuffer findShortestSeparator(ByteBuffer start, ByteBuffer limit)
+    public boolean findShortestSeparator(ByteBuffer start, ByteBuffer limit)
     {
-        return ByteBuffer.wrap(comparator.findShortestSeparator(toArray(start), toArray(limit)));
+        byte[] s = toArray(start);
+        byte[] ret = comparator.findShortestSeparator(s, toArray(limit));
+        if (ret == s)
+            return false;
+
+        start.mark();
+        start.put(ret).limit(start.position()).reset();
+        return true;
     }
 
     @Override
-    public ByteBuffer findShortSuccessor(ByteBuffer key)
+    public boolean findShortSuccessor(ByteBuffer key)
     {
-        return ByteBuffer.wrap(comparator.findShortSuccessor(toArray(key)));
+        byte[] k = toArray(key);
+        byte[] ret = comparator.findShortSuccessor(k);
+        if (ret == k)
+            return false;
+
+        key.mark();
+        key.put(ret).limit(key.position()).reset();
+        return true;
     }
 
     @Override
@@ -57,7 +71,8 @@ class LegacyComparatorWrapper
     private static byte[] toArray(ByteBuffer b)
     {
         byte[] arr = new byte[b.remaining()];
-        b.get(arr);
+        b.mark();
+        b.get(arr).reset();
         return arr;
     }
 }

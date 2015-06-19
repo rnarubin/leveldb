@@ -17,8 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.primitives.Longs;
-
 import org.iq80.leveldb.DBBufferComparator;
 
 import java.util.Arrays;
@@ -35,7 +33,7 @@ public class InternalKeyComparator
         this.userComparator = userComparator;
     }
 
-    public DBBufferComparator getDBBufferComparator()
+    public DBBufferComparator getUserComparator()
     {
         return userComparator;
     }
@@ -43,6 +41,28 @@ public class InternalKeyComparator
     public String name()
     {
         return this.userComparator.name();
+    }
+
+    InternalKey findShortestSeparator(InternalKey start, InternalKey limit)
+    {
+        // Attempt to shorten the user portion of the key
+        if (userComparator.findShortestSeparator(start.getUserKey(), limit.getUserKey())) {
+            return new TransientInternalKey(start.getUserKey(), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        }
+        else {
+            return start;
+        }
+
+    }
+
+    InternalKey findShortSuccessor(InternalKey key)
+    {
+        if (userComparator.findShortSuccessor(key.getUserKey())) {
+            return new TransientInternalKey(key.getUserKey(), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        }
+        else {
+            return key;
+        }
     }
 
     @Override
@@ -53,7 +73,7 @@ public class InternalKeyComparator
             return result;
         }
 
-        return Longs.compare(right.getSequenceNumber(), left.getSequenceNumber()); // reverse sorted version numbers
+        return Long.compare(right.getSequenceNumber(), left.getSequenceNumber()); // reverse sorted version numbers
     }
 
     /**

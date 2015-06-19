@@ -21,6 +21,8 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.impl.EncodedInternalKey;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -34,14 +36,14 @@ import java.util.NoSuchElementException;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
 public class BlockIterator
-        implements ReverseSeekingIterator<ByteBuffer, ByteBuffer>
+        implements ReverseSeekingIterator<InternalKey, ByteBuffer>
 {
     private final ByteBuffer data;
     private final ByteBuffer restartPositions;
     private final int restartCount;
     private int prevPosition;
     private int restartIndex;
-    private final Comparator<ByteBuffer> comparator;
+    private final Comparator<InternalKey> comparator;
 
     private BlockEntry nextEntry;
     private BlockEntry prevEntry;
@@ -53,7 +55,7 @@ public class BlockIterator
 
     public BlockIterator(ByteBuffer data,
             ByteBuffer restartPositions,
-            Comparator<ByteBuffer> comparator,
+            Comparator<InternalKey> comparator,
             MemoryManager memory)
     {
         Preconditions.checkNotNull(data, "data is null");
@@ -229,7 +231,7 @@ public class BlockIterator
      * the specified targetKey.
      */
     @Override
-    public void seek(ByteBuffer targetKey)
+    public void seek(InternalKey targetKey)
     {
         if (restartCount == 0) {
             return;
@@ -316,7 +318,7 @@ public class BlockIterator
             Preconditions.checkState(previousEntry != null,
                     "Entry has a shared key but no previous entry was provided");
 
-            ByteBuffer prev = previousEntry.getKey();
+            ByteBuffer prev = previousEntry.getKey().getUserKey();
             prev.mark();
             ByteBuffers.putLength(key, prev, sharedKeyLength);
             prev.reset();
@@ -327,7 +329,7 @@ public class BlockIterator
         // read value
         ByteBuffer value = ByteBuffers.slice(ByteBuffers.duplicateAndAdvance(data, valueLength));
 
-        return new BlockEntry(key, value);
+        return new BlockEntry(new EncodedInternalKey(key), value);
     }
 
     private void resetCache()

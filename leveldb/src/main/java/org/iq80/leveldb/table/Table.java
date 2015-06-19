@@ -24,6 +24,7 @@ import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
@@ -41,12 +42,12 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class Table
-        implements SeekingIterable<ByteBuffer, ByteBuffer>, AutoCloseable
+        implements SeekingIterable<InternalKey, ByteBuffer>, AutoCloseable
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
     protected final String name;
     protected final FileChannel fileChannel;
-    protected final Comparator<ByteBuffer> comparator;
+    protected final Comparator<InternalKey> comparator;
     protected final boolean verifyChecksums;
     protected final Block indexBlock;
     protected final BlockHandle metaindexBlockHandle;
@@ -54,10 +55,7 @@ public abstract class Table
     private final Compression compression;
     private final AtomicInteger refCount;
 
-    public Table(String name,
-            FileChannel fileChannel,
-            Comparator<ByteBuffer> comparator,
-            Options options)
+    public Table(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");
@@ -113,7 +111,7 @@ public abstract class Table
             return uncompress(compression, compressedData, memory);
         }
         if (compressionId == 1) {
-            // id matches Snappy, but not user comparator, implying legacy data
+            // id matches Snappy, but not user compression, implying legacy data
             return uncompress(Snappy.instance(), compressedData, memory);
         }
         else {
@@ -141,7 +139,7 @@ public abstract class Table
      * For example, the approximate offset of the last key in the table will
      * be close to the file length.
      */
-    public long getApproximateOffsetOf(ByteBuffer key)
+    public long getApproximateOffsetOf(InternalKey key)
     {
         BlockIterator iterator = indexBlock.iterator();
         iterator.seek(key);

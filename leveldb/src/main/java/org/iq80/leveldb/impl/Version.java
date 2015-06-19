@@ -24,10 +24,10 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 
-import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.util.InternalTableIterator;
 import org.iq80.leveldb.util.LevelIterator;
+import org.iq80.leveldb.util.TableIterator;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
@@ -128,9 +128,9 @@ public class Version
         this.compactionScore = compactionScore;
     }
 
-    List<InternalTableIterator> getLevel0Files()
+    List<TableIterator> getLevel0Files()
     {
-        Builder<InternalTableIterator> builder = ImmutableList.builder();
+        Builder<TableIterator> builder = ImmutableList.builder();
         for (FileMetaData file : level0.getFiles()) {
             builder.add(getTableCache().newIterator(file));
         }
@@ -149,6 +149,7 @@ public class Version
     }
 
     public LookupResult get(LookupKey key)
+            throws IOException
     {
         // We can search level-by-level since entries never hop across
         // levels.  Therefore we are guaranteed that if we find data
@@ -167,16 +168,16 @@ public class Version
         return lookupResult;
     }
 
-    int pickLevelForMemTableOutput(ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
+    int pickLevelForMemTableOutput(ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
         int level = 0;
-        if (!overlapInLevel(0, smallestUserKey, largestUserKey, memory)) {
+        if (!overlapInLevel(0, smallestUserKey, largestUserKey)) {
             // Push to next level if there is no overlap in next level,
             // and the #bytes overlapping in the level after that are limited.
-            InternalKey start = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE, memory);
-            InternalKey limit = new InternalKey(largestUserKey, 0, ValueType.VALUE, memory);
+            InternalKey start = new TransientInternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+            InternalKey limit = new TransientInternalKey(largestUserKey, 0, ValueType.VALUE);
             while (level < MAX_MEM_COMPACT_LEVEL) {
-                if (overlapInLevel(level + 1, smallestUserKey, largestUserKey, memory)) {
+                if (overlapInLevel(level + 1, smallestUserKey, largestUserKey)) {
                     break;
                 }
                 long sum = Compaction.totalFileSize(versionSet.getOverlappingInputs(level + 2, start, limit));
@@ -189,16 +190,16 @@ public class Version
         return level;
     }
 
-    public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey, MemoryManager memory)
+    public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
         Preconditions.checkPositionIndex(level, levels.size(), "Invalid level");
         Preconditions.checkNotNull(smallestUserKey, "smallestUserKey is null");
         Preconditions.checkNotNull(largestUserKey, "largestUserKey is null");
 
         if (level == 0) {
-            return level0.someFileOverlapsRange(smallestUserKey, largestUserKey, memory);
+            return level0.someFileOverlapsRange(smallestUserKey, largestUserKey);
         }
-        return levels.get(level - 1).someFileOverlapsRange(smallestUserKey, largestUserKey, memory);
+        return levels.get(level - 1).someFileOverlapsRange(smallestUserKey, largestUserKey);
     }
 
     public int numberOfLevels()
@@ -295,7 +296,7 @@ public class Version
                 else {
                     // "ikey" falls in the range for this table.  Add the
                     // approximate offset of "ikey" within the table.
-                    result += getTableCache().getApproximateOffsetOf(fileMetaData, key.encode());
+                    result += getTableCache().getApproximateOffsetOf(fileMetaData, key);
                 }
             }
         }

@@ -40,15 +40,15 @@ public final class DbIterator
     private final OrdinalIterator<?>[] heap;
     private final Comparator<OrdinalIterator<?>> smallerNext, largerPrev;
 
-    private final Comparator<InternalKey> userComparator;
+    private final Comparator<InternalKey> internalKeyComparator;
 
     public DbIterator(MemTableIterator memTableIterator,
             MemTableIterator immutableMemTableIterator,
-            List<InternalTableIterator> level0Files,
+            List<TableIterator> level0Files,
             List<LevelIterator> levels,
-            Comparator<InternalKey> userComparator)
+            Comparator<InternalKey> internalKeyComparator)
     {
-        this.userComparator = userComparator;
+        this.internalKeyComparator = internalKeyComparator;
 
         ArrayList<OrdinalIterator<?>> ordinalIterators = new ArrayList<OrdinalIterator<?>>();
         int ordinal = 0;
@@ -59,8 +59,8 @@ public final class DbIterator
         if (immutableMemTableIterator != null) {
             ordinalIterators.add(new OrdinalIterator<MemTableIterator>(ordinal++, immutableMemTableIterator));
         }
-        for (InternalTableIterator level0File : level0Files) {
-            ordinalIterators.add(new OrdinalIterator<InternalTableIterator>(ordinal++, level0File));
+        for (TableIterator level0File : level0Files) {
+            ordinalIterators.add(new OrdinalIterator<TableIterator>(ordinal++, level0File));
         }
         for (LevelIterator level : levels) {
             ordinalIterators.add(new OrdinalIterator<LevelIterator>(ordinal++, level));
@@ -240,7 +240,7 @@ public final class DbIterator
         final StringBuilder sb = new StringBuilder();
         sb.append("DbIterator");
         sb.append("{iterators=").append(Arrays.asList(heap));
-        sb.append(", userComparator=").append(userComparator);
+        sb.append(", userComparator=").append(internalKeyComparator);
         sb.append('}');
         return sb.toString();
     }
@@ -267,7 +267,7 @@ public final class DbIterator
                 if (o2.iterator.hasNext()) {
                     // both iterators have a next element
                     int result =
-                            userComparator.compare(o1.iterator.peek().getKey(),
+                            internalKeyComparator.compare(o1.iterator.peek().getKey(),
                                     o2.iterator.peek().getKey());
                     return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
                 }
@@ -289,7 +289,7 @@ public final class DbIterator
             if (o1.iterator.hasPrev()) {
                 if (o2.iterator.hasPrev()) {
                     int result =
-                            userComparator.compare(o1.iterator.peekPrev().getKey(),
+                            internalKeyComparator.compare(o1.iterator.peekPrev().getKey(),
                                     o2.iterator.peekPrev().getKey());
                     return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
                 }

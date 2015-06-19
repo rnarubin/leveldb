@@ -19,15 +19,13 @@ package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
 
-import org.iq80.leveldb.MemoryManager;
-
 public class LookupKey
 {
     private final InternalKey key;
 
-    public LookupKey(ByteBuffer userKey, long sequenceNumber, MemoryManager memory)
+    public LookupKey(ByteBuffer userKey, long sequenceNumber)
     {
-        key = new InternalKey(userKey, sequenceNumber, ValueType.VALUE, memory);
+        key = new TransientInternalKey(userKey, sequenceNumber, ValueType.VALUE);
     }
 
     public InternalKey getInternalKey()

@@ -24,9 +24,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBException;
-import org.iq80.leveldb.LegacyComparatorWrapper;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -39,7 +37,6 @@ import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
 import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.TableBuilder;
-import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MemoryManagers;
@@ -131,7 +128,7 @@ public class DbImpl
         //use custom comparator if set
         DBBufferComparator userComparator = options.bufferComparator();
         if (userComparator == null) {
-            userComparator = new BytewiseComparator(options.memoryManager());
+            userComparator = new BytewiseComparator();
         }
         internalKeyComparator = new InternalKeyComparator(userComparator);
 
@@ -153,8 +150,7 @@ public class DbImpl
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(databaseDir, tableCacheSize, new InternalKeyBufferComparator(userComparator,
-                options.memoryManager()), options);
+        tableCache = new TableCache(databaseDir, tableCacheSize, internalKeyComparator, options);
 
         // create the version set
 
@@ -448,9 +444,9 @@ public class DbImpl
 
         Compaction compaction;
         if (manualCompaction != null) {
-            compaction = versions.compactRange(manualCompaction.level, new InternalKey(manualCompaction.begin,
-                    MAX_SEQUENCE_NUMBER, ValueType.VALUE, options.memoryManager()),
-                    new InternalKey(manualCompaction.end, 0L, ValueType.DELETION, options.memoryManager()));
+            compaction = versions.compactRange(manualCompaction.level, new TransientInternalKey(manualCompaction.begin,
+                    MAX_SEQUENCE_NUMBER, ValueType.VALUE), new TransientInternalKey(manualCompaction.end, 0L,
+                    ValueType.DELETION));
         }
         else {
             compaction = versions.pickCompaction();
@@ -571,7 +567,7 @@ public class DbImpl
         mutex.lock();
         try {
             SnapshotImpl snapshot = getSnapshot(readOptions);
-            lookupKey = new LookupKey(ByteBuffer.wrap(key), snapshot.getLastSequence(), options.memoryManager());
+            lookupKey = new LookupKey(ByteBuffer.wrap(key), snapshot.getLastSequence());
             MemTables tables = memTables;
 
             // First look in the memtable, then in the immutable memtable (if any).
@@ -599,7 +595,13 @@ public class DbImpl
         }
 
         // Not in memTables; try live files in level order
-        LookupResult lookupResult = versions.get(lookupKey);
+        LookupResult lookupResult;
+        try {
+            lookupResult = versions.get(lookupKey);
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
 
         // schedule compaction if necessary
         mutex.lock();
@@ -732,7 +734,7 @@ public class DbImpl
             // filter any entries not visible in our snapshot
             SnapshotImpl snapshot = getSnapshot(readOptions);
             SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator, snapshot,
-                    internalKeyComparator.getDBBufferComparator(), options.memoryManager());
+                    internalKeyComparator.getUserComparator());
             return new SeekingIteratorAdapter(snapshotIterator);
         }
         finally {
@@ -951,7 +953,7 @@ public class DbImpl
             ByteBuffer minUserKey = meta.getSmallest().getUserKey();
             ByteBuffer maxUserKey = meta.getLargest().getUserKey();
             if (base != null) {
-                level = base.pickLevelForMemTableOutput(minUserKey, maxUserKey, options.memoryManager());
+                level = base.pickLevelForMemTableOutput(minUserKey, maxUserKey);
             }
             edit.addFile(level, meta);
         }
@@ -968,8 +970,7 @@ public class DbImpl
             // channel is closed
             FileChannel channel = new FileOutputStream(file).getChannel();
             try {
-                TableBuilder tableBuilder = new TableBuilder(options, channel, new InternalKeyBufferComparator(
-                        internalKeyComparator, options.memoryManager()));
+                TableBuilder tableBuilder = new TableBuilder(options, channel, internalKeyComparator);
 
                 for (Entry<InternalKey, ByteBuffer> entry : data) {
                     // update keys
@@ -979,8 +980,7 @@ public class DbImpl
                     }
                     largest = key;
 
-                    // TODO check encode
-                    tableBuilder.add(key.encode(), entry.getValue());
+                    tableBuilder.add(key, entry.getValue());
                 }
 
                 tableBuilder.finish();
@@ -1092,8 +1092,7 @@ public class DbImpl
                             compactionState.currentSmallest = key;
                         }
                         compactionState.currentLargest = key;
-                        // TODO: check encode
-                        compactionState.builder.add(key.encode(), iterator.peek().getValue());
+                        compactionState.builder.add(key, iterator.peek().getValue());
 
                         // Close output file if it is big enough
                         if (compactionState.builder.getFileSize() >=
@@ -1139,8 +1138,7 @@ public class DbImpl
 
             File file = new File(databaseDir, Filename.tableFileName(fileNumber));
             compactionState.outfile = new FileOutputStream(file).getChannel();
-            compactionState.builder = new TableBuilder(options, compactionState.outfile,
-                    new InternalKeyBufferComparator(internalKeyComparator, options.memoryManager()));
+            compactionState.builder = new TableBuilder(options, compactionState.outfile, internalKeyComparator);
         }
         finally {
             mutex.unlock();
@@ -1232,10 +1230,10 @@ public class DbImpl
     {
         Version v = versions.getCurrent();
 
-        InternalKey startKey = new InternalKey(ByteBuffer.wrap(range.start()), SequenceNumber.MAX_SEQUENCE_NUMBER,
-                ValueType.VALUE, options.memoryManager());
-        InternalKey limitKey = new InternalKey(ByteBuffer.wrap(range.limit()), SequenceNumber.MAX_SEQUENCE_NUMBER,
-                ValueType.VALUE, options.memoryManager());
+        InternalKey startKey = new TransientInternalKey(ByteBuffer.wrap(range.start()),
+                SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        InternalKey limitKey = new TransientInternalKey(ByteBuffer.wrap(range.limit()),
+                SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
         long startOffset = v.getApproximateOffsetOf(startKey);
         long limitOffset = v.getApproximateOffsetOf(limitKey);
 
@@ -1369,13 +1367,13 @@ public class DbImpl
         @Override
         public void put(ByteBuffer key, ByteBuffer value)
         {
-            memTable.add(new InternalKey(key, sequence++, VALUE, options.memoryManager()), value);
+            memTable.add(new TransientInternalKey(key, sequence++, VALUE), value);
         }
 
         @Override
         public void delete(ByteBuffer key)
         {
-            memTable.add(new InternalKey(key, sequence++, DELETION, options.memoryManager()), ByteBuffers.EMPTY_BUFFER);
+            memTable.add(new TransientInternalKey(key, sequence++, DELETION), ByteBuffers.EMPTY_BUFFER);
         }
     }
 
