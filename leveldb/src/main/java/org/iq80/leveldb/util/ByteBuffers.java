@@ -1,5 +1,6 @@
 package org.iq80.leveldb.util;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -111,7 +112,7 @@ public final class ByteBuffers
         }
     }
 
-    /*
+    /**
      * parts of this code are borrowed and adapted from Guava's {@link UnsignedBytes} and Apache's <a href=
      * "https://svn.apache.org/repos/asf/cassandra/trunk/src/java/org/apache/cassandra/utils/FastByteComparisons.java" >FastByteComparisons</a>
      */
@@ -538,8 +539,6 @@ public final class ByteBuffers
                     while (len > 7) {
                         long c = unsafe.getLong(address);
                         if (BIG_ENDIAN) {
-                            // this could probably be done natively with the appropriate shifting.
-                            // but i'm lazy; my apologies to anyone in big endian land
                             c = Long.reverseBytes(c);
                         }
                         final int highlong = (int) (c >>> 32);
@@ -791,6 +790,30 @@ public final class ByteBuffers
         dst.put(src);
         src.limit(oldlim);
         return dst;
+    }
+
+    public static CloseableByteBuffer closeable(ByteBuffer b, MemoryManager m)
+    {
+        return new CloseableByteBuffer(b, m);
+    }
+
+    public static class CloseableByteBuffer
+            implements Closeable
+    {
+        public final ByteBuffer buffer;
+        private final MemoryManager memory;
+
+        public CloseableByteBuffer(ByteBuffer b, MemoryManager m)
+        {
+            this.buffer = b;
+            this.memory = m;
+        }
+
+        @Override
+        public void close()
+        {
+            memory.free(buffer);
+        }
     }
 
     public static ByteBufferCrc32 crc32()

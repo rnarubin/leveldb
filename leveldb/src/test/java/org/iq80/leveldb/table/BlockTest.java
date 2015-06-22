@@ -17,6 +17,7 @@
  */
 package org.iq80.leveldb.table;
 
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.SequenceNumber;
 import org.iq80.leveldb.impl.TransientInternalKey;
@@ -35,12 +36,12 @@ import static org.testng.Assert.assertEquals;
 
 public class BlockTest
 {
-    private static final InternalKeyComparator byteCompare = new InternalKeyComparator(new BytewiseComparator());
+    private static final DBBufferComparator byteCompare = new BytewiseComparator();
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyBuffer()
             throws Exception
     {
-        new Block(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap());
+        new Block(ByteBuffers.EMPTY_BUFFER, new InternalKeyComparator(byteCompare), MemoryManagers.heap());
     }
 
     @Test
@@ -130,7 +131,7 @@ public class BlockTest
         ByteBuffer blockByteBuffer = builder.finish();
         assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
-        Block block = new Block(blockByteBuffer, byteCompare, MemoryManagers.heap());
+        Block block = new Block(blockByteBuffer, new InternalKeyComparator(byteCompare), MemoryManagers.heap());
         assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
         BlockIterator blockIterator = block.iterator();

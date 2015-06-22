@@ -25,7 +25,6 @@ import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
-import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.slf4j.Logger;
@@ -97,12 +96,12 @@ public class TableBuilder
         compression = options.compression();
 
         dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE), blockRestartInterval,
-                internalKeyComparator, this.memory);
+                internalKeyComparator.getUserComparator(), this.memory);
 
         // with expected 50% compression
         int expectedNumberOfBlocks = 1024;
         indexBlockBuilder = new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1,
-                internalKeyComparator, this.memory);
+                internalKeyComparator.getUserComparator(), this.memory);
 
         lastKey = InternalKey.MINIMUM_KEY;
     }
@@ -133,7 +132,7 @@ public class TableBuilder
         // If we just wrote a block, we can now add the handle to index block
         if (pendingIndexEntry) {
             Preconditions.checkState(dataBlockBuilder.isEmpty(), "Internal error: Table has a pending index entry but data block builder is empty");
-            indexBlockBuilder.addHandle(internalKeyComparator, lastKey, key, pendingHandle);
+            indexBlockBuilder.addHandle(lastKey, key, pendingHandle);
             pendingIndexEntry = false;
         }
 
@@ -225,22 +224,23 @@ public class TableBuilder
         closed = true;
 
         // write (empty) meta index block
-        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(memory),
+        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(),
                 this.memory);
         // TODO(postrelease): Add stats and other meta blocks
         BlockHandle metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);
 
         // add last handle to index block
         if (pendingIndexEntry) {
+            indexBlockBuilder.addHandle(lastKey, null, pendingHandle);
             // TODO handle handle manually
-            ByteBuffer shortSuccessor = userComparator.findShortSuccessor(lastKey);
-
-            ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
-            handleEncoding.mark();
-            BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
-            handleEncoding.limit(handleEncoding.position()).reset();
-
-            indexBlockBuilder.add(shortSuccessor, handleEncoding);
+            // ByteBuffer shortSuccessor = userComparator.findShortSuccessor(lastKey);
+            //
+            // ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+            // handleEncoding.mark();
+            // BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
+            // handleEncoding.limit(handleEncoding.position()).reset();
+            //
+            // indexBlockBuilder.add(shortSuccessor, handleEncoding);
             pendingIndexEntry = false;
         }
 

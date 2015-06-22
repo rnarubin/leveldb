@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.SizeOf;
 
 public abstract class InternalKey
@@ -34,6 +35,11 @@ public abstract class InternalKey
     public abstract ValueType getValueType();
 
     public abstract void writeToBuffer(ByteBuffer dst);
+
+    public abstract ByteBuffer writeUnsharedAndValue(GrowingBuffer buffer,
+            boolean restart,
+            ByteBuffer lastKeyBuffer,
+            ByteBuffer value);
 
     public int getEncodedSize()
     {

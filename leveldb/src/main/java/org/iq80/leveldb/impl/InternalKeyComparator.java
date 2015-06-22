@@ -43,28 +43,6 @@ public class InternalKeyComparator
         return this.userComparator.name();
     }
 
-    InternalKey findShortestSeparator(InternalKey start, InternalKey limit)
-    {
-        // Attempt to shorten the user portion of the key
-        if (userComparator.findShortestSeparator(start.getUserKey(), limit.getUserKey())) {
-            return new TransientInternalKey(start.getUserKey(), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-        }
-        else {
-            return start;
-        }
-
-    }
-
-    InternalKey findShortSuccessor(InternalKey key)
-    {
-        if (userComparator.findShortSuccessor(key.getUserKey())) {
-            return new TransientInternalKey(key.getUserKey(), SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-        }
-        else {
-            return key;
-        }
-    }
-
     @Override
     public int compare(InternalKey left, InternalKey right)
     {

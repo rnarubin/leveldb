@@ -57,6 +57,12 @@ public class GrowingBuffer
         return this;
     }
 
+    public GrowingBuffer putLong(long val)
+    {
+        ensureSpace(SizeOf.SIZE_OF_LONG).putLong(val);
+        return this;
+    }
+
     public GrowingBuffer writeLengthPrefixedKey(InternalKey key)
     {
         // 5 for max size of variable length int

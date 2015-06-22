@@ -21,6 +21,8 @@ package org.iq80.leveldb.impl;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.GrowingBuffer;
+import org.iq80.leveldb.util.VariableLengthQuantity;
 
 import com.google.common.base.Preconditions;
 
@@ -64,6 +66,33 @@ public class EncodedInternalKey
     public void writeToBuffer(ByteBuffer dst)
     {
         dst.put(ByteBuffers.duplicate(data));
+    }
+
+    @Override
+    public ByteBuffer writeUnsharedAndValue(GrowingBuffer block,
+            boolean restart,
+            ByteBuffer lastKeyBuffer,
+            ByteBuffer value)
+    {
+        int sharedKeyBytes = 0;
+        if (!restart && lastKeyBuffer != null) {
+            sharedKeyBytes = ByteBuffers.calculateSharedBytes(data, lastKeyBuffer);
+        }
+
+        int nonSharedKeyBytes = data.remaining() - sharedKeyBytes;
+
+        // write "<shared><non_shared><value_size>"
+        VariableLengthQuantity.writeVariableLengthInt(sharedKeyBytes, block);
+        VariableLengthQuantity.writeVariableLengthInt(nonSharedKeyBytes, block);
+        VariableLengthQuantity.writeVariableLengthInt(value.remaining(), block);
+
+        // write non-shared key bytes
+        block.put(ByteBuffers.duplicateByLength(data, data.position() + sharedKeyBytes, nonSharedKeyBytes));
+
+        // write value bytes
+        block.put(ByteBuffers.duplicate(value));
+
+        return data;
     }
 }
 
