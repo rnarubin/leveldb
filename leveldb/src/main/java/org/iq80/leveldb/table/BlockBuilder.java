@@ -152,8 +152,6 @@ public class BlockBuilder
         Preconditions.checkState(!finished, "block is finished");
         Preconditions.checkPositionIndex(restartBlockEntryCount, blockRestartInterval);
 
-        Preconditions.checkArgument(lastKeyBuffer == null || comparator.compare(key.getUserKey(), lastKeyBuffer) > 0,
-                "key must be greater than last key");
         boolean restart = restartBlockEntryCount >= blockRestartInterval;
         if (restart) {
             restartPositions.add(block.filled());
@@ -171,11 +169,11 @@ public class BlockBuilder
         try (CloseableByteBuffer last = ByteBuffers.closeable(ByteBuffers.copy(lastKey.getUserKey(), memory), memory);
                 CloseableByteBuffer handleEncoded = ByteBuffers.closeable(
                         memory.allocate(BlockHandle.MAX_ENCODED_LENGTH), memory)) {
+
             boolean changed = key == null ? comparator.findShortSuccessor(last.buffer)
                     : comparator.findShortestSeparator(last.buffer, key.getUserKey());
-
             InternalKey encoded = changed ? new TransientInternalKey(last.buffer, SequenceNumber.MAX_SEQUENCE_NUMBER,
-                    ValueType.VALUE) : key;
+                    ValueType.VALUE) : lastKey;
 
             handleEncoded.buffer.mark();
             BlockHandle.writeBlockHandleTo(handle, handleEncoded.buffer).limit(handleEncoded.buffer.position()).reset();

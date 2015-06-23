@@ -249,6 +249,7 @@ public class TableBuilder
 
         // write footer
         Footer footer = new Footer(metaindexBlockHandle, indexBlockHandle);
+        // TODO FIXME flip
         ByteBuffer footerEncoding = Footer.writeFooter(footer, this.memory.allocate(Footer.ENCODED_LENGTH));
         footerEncoding.flip();
         position += fileChannel.write(footerEncoding);

@@ -286,6 +286,56 @@ public abstract class LogTest
         }
     }
 
+    @Test
+    public void testLogRecordBounds()
+            throws Exception
+    {
+        File file = File.createTempFile("test", ".log");
+        try {
+            int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
+            ByteBuffer record = ByteBuffer.allocate(recordSize);
+
+            LogWriter writer = Logs.createLogWriter(file, 10, options);
+            writer.addRecord(record, true);
+            writer.close();
+
+            LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
+
+            try (StrictMemoryManager strictMemory = new StrictMemoryManager();
+                    FileInputStream fileInput = new FileInputStream(file);
+                    LogReader logReader = new LogReader(fileInput.getChannel(), logMonitor, true, 0, strictMemory)) {
+
+                int count = 0;
+                for (ByteBuffer slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
+                    assertEquals(slice.remaining(), recordSize);
+                    count++;
+                    strictMemory.free(slice);
+                }
+                assertEquals(count, 1);
+            }
+        }
+        finally {
+            file.delete();
+        }
+    }
+
+    private static class AssertNoCorruptionLogMonitor
+            implements LogMonitor
+    {
+
+        @Override
+        public void corruption(long bytes, String reason)
+        {
+            fail("corruption at " + bytes + " reason: " + reason);
+        }
+
+        @Override
+        public void corruption(long bytes, Throwable reason)
+        {
+            fail("corruption at " + bytes + " reason: " + reason.toString());
+        }
+    }
+
     static ByteBuffer toByteBuffer(String value)
     {
         return toByteBuffer(value, 1);

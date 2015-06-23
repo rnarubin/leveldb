@@ -50,6 +50,7 @@ public class BytewiseComparator
             int lastSharedByte = ByteBuffers.getUnsignedByte(start, sharedBytes);
             if (lastSharedByte < 0xff && lastSharedByte + 1 < ByteBuffers.getUnsignedByte(limit, sharedBytes)) {
                 start.put(sharedBytes, (byte) (lastSharedByte + 1));
+                start.limit(sharedBytes + 1);
 
                 assert (compare(start, limit) < 0) : "start must be less than last limit";
                 return true;
@@ -66,6 +67,7 @@ public class BytewiseComparator
             int b = ByteBuffers.getUnsignedByte(key, i);
             if (b != 0xff) {
                 key.put(i, (byte) (b + 1));
+                key.limit(i + 1);
                 return true;
             }
         }

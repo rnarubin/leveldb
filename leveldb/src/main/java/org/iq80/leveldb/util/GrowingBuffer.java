@@ -65,9 +65,9 @@ public class GrowingBuffer
 
     public GrowingBuffer writeLengthPrefixedKey(InternalKey key)
     {
+        final int writeSize = key.getEncodedSize();
         // 5 for max size of variable length int
-        final int writeSize = key.getEncodedSize() + 5;
-        ByteBuffer dst = ensureSpace(writeSize);
+        ByteBuffer dst = ensureSpace(writeSize + 5);
         VariableLengthQuantity.writeVariableLengthInt(writeSize, dst);
         key.writeToBuffer(dst);
         return this;
