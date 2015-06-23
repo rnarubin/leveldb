@@ -130,12 +130,15 @@ public class BlockEntry<T>
             return false;
         }
 
-        BlockEntry entry = (BlockEntry) o;
+        BlockEntry<?> entry = (BlockEntry<?>) o;
 
         if (!key.equals(entry.key)) {
             return false;
         }
         if (!value.equals(entry.value)) {
+            return false;
+        }
+        if (!encodedKey.equals(entry.encodedKey)) {
             return false;
         }
 

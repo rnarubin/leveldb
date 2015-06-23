@@ -95,23 +95,6 @@ public final class VariableLengthQuantity
         writeVariableLengthLong(value, buffer.ensureSpace(10));
     }
 
-    public static int readVariableLengthInt(SliceInput sliceInput)
-    {
-        int result = 0;
-        for (int shift = 0; shift <= 28; shift += 7) {
-            int b = sliceInput.readUnsignedByte();
-
-            // add the lower 7 bits to the result
-            result |= ((b & 0x7f) << shift);
-
-            // if high bit is not set, this is the last byte in the number
-            if ((b & 0x80) == 0) {
-                return result;
-            }
-        }
-        throw new NumberFormatException("last byte of variable length int has high bit set");
-    }
-
     public static int readVariableLengthInt(ByteBuffer sliceInput)
     {
         int result = 0;
