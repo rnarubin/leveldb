@@ -29,8 +29,8 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.table.FileChannelTable;
 import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
+import org.iq80.leveldb.table.TableIterator;
 import org.iq80.leveldb.util.Finalizer;
-import org.iq80.leveldb.util.TableIterator;
 
 import java.io.File;
 import java.io.FileInputStream;

@@ -21,8 +21,6 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.impl.EncodedInternalKey;
-import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -35,28 +33,30 @@ import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
-public class BlockIterator
-        implements ReverseSeekingIterator<InternalKey, ByteBuffer>
+public class BlockIterator<T>
+        implements ReverseSeekingIterator<T, ByteBuffer>
 {
     private final ByteBuffer data;
     private final ByteBuffer restartPositions;
     private final int restartCount;
     private int prevPosition;
     private int restartIndex;
-    private final Comparator<InternalKey> comparator;
+    private final Comparator<T> comparator;
+    private final Decoder<T> decoder;
 
-    private BlockEntry nextEntry;
-    private BlockEntry prevEntry;
+    private BlockEntry<T> nextEntry;
+    private BlockEntry<T> prevEntry;
 
-    private final Deque<CacheEntry> prevCache;
+    private final Deque<CacheEntry<T>> prevCache;
     private int prevCacheRestartIndex;
 
     private final MemoryManager memory;
 
     public BlockIterator(ByteBuffer data,
             ByteBuffer restartPositions,
-            Comparator<InternalKey> comparator,
-            MemoryManager memory)
+            Comparator<T> comparator,
+            MemoryManager memory,
+            Decoder<T> decoder)
     {
         Preconditions.checkNotNull(data, "data is null");
         Preconditions.checkNotNull(restartPositions, "restartPositions is null");
@@ -64,6 +64,7 @@ public class BlockIterator
                 "restartPositions.readableBytes() must be a multiple of %s", SIZE_OF_INT);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
+        this.decoder = decoder;
         this.memory = memory;
         this.data = ByteBuffers.duplicate(data);
 
@@ -72,7 +73,7 @@ public class BlockIterator
 
         this.comparator = comparator;
 
-        prevCache = new ArrayDeque<CacheEntry>();
+        prevCache = new ArrayDeque<CacheEntry<T>>();
         prevCacheRestartIndex = -1;
 
         seekToFirst();
@@ -91,7 +92,7 @@ public class BlockIterator
     }
 
     @Override
-    public BlockEntry peek()
+    public BlockEntry<T> peek()
     {
         if (!hasNext()) {
             throw new NoSuchElementException();
@@ -100,11 +101,11 @@ public class BlockIterator
     }
 
     @Override
-    public BlockEntry peekPrev()
+    public BlockEntry<T> peekPrev()
     {
         if (prevEntry == null && currentPosition() > 0) {
             // this case should only occur after seeking under certain conditions
-            BlockEntry peeked = prev();
+            BlockEntry<T> peeked = prev();
             next();
             prevEntry = peeked;
         }
@@ -115,7 +116,7 @@ public class BlockIterator
     }
 
     @Override
-    public BlockEntry next()
+    public BlockEntry<T> next()
     {
         if (!hasNext()) {
             throw new NoSuchElementException();
@@ -135,7 +136,7 @@ public class BlockIterator
     }
 
     @Override
-    public BlockEntry prev()
+    public BlockEntry<T> prev()
     {
         int original = currentPosition();
         if (original == 0) {
@@ -144,22 +145,22 @@ public class BlockIterator
 
         int previousRestart = getPreviousRestart(restartIndex, original);
         if (previousRestart == prevCacheRestartIndex && prevCache.size() > 0) {
-            CacheEntry prevState = prevCache.pop();
+            CacheEntry<T> prevState = prevCache.pop();
             nextEntry = prevState.entry;
             prevPosition = prevState.prevPosition;
             data.position(prevState.dataPosition);
 
-            CacheEntry peek = prevCache.peek();
+            CacheEntry<T> peek = prevCache.peek();
             prevEntry = peek == null ? null : peek.entry;
         }
         else {
             seekToRestartPosition(previousRestart);
             prevCacheRestartIndex = previousRestart;
-            prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+            prevCache.push(new CacheEntry<T>(nextEntry, prevPosition, data.position()));
             while (data.position() < original && data.hasRemaining()) {
                 prevEntry = nextEntry;
                 nextEntry = readEntry(data, prevEntry);
-                prevCache.push(new CacheEntry(nextEntry, prevPosition, data.position()));
+                prevCache.push(new CacheEntry<T>(nextEntry, prevPosition, data.position()));
             }
             prevCache.pop(); // we don't want to cache the last entry because that's returned with this call
         }
@@ -231,7 +232,7 @@ public class BlockIterator
      * the specified targetKey.
      */
     @Override
-    public void seek(InternalKey targetKey)
+    public void seek(T targetKey)
     {
         if (restartCount == 0) {
             return;
@@ -302,7 +303,7 @@ public class BlockIterator
      *
      * @return true if an entry was read
      */
-    private BlockEntry readEntry(ByteBuffer data, BlockEntry previousEntry)
+    private BlockEntry<T> readEntry(ByteBuffer data, BlockEntry<T> previousEntry)
     {
         prevPosition = data.position();
 
@@ -319,7 +320,7 @@ public class BlockIterator
             Preconditions.checkState(previousEntry != null,
                     "Entry has a shared key but no previous entry was provided");
 
-            ByteBuffer prev = previousEntry.getKey().getUserKey();
+            ByteBuffer prev = previousEntry.getEncodedKey();
             key.put(ByteBuffers.duplicateByLength(prev, prev.position(), sharedKeyLength));
         }
         ByteBuffers.putLength(key, data, nonSharedKeyLength);
@@ -328,7 +329,7 @@ public class BlockIterator
         // read value
         ByteBuffer value = ByteBuffers.duplicateAndAdvance(data, valueLength);
 
-        return new BlockEntry(new EncodedInternalKey(key), value);
+        return BlockEntry.of(decoder.decode(key), key, value);
     }
 
     private void resetCache()
@@ -337,12 +338,12 @@ public class BlockIterator
         prevCacheRestartIndex = -1;
     }
 
-    private static class CacheEntry
+    private static class CacheEntry<T>
     {
-        public final BlockEntry entry;
+        public final BlockEntry<T> entry;
         public final int prevPosition, dataPosition;
 
-        public CacheEntry(BlockEntry entry, int prevPosition, int dataPosition)
+        public CacheEntry(BlockEntry<T> entry, int prevPosition, int dataPosition)
         {
             this.entry = entry;
             this.prevPosition = prevPosition;

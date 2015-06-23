@@ -24,8 +24,8 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 
+import org.iq80.leveldb.table.TableIterator;
 import org.iq80.leveldb.util.LevelIterator;
-import org.iq80.leveldb.util.TableIterator;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

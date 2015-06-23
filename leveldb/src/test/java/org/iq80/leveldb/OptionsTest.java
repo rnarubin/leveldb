@@ -105,7 +105,7 @@ public abstract class OptionsTest
             Options b = Options.copy(a);
             assertReflectionEquals(b, a, Options.class);
 
-            a.blockRestartInterval(789).errorIfExists(true).comparator(null).compression(null);
+            a.blockRestartInterval(789).errorIfExists(true).compression(null);
             try {
                 assertReflectionEquals(b, a, Options.class);
             }

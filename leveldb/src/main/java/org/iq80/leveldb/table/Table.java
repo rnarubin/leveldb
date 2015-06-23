@@ -24,12 +24,12 @@ import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Snappy;
-import org.iq80.leveldb.util.TableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,11 +49,19 @@ public abstract class Table
     protected final FileChannel fileChannel;
     protected final Comparator<InternalKey> comparator;
     protected final boolean verifyChecksums;
-    protected final Block indexBlock;
+    protected final Block<InternalKey> indexBlock;
     protected final BlockHandle metaindexBlockHandle;
     protected final MemoryManager memory;
     private final Compression compression;
     private final AtomicInteger refCount;
+    protected static final Decoder<InternalKey> INTERNAL_KEY_DECODER = new Decoder<InternalKey>()
+    {
+        @Override
+        public InternalKey decode(ByteBuffer b)
+        {
+            return new EncodedInternalKey(b);
+        }
+    };
 
     public Table(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
             throws IOException
@@ -87,10 +95,10 @@ public abstract class Table
         return new TableIterator(this, indexBlock.iterator());
     }
 
-    public Block openBlock(ByteBuffer blockEntry)
+    public Block<InternalKey> openBlock(ByteBuffer blockEntry)
     {
         BlockHandle blockHandle = BlockHandle.readBlockHandle(ByteBuffers.duplicate(blockEntry));
-        Block dataBlock;
+        Block<InternalKey> dataBlock;
         try {
             dataBlock = readBlock(blockHandle);
         }
@@ -128,7 +136,7 @@ public abstract class Table
         return dst;
     }
 
-    protected abstract Block readBlock(BlockHandle blockHandle)
+    protected abstract Block<InternalKey> readBlock(BlockHandle blockHandle)
             throws IOException;
 
     /**
@@ -141,7 +149,7 @@ public abstract class Table
      */
     public long getApproximateOffsetOf(InternalKey key)
     {
-        BlockIterator iterator = indexBlock.iterator();
+        BlockIterator<InternalKey> iterator = indexBlock.iterator();
         iterator.seek(key);
         if (iterator.hasNext()) {
             BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue());

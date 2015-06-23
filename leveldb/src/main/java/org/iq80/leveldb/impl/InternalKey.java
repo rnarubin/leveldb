@@ -18,6 +18,7 @@
 package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
@@ -44,6 +45,20 @@ public abstract class InternalKey
     public int getEncodedSize()
     {
         return getUserKey().remaining() + SizeOf.SIZE_OF_LONG;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (o == null)
+            return false;
+        if (!(o instanceof InternalKey))
+            return false;
+
+        InternalKey that = (InternalKey) o;
+        return Objects.equals(this.getUserKey(), that.getUserKey())
+                && this.getSequenceNumber() == that.getSequenceNumber()
+                && Objects.equals(this.getValueType(), that.getValueType());
     }
 
     @Override

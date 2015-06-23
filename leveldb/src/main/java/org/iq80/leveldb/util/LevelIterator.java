@@ -26,9 +26,10 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map.Entry;
 
-import org.iq80.leveldb.util.TableIterator.CurrentOrigin;
+import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.table.TableIterator.CurrentOrigin;
 
-import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
+import static org.iq80.leveldb.table.TableIterator.CurrentOrigin.*;
 
 public final class LevelIterator
         extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
@@ -67,7 +68,7 @@ public final class LevelIterator
         index = files.size() - 1;
         current = openFile(index);
         currentOrigin = PREV;
-        current.seekToLastInternal();
+        current.seekToLast();
     }
 
     @Override

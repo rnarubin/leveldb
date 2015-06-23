@@ -24,10 +24,10 @@ import com.google.common.collect.Lists;
 
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
+import org.iq80.leveldb.table.TableIterator;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.LevelIterator;
-import org.iq80.leveldb.util.TableIterator;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

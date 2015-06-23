@@ -20,7 +20,6 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 
 import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 
@@ -63,17 +62,18 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
  * </tbody>
  * </table>
  */
-public class Block
-        implements SeekingIterable<InternalKey, ByteBuffer>
+public class Block<T>
+        implements SeekingIterable<T, ByteBuffer>
 {
     private final ByteBuffer block;
-    private final Comparator<InternalKey> comparator;
+    private final Comparator<T> comparator;
 
     private final ByteBuffer data;
     private final ByteBuffer restartPositions;
     private final MemoryManager memory;
+    private Decoder<T> decoder;
 
-    public Block(ByteBuffer block, Comparator<InternalKey> comparator, MemoryManager memory)
+    public Block(ByteBuffer block, Comparator<T> comparator, MemoryManager memory, Decoder<T> decoder)
     {
         Preconditions.checkNotNull(block, "block is null");
         Preconditions.checkArgument(block.remaining() >= SIZE_OF_INT, "Block is corrupt: size must be at least %s block", SIZE_OF_INT);
@@ -83,6 +83,7 @@ public class Block
         this.block = block;
         this.comparator = comparator;
         this.memory = memory;
+        this.decoder = decoder;
 
         // Keys are prefix compressed.  Every once in a while the prefix compression is restarted and the full key is written.
         // These "restart" locations are written at the end of the file, so you can seek to key without having to read the
@@ -114,8 +115,8 @@ public class Block
     }
 
     @Override
-    public BlockIterator iterator()
+    public BlockIterator<T> iterator()
     {
-        return new BlockIterator(data, restartPositions, comparator, memory);
+        return new BlockIterator<T>(data, restartPositions, comparator, memory, decoder);
     }
 }

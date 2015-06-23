@@ -88,7 +88,7 @@ public class MMapTable
     }
 
     @Override
-    protected Block readBlock(BlockHandle blockHandle)
+    protected Block<InternalKey> readBlock(BlockHandle blockHandle)
             throws IOException
     {
         // read block trailer
@@ -106,9 +106,9 @@ public class MMapTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        return new Block(uncompressIfNecessary(
+        return new Block<InternalKey>(uncompressIfNecessary(
                 read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize()),
-                blockTrailer.getCompressionId()), comparator, memory);
+                blockTrailer.getCompressionId()), comparator, memory, INTERNAL_KEY_DECODER);
     }
 
     public static ByteBuffer read(MappedByteBuffer data, int offset, int length)

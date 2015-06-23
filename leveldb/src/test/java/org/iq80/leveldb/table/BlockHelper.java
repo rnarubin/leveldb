@@ -26,6 +26,8 @@ import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.testng.Assert;
 
+import com.google.common.collect.Maps;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
@@ -46,7 +48,7 @@ public final class BlockHelper
     {
     }
 
-    public static int estimateBlockSize(int blockRestartInterval, List<BlockEntry> entries)
+    public static int estimateBlockSize(int blockRestartInterval, List<BlockEntry<ByteBuffer>> entries)
     {
         if (entries.isEmpty()) {
             return SIZE_OF_INT;
@@ -139,33 +141,53 @@ public final class BlockHelper
         return key.substring(0, key.length() - 1) + ((char) (lastByte + 1));
     }
 
-    public static InternalKey before(Entry<InternalKey, ?> expectedEntry)
+    public static InternalKey beforeInternalKey(Entry<InternalKey, ?> expectedEntry)
     {
-        ByteBuffer slice = ByteBuffers.heapCopy(expectedEntry.getKey().getUserKey());
-        int lastByte = slice.limit() - 1;
-        slice.put(lastByte, (byte) (slice.get(lastByte) - 1));
-        return new TransientInternalKey(slice, SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        return new TransientInternalKey(before(expectedEntry.getKey().getUserKey()),
+                SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
     }
 
-    public static InternalKey after(Entry<InternalKey, ?> expectedEntry)
+    public static ByteBuffer before(Entry<ByteBuffer, ?> expectedEntry)
     {
-        ByteBuffer slice = ByteBuffers.heapCopy(expectedEntry.getKey().getUserKey());
-        int lastByte = slice.limit() - 1;
-        slice.put(lastByte, (byte) (slice.get(lastByte) + 1));
-        return new TransientInternalKey(slice, SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+        return before(expectedEntry.getKey());
     }
 
-    public static int estimateEntriesSize(int blockRestartInterval, List<BlockEntry> entries)
+    public static ByteBuffer before(ByteBuffer b)
+    {
+        ByteBuffer slice = ByteBuffers.heapCopy(b);
+        int lastByte = slice.limit() - 1;
+        return slice.put(lastByte, (byte) (slice.get(lastByte) - 1));
+    }
+
+    public static InternalKey afterInternalKey(Entry<InternalKey, ?> expectedEntry)
+    {
+        return new TransientInternalKey(after(expectedEntry.getKey().getUserKey()), SequenceNumber.MAX_SEQUENCE_NUMBER,
+                ValueType.VALUE);
+    }
+
+    public static ByteBuffer after(Entry<ByteBuffer, ?> expectedEntry)
+    {
+        return after(expectedEntry.getKey());
+    }
+
+    public static ByteBuffer after(ByteBuffer b)
+    {
+        ByteBuffer slice = ByteBuffers.heapCopy(b);
+        int lastByte = slice.limit() - 1;
+        return slice.put(lastByte, (byte) (slice.get(lastByte) + 1));
+    }
+
+    public static int estimateEntriesSize(int blockRestartInterval, List<BlockEntry<ByteBuffer>> entries)
     {
         int size = 0;
         ByteBuffer previousKey = null;
         int restartBlockCount = 0;
-        for (BlockEntry entry : entries) {
+        for (BlockEntry<ByteBuffer> entry : entries) {
             int nonSharedBytes;
-            int rem = entry.getKey().getUserKey().remaining();
+            int rem = entry.getKey().remaining();
             if (restartBlockCount < blockRestartInterval) {
                 nonSharedBytes = previousKey == null ? rem : rem
-                        - ByteBuffers.calculateSharedBytes(entry.getKey().getUserKey(), previousKey);
+                        - ByteBuffers.calculateSharedBytes(entry.getKey(), previousKey);
             }
             else {
                 nonSharedBytes = rem;
@@ -173,15 +195,21 @@ public final class BlockHelper
             }
             size += nonSharedBytes + entry.getValue().remaining() + (SIZE_OF_BYTE * 3); // 3 bytes for sizes
 
-            previousKey = entry.getKey().getUserKey();
+            previousKey = entry.getKey();
             restartBlockCount++;
         }
         return size;
     }
 
-    static BlockEntry createBlockEntry(String key, String value)
+    static BlockEntry<ByteBuffer> createBlockEntry(String key, String value)
     {
-        return new BlockEntry(new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), 0, ValueType.VALUE),
+        return BlockEntry.of(ByteBuffer.wrap(key.getBytes(UTF_8)), ByteBuffer.wrap(value.getBytes(UTF_8)));
+    }
+
+    static Entry<InternalKey, ByteBuffer> createInternalEntry(String key, String value, long sequenceNumber)
+    {
+        return Maps.<InternalKey, ByteBuffer> immutableEntry(
+                new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), sequenceNumber, ValueType.VALUE),
                 ByteBuffer.wrap(value.getBytes(UTF_8)));
     }
 }

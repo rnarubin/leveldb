@@ -81,6 +81,7 @@ import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
 
+@SuppressWarnings("deprecation")
 public class DbImplTest
 {
     // You can set the STRESS_FACTOR system property to make the tests run more iterations.
@@ -866,7 +867,7 @@ public class DbImplTest
     }
 
     @Test
-    public void testCustomComparator()
+    public void testCustomLegacyComparator()
             throws Exception
     {
         DbStringWrapper db = new DbStringWrapper(Options.make().comparator(new ReverseDBComparator()), databaseDir);

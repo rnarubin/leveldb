@@ -15,29 +15,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.util;
+package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.table.Block;
-import org.iq80.leveldb.table.BlockIterator;
-import org.iq80.leveldb.table.Table;
+import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
+import org.iq80.leveldb.util.InternalIterator;
 
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 
-import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
+import static org.iq80.leveldb.table.TableIterator.CurrentOrigin.*;
 
 public final class TableIterator
         extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
         implements InternalIterator
 {
     private final Table table;
-    private final BlockIterator blockIterator;
-    private BlockIterator current;
+    private final BlockIterator<InternalKey> blockIterator;
+    private BlockIterator<InternalKey> current;
     private CurrentOrigin currentOrigin = NONE;
     private boolean closed;
 
-    protected enum CurrentOrigin
+    public enum CurrentOrigin
     {
         /*
          * reversable iterators don't have a consistent concept of a "current" item instead they exist
@@ -49,7 +48,7 @@ public final class TableIterator
         // a state of NONE should be interchangeable with current==NULL
     }
 
-    public TableIterator(Table table, BlockIterator blockIterator)
+    public TableIterator(Table table, BlockIterator<InternalKey> blockIterator)
     {
         this.table = table;
         this.closed = false;
@@ -210,18 +209,18 @@ public final class TableIterator
         return currentHasPrev;
     }
 
-    private BlockIterator getNextBlock()
+    private BlockIterator<InternalKey> getNextBlock()
     {
         ByteBuffer blockHandle = blockIterator.next().getValue();
-        Block dataBlock = table.openBlock(blockHandle);
+        Block<InternalKey> dataBlock = table.openBlock(blockHandle);
         currentOrigin = NEXT;
         return dataBlock.iterator();
     }
 
-    private BlockIterator getPrevBlock()
+    private BlockIterator<InternalKey> getPrevBlock()
     {
         ByteBuffer blockHandle = blockIterator.prev().getValue();
-        Block dataBlock = table.openBlock(blockHandle);
+        Block<InternalKey> dataBlock = table.openBlock(blockHandle);
         currentOrigin = PREV;
         return dataBlock.iterator();
     }

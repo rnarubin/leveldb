@@ -48,7 +48,7 @@ public class FileChannelTable
     }
 
     @Override
-    protected Block readBlock(BlockHandle blockHandle)
+    protected Block<InternalKey> readBlock(BlockHandle blockHandle)
             throws IOException
     {
         // read block trailer
@@ -67,7 +67,8 @@ public class FileChannelTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        return new Block(uncompressIfNecessary(compressedData, blockTrailer.getCompressionId()), comparator, memory);
+        return new Block<InternalKey>(uncompressIfNecessary(compressedData, blockTrailer.getCompressionId()),
+                comparator, memory, INTERNAL_KEY_DECODER);
     }
 
     private ByteBuffer read(long offset, int length)

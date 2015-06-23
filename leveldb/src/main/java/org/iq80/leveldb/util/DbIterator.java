@@ -21,6 +21,7 @@ package org.iq80.leveldb.util;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.table.TableIterator;
 
 import java.io.Closeable;
 import java.io.IOException;

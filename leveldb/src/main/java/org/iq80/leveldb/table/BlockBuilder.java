@@ -29,6 +29,7 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ByteBuffers.CloseableByteBuffer;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.IntVector;
+import org.iq80.leveldb.util.VariableLengthQuantity;
 
 import java.nio.ByteBuffer;
 
@@ -48,10 +49,7 @@ public class BlockBuilder
     private ByteBuffer lastKeyBuffer;
     private final MemoryManager memory;
 
-    public BlockBuilder(int estimatedSize,
-            int blockRestartInterval,
- DBBufferComparator comparator,
-            MemoryManager memory)
+    public BlockBuilder(int estimatedSize, int blockRestartInterval, DBBufferComparator comparator, MemoryManager memory)
     {
         Preconditions.checkArgument(estimatedSize >= 0, "estimatedSize is negative");
         Preconditions.checkArgument(blockRestartInterval >= 0, "blockRestartInterval is negative");
@@ -104,6 +102,49 @@ public class BlockBuilder
                 SIZE_OF_INT;                               // restart position size
     }
 
+    public void add(ByteBuffer key, ByteBuffer value)
+    {
+        Preconditions.checkNotNull(key, "key is null");
+        Preconditions.checkNotNull(value, "value is null");
+        Preconditions.checkState(!finished, "block is finished");
+        Preconditions.checkPositionIndex(restartBlockEntryCount, blockRestartInterval);
+
+        Preconditions.checkArgument(lastKeyBuffer == null || comparator.compare(key, lastKeyBuffer) > 0,
+                "key must be greater than last key");
+
+        int sharedKeyBytes = 0;
+        if (restartBlockEntryCount < blockRestartInterval) {
+            if (lastKeyBuffer != null) {
+                sharedKeyBytes = ByteBuffers.calculateSharedBytes(key, lastKeyBuffer);
+            }
+        }
+        else {
+            // restart prefix compression
+            restartPositions.add(block.filled());
+            restartBlockEntryCount = 0;
+        }
+
+        int nonSharedKeyBytes = key.remaining() - sharedKeyBytes;
+
+        // write "<shared><non_shared><value_size>"
+        VariableLengthQuantity.writeVariableLengthInt(sharedKeyBytes, block);
+        VariableLengthQuantity.writeVariableLengthInt(nonSharedKeyBytes, block);
+        VariableLengthQuantity.writeVariableLengthInt(value.remaining(), block);
+
+        // write non-shared key bytes
+        block.put(ByteBuffers.duplicate(key, sharedKeyBytes, sharedKeyBytes + nonSharedKeyBytes));
+
+        // write value bytes
+        block.put(ByteBuffers.duplicate(value));
+
+        // update last key
+        lastKeyBuffer = key;
+
+        // update state
+        entryCount++;
+        restartBlockEntryCount++;
+    }
+
     public void add(InternalKey key, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
@@ -113,34 +154,6 @@ public class BlockBuilder
 
         Preconditions.checkArgument(lastKeyBuffer == null || comparator.compare(key.getUserKey(), lastKeyBuffer) > 0,
                 "key must be greater than last key");
-
-        // int sharedKeyBytes = 0;
-        // if (restartBlockEntryCount < blockRestartInterval) {
-        // if (lastKeyBuffer != null) {
-        // sharedKeyBytes = ByteBuffers.calculateSharedBytes(key, lastKeyBuffer);
-        // }
-        // }
-        // else {
-        // // restart prefix compression
-        // restartPositions.add(block.filled());
-        // restartBlockEntryCount = 0;
-        // }
-        //
-        // int nonSharedKeyBytes = key.remaining() - sharedKeyBytes;
-        //
-        // // write "<shared><non_shared><value_size>"
-        // VariableLengthQuantity.writeVariableLengthInt(sharedKeyBytes, block);
-        // VariableLengthQuantity.writeVariableLengthInt(nonSharedKeyBytes, block);
-        // VariableLengthQuantity.writeVariableLengthInt(value.remaining(), block);
-        //
-        // // write non-shared key bytes
-        // block.put(ByteBuffers.duplicate(key, sharedKeyBytes, sharedKeyBytes + nonSharedKeyBytes));
-        //
-        // // write value bytes
-        // block.put(ByteBuffers.duplicate(value));
-        //
-        // // update last key
-        // lastKeyBuffer = key;
         boolean restart = restartBlockEntryCount >= blockRestartInterval;
         if (restart) {
             restartPositions.add(block.filled());
@@ -168,13 +181,6 @@ public class BlockBuilder
             BlockHandle.writeBlockHandleTo(handle, handleEncoded.buffer).limit(handleEncoded.buffer.position()).reset();
             add(encoded, handleEncoded.buffer);
         }
-        // ByteBuffer shortestSeparator = userComparator.findShortestSeparator(lastKey, key);
-        //
-        // ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
-        // handleEncoding.mark();
-        // BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
-        // handleEncoding.limit(handleEncoding.position()).reset();
-        // indexBlockBuilder.add(shortestSeparator, handleEncoding);
     }
 
     public ByteBuffer finish()
