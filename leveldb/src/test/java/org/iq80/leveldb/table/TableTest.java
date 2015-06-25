@@ -19,14 +19,15 @@ package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
 
+import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -39,7 +40,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -51,19 +51,17 @@ public abstract class TableTest
     private File file;
     private RandomAccessFile randomAccessFile;
     private FileChannel fileChannel;
-    private static final InternalKeyComparator byteCompare = new InternalKeyComparator(new BytewiseComparator());
+    private static final DBBufferComparator byteCompare = new BytewiseComparator();
 
-    protected abstract Table createTable(String name,
-            FileChannel fileChannel,
-            Comparator<InternalKey> comparator,
-            boolean verifyChecksums)
+    protected abstract Table createTable(String name, FileChannel fileChannel, Options options)
             throws IOException;
 
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyFile()
             throws Exception
     {
-        createTable(file.getAbsolutePath(), fileChannel, byteCompare, true).close();
+        createTable(file.getAbsolutePath(), fileChannel,
+                Options.make().bufferComparator(byteCompare).verifyChecksums(true).compression(Snappy.instance())).close();
     }
 
     @Test
@@ -132,64 +130,71 @@ public abstract class TableTest
         Collections.reverse(reverseEntries);
 
         reopenFile();
-        Options options = Options.make()
-                .blockSize(blockSize)
-                .blockRestartInterval(blockRestartInterval)
-                .memoryManager(MemoryManagers.heap())
-                .compression(Snappy.instance());
-        TableBuilder builder = new TableBuilder(options, fileChannel, byteCompare);
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make()
+                    .blockSize(blockSize)
+                    .blockRestartInterval(blockRestartInterval)
+                    .memoryManager(strictMemory)
+                    .compression(Snappy.instance())
+                    .bufferComparator(byteCompare);
 
-        for (Entry<InternalKey, ByteBuffer> entry : entries) {
-            builder.add(entry.getKey(), entry.getValue());
-        }
-        builder.finish();
-        builder.close();
+            try (TableBuilder builder = new TableBuilder(options, fileChannel, new InternalKeyComparator(
+                    options.bufferComparator()))) {
+                for (Entry<InternalKey, ByteBuffer> entry : entries) {
+                    builder.add(entry.getKey(), entry.getValue());
+                }
+                builder.finish();
+            }
 
-        try (Table table = createTable(file.getAbsolutePath(), fileChannel, byteCompare, true)) {
-            ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = table.iterator();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
-            BlockHelper.assertSequence(seekingIterator, entries);
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+            try (Table table = createTable(file.getAbsolutePath(), fileChannel, options);
+                    TableIterator tableIter = table.retain().iterator()) {
+                ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
+                BlockHelper.assertReverseSequence(seekingIterator,
+                        Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
+                BlockHelper.assertSequence(seekingIterator, entries);
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-            seekingIterator.seekToFirst();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
-            BlockHelper.assertSequence(seekingIterator, entries);
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+                seekingIterator.seekToFirst();
+                BlockHelper.assertReverseSequence(seekingIterator,
+                        Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
+                BlockHelper.assertSequence(seekingIterator, entries);
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-            seekingIterator.seekToLast();
-            if (reverseEntries.size() > 0) {
-                BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
                 seekingIterator.seekToLast();
-                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
-            }
-            BlockHelper.assertSequence(seekingIterator, entries);
+                if (reverseEntries.size() > 0) {
+                    BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
+                    seekingIterator.seekToLast();
+                    BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+                }
+                BlockHelper.assertSequence(seekingIterator, entries);
 
-            long lastApproximateOffset = 0;
-            for (Entry<InternalKey, ByteBuffer> entry : entries) {
-                List<Entry<InternalKey, ByteBuffer>> nextEntries = entries.subList(entries.indexOf(entry),
-                        entries.size());
-                seekingIterator.seek(entry.getKey());
-                BlockHelper.assertSequence(seekingIterator, nextEntries);
+                long lastApproximateOffset = 0;
+                for (Entry<InternalKey, ByteBuffer> entry : entries) {
+                    List<Entry<InternalKey, ByteBuffer>> nextEntries = entries.subList(entries.indexOf(entry),
+                            entries.size());
+                    seekingIterator.seek(entry.getKey());
+                    BlockHelper.assertSequence(seekingIterator, nextEntries);
 
-                seekingIterator.seek(BlockHelper.beforeInternalKey(entry));
-                BlockHelper.assertSequence(seekingIterator, nextEntries);
+                    seekingIterator.seek(BlockHelper.beforeInternalKey(entry));
+                    BlockHelper.assertSequence(seekingIterator, nextEntries);
 
-                seekingIterator.seek(BlockHelper.afterInternalKey(entry));
-                BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+                    seekingIterator.seek(BlockHelper.afterInternalKey(entry));
+                    BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
 
-                long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                    long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                    assertTrue(approximateOffset >= lastApproximateOffset);
+                    lastApproximateOffset = approximateOffset;
+                }
+
+                InternalKey endKey = new TransientInternalKey(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF,
+                        (byte) 0xFF, (byte) 0xFF }), 0, ValueType.VALUE);
+                seekingIterator.seek(endKey);
+                BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry<InternalKey>> emptyList());
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+
+                long approximateOffset = table.getApproximateOffsetOf(endKey);
                 assertTrue(approximateOffset >= lastApproximateOffset);
-                lastApproximateOffset = approximateOffset;
             }
-
-            InternalKey endKey = new TransientInternalKey(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF,
-                    (byte) 0xFF, (byte) 0xFF }), 0, ValueType.VALUE);
-            seekingIterator.seek(endKey);
-            BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry<InternalKey>> emptyList());
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-            long approximateOffset = table.getApproximateOffsetOf(endKey);
-            assertTrue(approximateOffset >= lastApproximateOffset);
         }
     }
 
@@ -223,16 +228,11 @@ public abstract class TableTest
             extends TableTest
     {
         @Override
-        protected Table createTable(String name,
-                FileChannel fileChannel,
-                Comparator<InternalKey> comparator,
-                boolean verifyChecksums)
+        protected Table createTable(String name, FileChannel fileChannel, Options options)
                 throws IOException
         {
-            return new FileChannelTable(name, fileChannel, comparator, Options.make()
-                    .verifyChecksums(verifyChecksums)
-                    .memoryManager(MemoryManagers.heap())
-                    .compression(Snappy.instance()));
+            return new FileChannelTable(name, fileChannel, new InternalKeyComparator(options.bufferComparator()),
+                    options);
         }
     }
 
@@ -240,16 +240,10 @@ public abstract class TableTest
             extends TableTest
     {
         @Override
-        protected Table createTable(String name,
-                FileChannel fileChannel,
-                Comparator<InternalKey> comparator,
-                boolean verifyChecksums)
+        protected Table createTable(String name, FileChannel fileChannel, Options options)
                 throws IOException
         {
-            return new MMapTable(name, fileChannel, comparator, Options.make()
-                    .verifyChecksums(verifyChecksums)
-                    .memoryManager(MemoryManagers.heap())
-                    .compression(Snappy.instance()));
+            return new MMapTable(name, fileChannel, new InternalKeyComparator(options.bufferComparator()), options);
         }
     }
 }

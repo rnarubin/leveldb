@@ -1189,23 +1189,23 @@ public class DbImplTest
     {
         private final FinalizableReferenceQueue phantomQueue = new FinalizableReferenceQueue();
         private final Set<FinalizablePhantomReference<ByteBuffer>> refSet = Sets.newConcurrentHashSet();
-        private final Map<ByteBuffer, AtomicBoolean> bufMap = new MapMaker().weakKeys().makeMap();
+        private final Map<ByteBuffer, MetaData> bufMap = new MapMaker().weakKeys().makeMap();
         private volatile Throwable backgroundException = null;
 
         @Override
         public ByteBuffer allocate(int capacity)
         {
             final ByteBuffer buf = ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
-            final AtomicBoolean freed = new AtomicBoolean(false);
-            bufMap.put(buf, freed);
+            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable(), "cap:" + capacity);
+            bufMap.put(buf, metaData);
             refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
             {
                 @Override
                 public void finalizeReferent()
                 {
                     refSet.remove(this);
-                    if (!freed.get()) {
-                        backgroundException = new IllegalStateException("buffer GC without free");
+                    if (!metaData.freed.get()) {
+                        backgroundException = new IllegalStateException("buffer GC without free", metaData.stackHolder);
                     }
                 }
             });
@@ -1215,12 +1215,12 @@ public class DbImplTest
         @Override
         public void free(ByteBuffer buffer)
         {
-            AtomicBoolean freed = bufMap.get(buffer);
-            if (freed == null) {
+            MetaData metaData = bufMap.get(buffer);
+            if (metaData == null) {
                 throw new IllegalStateException("free called on buffer from foreign source");
             }
-            if (!freed.compareAndSet(false, true)) {
-                throw new IllegalStateException("double free");
+            if (!metaData.freed.compareAndSet(false, true)) {
+                throw new IllegalStateException("double free", metaData.stackHolder);
             }
 
             // force data corruption on use-after-free
@@ -1235,10 +1235,30 @@ public class DbImplTest
             if (backgroundException != null) {
                 Throwables.propagate(backgroundException);
             }
-            for (Entry<ByteBuffer, AtomicBoolean> entry : bufMap.entrySet()) {
-                if (!entry.getValue().get()) {
-                    throw new IllegalStateException("buffer not freed before closing memory manager");
+            for (Entry<ByteBuffer, MetaData> entry : bufMap.entrySet()) {
+                if (!entry.getValue().freed.get()) {
+                    throw new IllegalStateException("buffer never freed", entry.getValue().stackHolder);
                 }
+            }
+        }
+
+        private static class MetaData
+        {
+            public final AtomicBoolean freed;
+            public final Throwable stackHolder;
+            private final Object[] info;
+
+            public MetaData(AtomicBoolean freed, Throwable stackHolder, Object... info)
+            {
+                this.freed = freed;
+                this.stackHolder = stackHolder;
+                this.info = info;
+            }
+
+            @Override
+            public String toString()
+            {
+                return "MetaData [freed=" + freed + ", info=" + Arrays.deepToString(info) + "]";
             }
         }
 

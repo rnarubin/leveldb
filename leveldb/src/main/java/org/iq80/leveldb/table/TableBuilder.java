@@ -27,7 +27,6 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.ByteBuffers.CloseableByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -177,7 +176,6 @@ public class TableBuilder
                     + BlockTrailer.ENCODED_LENGTH);
 
             try {
-                // can't trust user code, duplicate buffers
                 int compressedSize = compression.compress(ByteBuffers.duplicate(raw),
                         ByteBuffers.duplicate(compressedContents));
 
@@ -192,6 +190,12 @@ public class TableBuilder
                 LOGGER.warn("Compression failed", e);
                 // compression failed, so just store uncompressed form
                 blockContents = raw;
+                compressionId = 0;
+            }
+            finally {
+                if (blockContents != compressedContents) {
+                    memory.free(compressedContents);
+                }
             }
         }
 
@@ -207,7 +211,14 @@ public class TableBuilder
         BlockHandle blockHandle = new BlockHandle(position, blockContents.remaining() - BlockTrailer.ENCODED_LENGTH);
 
         // write data and trailer
-        position += fileChannel.write(blockContents);
+        try {
+            position += fileChannel.write(blockContents);
+        }
+        finally {
+            if (blockContents != raw) {
+                memory.free(blockContents);
+            }
+        }
 
         // clean up state
         blockBuilder.reset();
@@ -249,12 +260,16 @@ public class TableBuilder
 
         // write footer
         Footer footer = new Footer(metaindexBlockHandle, indexBlockHandle);
-        try (CloseableByteBuffer footerEncoding = ByteBuffers.closeable(this.memory.allocate(Footer.ENCODED_LENGTH),
-                memory)) {
-            footerEncoding.buffer.mark();
-            Footer.writeFooter(footer, footerEncoding.buffer).reset();
-            position += fileChannel.write(footerEncoding.buffer);
+        ByteBuffer footerEncoding = this.memory.allocate(Footer.ENCODED_LENGTH);
+        footerEncoding.mark();
+        Footer.writeFooter(footer, footerEncoding).reset();
+        try {
+            position += fileChannel.write(footerEncoding);
         }
+        finally {
+            memory.free(footerEncoding);
+        }
+
     }
 
     public void abandon()

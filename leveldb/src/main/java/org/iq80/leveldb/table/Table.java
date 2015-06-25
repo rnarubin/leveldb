@@ -81,8 +81,8 @@ public abstract class Table
         this.comparator = comparator;
 
         Footer footer = init();
-        indexBlock = readBlock(footer.getIndexBlockHandle());
-        metaindexBlockHandle = footer.getMetaindexBlockHandle();
+        this.indexBlock = readBlock(footer.getIndexBlockHandle());
+        this.metaindexBlockHandle = footer.getMetaindexBlockHandle();
     }
 
     protected abstract Footer init()
@@ -148,17 +148,18 @@ public abstract class Table
      */
     public long getApproximateOffsetOf(InternalKey key)
     {
-        BlockIterator<InternalKey> iterator = indexBlock.iterator();
-        iterator.seek(key);
-        if (iterator.hasNext()) {
-            BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue());
-            return blockHandle.getOffset();
-        }
+        try (BlockIterator<InternalKey> iterator = indexBlock.iterator()) {
+            iterator.seek(key);
+            if (iterator.hasNext()) {
+                BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue());
+                return blockHandle.getOffset();
+            }
 
-        // key is past the last key in the file.  Approximate the offset
-        // by returning the offset of the metaindex block (which is
-        // right near the end of the file).
-        return metaindexBlockHandle.getOffset();
+            // key is past the last key in the file. Approximate the offset
+            // by returning the offset of the metaindex block (which is
+            // right near the end of the file).
+            return metaindexBlockHandle.getOffset();
+        }
     }
 
     @Override

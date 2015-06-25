@@ -131,6 +131,8 @@ public class BlockIterator<T>
             throw new NoSuchElementException();
         }
 
+        if (prevEntry != null)
+            memory.free(prevEntry.getEncodedKey());
         prevEntry = nextEntry;
 
         if (!data.hasRemaining()) {
@@ -155,6 +157,7 @@ public class BlockIterator<T>
         int previousRestart = getPreviousRestart(restartIndex, original);
         if (previousRestart == prevCacheRestartIndex && prevCache.size() > 0) {
             CacheEntry<T> prevState = prevCache.pop();
+            memory.free(nextEntry.getEncodedKey());
             nextEntry = prevState.entry;
             prevPosition = prevState.prevPosition;
             data.position(prevState.dataPosition);
@@ -343,6 +346,16 @@ public class BlockIterator<T>
 
     private void resetCache()
     {
+        if (!prevCache.isEmpty()) {
+            BlockEntry<?> cachedPrev = prevCache.pop().entry;
+            if (cachedPrev != prevEntry) {
+                memory.free(cachedPrev.getEncodedKey());
+            }
+            for (CacheEntry<?> cachedEntry : prevCache) {
+                memory.free(cachedEntry.entry.getEncodedKey());
+            }
+
+        }
         prevCache.clear();
         prevCacheRestartIndex = -1;
     }
@@ -363,6 +376,8 @@ public class BlockIterator<T>
     @Override
     public void close()
     {
+        resetCache();
+
         if (nextEntry != null) {
             memory.free(nextEntry.getEncodedKey());
         }

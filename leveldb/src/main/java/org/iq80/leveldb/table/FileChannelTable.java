@@ -44,7 +44,12 @@ public class FileChannelTable
     {
         long size = fileChannel.size();
         ByteBuffer footerData = read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
-        return Footer.readFooter(footerData);
+        try {
+            return Footer.readFooter(footerData);
+        }
+        finally {
+            memory.free(footerData);
+        }
     }
 
     @Override

@@ -18,10 +18,13 @@
 package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.impl.DbImplTest;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.annotations.Test;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -135,18 +138,24 @@ public class BlockTest
         List<BlockEntry<ByteBuffer>> reverseEntries = new ArrayList<>(entries);
         Collections.reverse(reverseEntries);
 
-        try (BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, MemoryManagers.heap())) {
+        try (StrictMemoryManager strictMemory = new DbImplTest.StrictMemoryManager()) {
+            ByteBuffer blockByteBuffer;
+            try (BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, strictMemory)) {
+                for (BlockEntry<ByteBuffer> entry : entries) {
+                    builder.add(entry.getKey(), entry.getValue());
+                }
 
-            for (BlockEntry<ByteBuffer> entry : entries) {
-                builder.add(entry.getKey(), entry.getValue());
+                assertEquals(builder.currentSizeEstimate(),
+                        BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+
+                blockByteBuffer = ByteBuffers.copy(builder.finish(), strictMemory);
+
+                assertEquals(builder.currentSizeEstimate(),
+                        BlockHelper.estimateBlockSize(blockRestartInterval, entries));
             }
 
-            assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-            ByteBuffer blockByteBuffer = builder.finish();
-            assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-
             try (Block<ByteBuffer> block = new Block<ByteBuffer>(blockByteBuffer, byteCompare, MemoryManagers.heap(),
-                    noopDecoder, noopCallable)) {
+                    noopDecoder, ByteBuffers.freer(blockByteBuffer, strictMemory))) {
                 assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
 
                 try (BlockIterator<ByteBuffer> blockIterator = block.iterator()) {
@@ -200,6 +209,9 @@ public class BlockTest
                     BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
                 }
             }
+        }
+        catch (IOException e) {
+            throw new AssertionError(e);
         }
     }
 }

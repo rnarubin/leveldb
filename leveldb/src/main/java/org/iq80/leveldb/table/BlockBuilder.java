@@ -26,7 +26,6 @@ import org.iq80.leveldb.impl.SequenceNumber;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.ByteBuffers.CloseableByteBuffer;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.IntVector;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -168,18 +167,21 @@ public class BlockBuilder
 
     public void addHandle(InternalKey lastKey, InternalKey key, BlockHandle handle)
     {
-        try (CloseableByteBuffer last = ByteBuffers.closeable(ByteBuffers.copy(lastKey.getUserKey(), memory), memory);
-                CloseableByteBuffer handleEncoded = ByteBuffers.closeable(
-                        memory.allocate(BlockHandle.MAX_ENCODED_LENGTH), memory)) {
-
-            boolean changed = key == null ? comparator.findShortSuccessor(last.buffer)
-                    : comparator.findShortestSeparator(last.buffer, key.getUserKey());
-            InternalKey encoded = changed ? new TransientInternalKey(last.buffer, SequenceNumber.MAX_SEQUENCE_NUMBER,
+        ByteBuffer lastBuffer = ByteBuffers.copy(lastKey.getUserKey(), memory);
+        ByteBuffer handleEncoded = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
+        try {
+            boolean changed = key == null ? comparator.findShortSuccessor(lastBuffer)
+                    : comparator.findShortestSeparator(lastBuffer, key.getUserKey());
+            InternalKey encoded = changed ? new TransientInternalKey(lastBuffer, SequenceNumber.MAX_SEQUENCE_NUMBER,
                     ValueType.VALUE) : lastKey;
 
-            handleEncoded.buffer.mark();
-            BlockHandle.writeBlockHandleTo(handle, handleEncoded.buffer).limit(handleEncoded.buffer.position()).reset();
-            add(encoded, handleEncoded.buffer);
+            handleEncoded.mark();
+            BlockHandle.writeBlockHandleTo(handle, handleEncoded).limit(handleEncoded.position()).reset();
+            add(encoded, handleEncoded);
+        }
+        finally {
+            memory.free(lastBuffer);
+            memory.free(handleEncoded);
         }
     }
 

@@ -61,6 +61,7 @@ public final class TableIterator
     {
         if (!closed) {
             closed = true;
+            closeCurrent();
             indexIterator.close();
             table.close();
         }

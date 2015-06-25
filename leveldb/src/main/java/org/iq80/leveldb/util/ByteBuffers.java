@@ -1,6 +1,5 @@
 package org.iq80.leveldb.util;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -793,27 +792,30 @@ public final class ByteBuffers
         return dst;
     }
 
-    public static CloseableByteBuffer closeable(ByteBuffer b, MemoryManager m)
+    public static void safeFree(MemoryManager memory, ByteBuffer buffer1, ByteBuffer buffer2)
     {
-        return new CloseableByteBuffer(b, m);
+        try {
+            memory.free(buffer1);
+        }
+        finally {
+            memory.free(buffer2);
+        }
     }
 
-    public static class CloseableByteBuffer
-            implements Closeable
+    public static void safeFree(MemoryManager memory, ByteBuffer... buffers)
     {
-        public final ByteBuffer buffer;
-        private final MemoryManager memory;
+        safeFree(memory, buffers, buffers.length - 1);
+    }
 
-        public CloseableByteBuffer(ByteBuffer b, MemoryManager m)
-        {
-            this.buffer = b;
-            this.memory = m;
+    private static void safeFree(MemoryManager memory, ByteBuffer[] buffers, int index)
+    {
+        try {
+            memory.free(buffers[index]);
         }
-
-        @Override
-        public void close()
-        {
-            memory.free(buffer);
+        finally {
+            if (index == 0)
+                return;
+            safeFree(memory, buffers, index - 1);
         }
     }
 

@@ -1303,7 +1303,6 @@ public class DbImpl
             entries++;
             ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
             if (valueType == VALUE) {
-                // only called in case of log recovery, buffer copying tolerable
                 ByteBuffer key = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
                         options.memoryManager());
                 ByteBuffer value = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
