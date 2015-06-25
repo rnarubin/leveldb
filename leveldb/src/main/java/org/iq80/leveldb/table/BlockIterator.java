@@ -19,12 +19,15 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.ReferenceCounted;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 
+import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -34,7 +37,7 @@ import java.util.NoSuchElementException;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
 public class BlockIterator<T>
-        implements ReverseSeekingIterator<T, ByteBuffer>
+        implements ReverseSeekingIterator<T, ByteBuffer>, Closeable
 {
     private final ByteBuffer data;
     private final ByteBuffer restartPositions;
@@ -51,12 +54,14 @@ public class BlockIterator<T>
     private int prevCacheRestartIndex;
 
     private final MemoryManager memory;
+    private final ReferenceCounted<?> block;
 
     public BlockIterator(ByteBuffer data,
             ByteBuffer restartPositions,
             Comparator<T> comparator,
             MemoryManager memory,
-            Decoder<T> decoder)
+            Decoder<T> decoder,
+            ReferenceCounted<?> block)
     {
         Preconditions.checkNotNull(data, "data is null");
         Preconditions.checkNotNull(restartPositions, "restartPositions is null");
@@ -64,6 +69,10 @@ public class BlockIterator<T>
                 "restartPositions.readableBytes() must be a multiple of %s", SIZE_OF_INT);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
+        Object retainCheck = block.retain();
+        Preconditions.checkNotNull(retainCheck, "Opened an iterator on a disposed block");
+
+        this.block = block;
         this.decoder = decoder;
         this.memory = memory;
         this.data = ByteBuffers.duplicate(data);
@@ -313,7 +322,7 @@ public class BlockIterator<T>
         int valueLength = VariableLengthQuantity.readVariableLengthInt(data);
 
         // read key
-        // TODO don't alloc if nothing shared
+        // TODO don't alloc if nothing shared, necessitates modification to decoder
         ByteBuffer key = this.memory.allocate(sharedKeyLength + nonSharedKeyLength);
         key.mark();
         if (sharedKeyLength > 0) {
@@ -348,6 +357,23 @@ public class BlockIterator<T>
             this.entry = entry;
             this.prevPosition = prevPosition;
             this.dataPosition = dataPosition;
+        }
+    }
+
+    @Override
+    public void close()
+    {
+        if (nextEntry != null) {
+            memory.free(nextEntry.getEncodedKey());
+        }
+        if (prevEntry != null) {
+            memory.free(prevEntry.getEncodedKey());
+        }
+        try {
+            block.release();
+        }
+        catch (Exception e) {
+            Throwables.propagate(e);
         }
     }
 }

@@ -25,6 +25,7 @@ public class LookupKey
 
     public LookupKey(ByteBuffer userKey, long sequenceNumber)
     {
+        // TODO check this transient freeing
         key = new TransientInternalKey(userKey, sequenceNumber, ValueType.VALUE);
     }
 

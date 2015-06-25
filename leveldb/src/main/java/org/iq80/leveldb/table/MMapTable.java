@@ -37,6 +37,15 @@ import java.util.concurrent.Callable;
 public class MMapTable
         extends Table
 {
+    private static final Callable<?> NOOP = new Callable<Void>()
+    {
+        @Override
+        public Void call()
+        {
+            return null;
+        }
+    };
+
     private MappedByteBuffer data;
 
     public MMapTable(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
@@ -106,9 +115,12 @@ public class MMapTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        return new Block<InternalKey>(uncompressIfNecessary(
-                read(this.data, (int) blockHandle.getOffset(), blockHandle.getDataSize()),
-                blockTrailer.getCompressionId()), comparator, memory, INTERNAL_KEY_DECODER);
+        ByteBuffer compressedData = read(data, (int) blockHandle.getOffset(), blockHandle.getDataSize());
+        ByteBuffer blockData = uncompressIfNecessary(compressedData, blockTrailer.getCompressionId());
+        boolean didUncompress = blockData != compressedData;
+
+        return new Block<InternalKey>(blockData, comparator, memory, INTERNAL_KEY_DECODER,
+                didUncompress ? ByteBuffers.freer(blockData, memory) : NOOP);
     }
 
     public static ByteBuffer read(MappedByteBuffer data, int offset, int length)

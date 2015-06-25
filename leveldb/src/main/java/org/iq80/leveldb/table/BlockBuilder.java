@@ -31,11 +31,13 @@ import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.IntVector;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 
+import java.io.Closeable;
 import java.nio.ByteBuffer;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
 public class BlockBuilder
+        implements Closeable
 {
     private final int blockRestartInterval;
     private final IntVector restartPositions;
@@ -199,5 +201,11 @@ public class BlockBuilder
             block.ensureSpace(BlockTrailer.ENCODED_LENGTH);
         }
         return block.get();
+    }
+
+    @Override
+    public void close()
+    {
+        block.close();
     }
 }

@@ -2,7 +2,6 @@
 package org.iq80.leveldb.util;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.MemoryManager;
@@ -104,7 +103,6 @@ public class GrowingBuffer
 
     @Override
     public void close()
-            throws IOException
     {
         memory.free(buffer);
     }

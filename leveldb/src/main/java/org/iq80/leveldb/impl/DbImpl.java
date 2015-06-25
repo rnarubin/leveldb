@@ -108,6 +108,16 @@ public class DbImpl
     private final InternalKeyComparator internalKeyComparator;
 
     private volatile Throwable backgroundException;
+    private final UncaughtExceptionHandler backgroundExceptionHandler = new UncaughtExceptionHandler()
+    {
+        @Override
+        public void uncaughtException(Thread t, Throwable e)
+        {
+            // todo need a real UncaughtExceptionHandler
+            LOGGER.error("{} error in background thread {}", DbImpl.this, e);
+            backgroundException = e;
+        }
+    };
 
     private final ThreadPoolExecutor compactionExecutor;
     private final BlockingQueue<Runnable> backgroundCompaction = new ArrayBlockingQueue<>(1);
@@ -134,23 +144,15 @@ public class DbImpl
 
         ThreadFactory compactionThreadFactory = new ThreadFactoryBuilder()
                 .setNameFormat("leveldb-compaction-%s")
-                .setUncaughtExceptionHandler(new UncaughtExceptionHandler()
-                {
-                    @Override
-                    public void uncaughtException(Thread t, Throwable e)
-                    {
-                        // todo need a real UncaughtExceptionHandler
-                        LOGGER.error("{} error in background thread {}", DbImpl.this, e);
-                        backgroundException = e;
-                    }
-                })
+                .setUncaughtExceptionHandler(backgroundExceptionHandler)
                 .build();
         compactionExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, backgroundCompaction,
                 compactionThreadFactory);
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(databaseDir, tableCacheSize, internalKeyComparator, options);
+        tableCache = new TableCache(databaseDir, tableCacheSize, internalKeyComparator, options,
+                backgroundExceptionHandler);
 
         // create the version set
 
@@ -402,7 +404,7 @@ public class DbImpl
                 catch (DatabaseShutdownException ignored) {
                 }
                 catch (Throwable e) {
-                    backgroundException = e;
+                    setBackgroundException(e);
                 }
                 finally {
                     try {
@@ -425,6 +427,11 @@ public class DbImpl
         else {
             LOGGER.trace("{} foregoing compaction, queue full", this);
         }
+    }
+
+    private void setBackgroundException(Throwable t)
+    {
+        backgroundExceptionHandler.uncaughtException(Thread.currentThread(), t);
     }
 
     public void checkBackgroundException()
@@ -860,7 +867,7 @@ public class DbImpl
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
                     //other writers trying to acquire it (those spinning in this loop, or new writers) should be fail
-                    backgroundException = e;
+                    setBackgroundException(e);
                     current.release();
                     throw new DBException(e);
                 }
@@ -966,31 +973,26 @@ public class DbImpl
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
-            @SuppressWarnings("resource")
-            // channel is closed
-            FileChannel channel = new FileOutputStream(file).getChannel();
-            try {
-                TableBuilder tableBuilder = new TableBuilder(options, channel, internalKeyComparator);
 
-                for (Entry<InternalKey, ByteBuffer> entry : data) {
-                    // update keys
-                    InternalKey key = entry.getKey();
-                    if (smallest == null) {
-                        smallest = key;
+            try (FileOutputStream fileOutput = new FileOutputStream(file);
+                    FileChannel channel = fileOutput.getChannel()) {
+                try (TableBuilder tableBuilder = new TableBuilder(options, channel, internalKeyComparator)) {
+
+                    for (Entry<InternalKey, ByteBuffer> entry : data) {
+                        // update keys
+                        InternalKey key = entry.getKey();
+                        if (smallest == null) {
+                            smallest = key;
+                        }
+                        largest = key;
+
+                        tableBuilder.add(key, entry.getValue());
                     }
-                    largest = key;
 
-                    tableBuilder.add(key, entry.getValue());
-                }
-
-                tableBuilder.finish();
-            }
-            finally {
-                try {
-                   channel.force(true);
+                    tableBuilder.finish();
                 }
                 finally {
-                   channel.close();
+                   channel.force(true);
                 }
             }
 
@@ -1168,6 +1170,7 @@ public class DbImpl
                 compactionState.currentLargest);
         compactionState.outputs.add(currentFileMetaData);
 
+        compactionState.builder.close();
         compactionState.builder = null;
 
         compactionState.outfile.force(true);
@@ -1305,6 +1308,7 @@ public class DbImpl
                         options.memoryManager());
                 ByteBuffer value = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
                         options.memoryManager());
+                // TODO trace write batch internal keys
                 writeBatch.put(key, value);
             }
             else if (valueType == DELETION) {
@@ -1367,12 +1371,14 @@ public class DbImpl
         @Override
         public void put(ByteBuffer key, ByteBuffer value)
         {
+            // FIXME transient key freeing
             memTable.add(new TransientInternalKey(key, sequence++, VALUE), value);
         }
 
         @Override
         public void delete(ByteBuffer key)
         {
+            // FIXME transient key freeing
             memTable.add(new TransientInternalKey(key, sequence++, DELETION), ByteBuffers.EMPTY_BUFFER);
         }
     }

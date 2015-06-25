@@ -38,6 +38,17 @@ public class EncodedInternalKey
 
     public EncodedInternalKey(ByteBuffer data)
     {
+        this(data, false);
+    }
+
+    public EncodedInternalKey(ByteBuffer data, boolean freeKey)
+    {
+        this(data, freeKey, false);
+    }
+
+    public EncodedInternalKey(ByteBuffer data, boolean freeKey, boolean freeValue)
+    {
+        super(freeKey, freeValue);
         Preconditions.checkNotNull(data, "data is null");
         Preconditions.checkArgument(data.remaining() >= SIZE_OF_LONG, "data must be at least %s bytes", SIZE_OF_LONG);
         this.userKey = ByteBuffers.duplicate(data, data.position(), data.limit() - SIZE_OF_LONG);
@@ -63,9 +74,10 @@ public class EncodedInternalKey
     }
 
     @Override
-    public void writeToBuffer(ByteBuffer dst)
+    public ByteBuffer writeToBuffer(ByteBuffer dst)
     {
         dst.put(ByteBuffers.duplicate(data));
+        return dst;
     }
 
     @Override

@@ -31,7 +31,7 @@ public final class TableIterator
         implements InternalIterator
 {
     private final Table table;
-    private final BlockIterator<InternalKey> blockIterator;
+    private final BlockIterator<InternalKey> indexIterator;
     private BlockIterator<InternalKey> current;
     private CurrentOrigin currentOrigin = NONE;
     private boolean closed;
@@ -48,11 +48,11 @@ public final class TableIterator
         // a state of NONE should be interchangeable with current==NULL
     }
 
-    public TableIterator(Table table, BlockIterator<InternalKey> blockIterator)
+    public TableIterator(Table table, BlockIterator<InternalKey> indexIterator)
     {
         this.table = table;
         this.closed = false;
-        this.blockIterator = blockIterator;
+        this.indexIterator = indexIterator;
         clearCurrent();
     }
 
@@ -61,6 +61,7 @@ public final class TableIterator
     {
         if (!closed) {
             closed = true;
+            indexIterator.close();
             table.close();
         }
     }
@@ -69,14 +70,14 @@ public final class TableIterator
     protected void seekToFirstInternal()
     {
         // reset index to before first and clear the data iterator
-        blockIterator.seekToFirst();
+        indexIterator.seekToFirst();
         clearCurrent();
     }
 
     @Override
     protected void seekToLastInternal()
     {
-        blockIterator.seekToEnd();
+        indexIterator.seekToEnd();
         clearCurrent();
         if (currentHasPrev()) {
             current.prev();
@@ -86,7 +87,7 @@ public final class TableIterator
     @Override
     public void seekToEndInternal()
     {
-        blockIterator.seekToEnd();
+        indexIterator.seekToEnd();
         clearCurrent();
     }
 
@@ -94,10 +95,10 @@ public final class TableIterator
     protected void seekInternal(InternalKey targetKey)
     {
         // seek the index to the block containing the key
-        blockIterator.seek(targetKey);
+        indexIterator.seek(targetKey);
 
         // if indexIterator does not have a next, it mean the key does not exist in this iterator
-        if (blockIterator.hasNext()) {
+        if (indexIterator.hasNext()) {
             // seek the current iterator to the key
             current = getNextBlock();
             current.seek(targetKey);
@@ -156,14 +157,14 @@ public final class TableIterator
             }
             if (!currentHasNext) {
                 if (currentOrigin == PREV) {
-                    // current came from PREV, so advancing blockIterator to next() must be safe
+                    // current came from PREV, so advancing indexIterator to next() must be safe
                     // indeed, because alternating calls to prev() and next() must return the same item
                     // current can be retrieved from next() when the origin is PREV
-                    blockIterator.next();
+                    indexIterator.next();
                     // but of course we want to go beyond current to the next block
                     // so we pass into the next if
                 }
-                if (blockIterator.hasNext()) {
+                if (indexIterator.hasNext()) {
                     current = getNextBlock();
                 }
                 else {
@@ -189,9 +190,9 @@ public final class TableIterator
             }
             if (!(currentHasPrev)) {
                 if (currentOrigin == NEXT) {
-                    blockIterator.prev();
+                    indexIterator.prev();
                 }
-                if (blockIterator.hasPrev()) {
+                if (indexIterator.hasPrev()) {
                     current = getPrevBlock();
                     current.seekToEnd();
                 }
@@ -211,22 +212,36 @@ public final class TableIterator
 
     private BlockIterator<InternalKey> getNextBlock()
     {
-        ByteBuffer blockHandle = blockIterator.next().getValue();
-        Block<InternalKey> dataBlock = table.openBlock(blockHandle);
+        ByteBuffer blockHandle = indexIterator.next().getValue();
         currentOrigin = NEXT;
-        return dataBlock.iterator();
+        return blockIterator(blockHandle);
     }
 
     private BlockIterator<InternalKey> getPrevBlock()
     {
-        ByteBuffer blockHandle = blockIterator.prev().getValue();
-        Block<InternalKey> dataBlock = table.openBlock(blockHandle);
+        ByteBuffer blockHandle = indexIterator.prev().getValue();
         currentOrigin = PREV;
-        return dataBlock.iterator();
+        return blockIterator(blockHandle);
+    }
+
+    private BlockIterator<InternalKey> blockIterator(ByteBuffer blockHandle)
+    {
+        closeCurrent();
+        try (Block<InternalKey> dataBlock = table.openBlock(blockHandle)) {
+            return dataBlock.iterator(); // dataBlock retained by iterator
+        }
+    }
+
+    private void closeCurrent()
+    {
+        if (current != null) {
+            current.close();
+        }
     }
 
     private void clearCurrent()
     {
+        closeCurrent();
         current = null;
         currentOrigin = NONE;
     }
@@ -236,7 +251,7 @@ public final class TableIterator
     {
         final StringBuilder sb = new StringBuilder();
         sb.append("ConcatenatingIterator");
-        sb.append("{blockIterator=").append(blockIterator);
+        sb.append("{blockIterator=").append(indexIterator);
         sb.append(", current=").append(current);
         sb.append('}');
         return sb.toString();

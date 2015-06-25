@@ -18,13 +18,16 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.ReferenceCounted;
 
 import java.nio.ByteBuffer;
 import java.util.Comparator;
+import java.util.concurrent.Callable;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
@@ -63,6 +66,7 @@ import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
  * </table>
  */
 public class Block<T>
+        extends ReferenceCounted<Block<T>>
         implements SeekingIterable<T, ByteBuffer>
 {
     private final ByteBuffer block;
@@ -72,8 +76,13 @@ public class Block<T>
     private final ByteBuffer restartPositions;
     private final MemoryManager memory;
     private Decoder<T> decoder;
+    private final Callable<?> cleaner;
 
-    public Block(ByteBuffer block, Comparator<T> comparator, MemoryManager memory, Decoder<T> decoder)
+    public Block(ByteBuffer block,
+            Comparator<T> comparator,
+            MemoryManager memory,
+            Decoder<T> decoder,
+            Callable<?> cleaner)
     {
         Preconditions.checkNotNull(block, "block is null");
         Preconditions.checkArgument(block.remaining() >= SIZE_OF_INT, "Block is corrupt: size must be at least %s block", SIZE_OF_INT);
@@ -84,6 +93,7 @@ public class Block<T>
         this.comparator = comparator;
         this.memory = memory;
         this.decoder = decoder;
+        this.cleaner = cleaner;
 
         // Keys are prefix compressed.  Every once in a while the prefix compression is restarted and the full key is written.
         // These "restart" locations are written at the end of the file, so you can seek to key without having to read the
@@ -97,11 +107,9 @@ public class Block<T>
             int restartOffset = block.limit() - (1 + restartCount) * SIZE_OF_INT;
             Preconditions.checkArgument(restartOffset < block.limit() - SIZE_OF_INT, "Block is corrupt: restart offset count is greater than block size");
             restartPositions = ByteBuffers.duplicate(block, restartOffset, restartOffset + restartCount*SIZE_OF_INT);
-            //restartPositions = block.slice(restartOffset, restartCount * SIZE_OF_INT);
 
             // data starts at 0 and extends to the restart index
             data = ByteBuffers.duplicate(block, block.position(), restartOffset);
-            //data = block.slice(0, restartOffset);
         }
         else {
             data = ByteBuffers.EMPTY_BUFFER;
@@ -117,6 +125,23 @@ public class Block<T>
     @Override
     public BlockIterator<T> iterator()
     {
-        return new BlockIterator<T>(data, restartPositions, comparator, memory, decoder);
+        return new BlockIterator<T>(data, restartPositions, comparator, memory, decoder, this);
+    }
+
+    @Override
+    protected Block<T> getThis()
+    {
+        return this;
+    }
+
+    @Override
+    protected void dispose()
+    {
+        try {
+            cleaner.call();
+        }
+        catch (Exception e) {
+            Throwables.propagate(e);
+        }
     }
 }

@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertEquals;
@@ -41,12 +42,20 @@ public class BlockTest
             return b;
         }
     };
+    private static final Callable<?> noopCallable = new Callable<Void>()
+    {
+        @Override
+        public Void call()
+        {
+            return null;
+        }
+    };
 
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyBuffer()
             throws Exception
     {
-        new Block<ByteBuffer>(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap(), noopDecoder);
+        new Block<ByteBuffer>(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap(), noopDecoder, noopCallable).close();
     }
 
     @Test
@@ -126,66 +135,71 @@ public class BlockTest
         List<BlockEntry<ByteBuffer>> reverseEntries = new ArrayList<>(entries);
         Collections.reverse(reverseEntries);
 
-        BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, MemoryManagers.heap());
+        try (BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, byteCompare, MemoryManagers.heap())) {
 
-        for (BlockEntry<ByteBuffer> entry : entries) {
-            builder.add(entry.getKey(), entry.getValue());
+            for (BlockEntry<ByteBuffer> entry : entries) {
+                builder.add(entry.getKey(), entry.getValue());
+            }
+
+            assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+            ByteBuffer blockByteBuffer = builder.finish();
+            assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+
+            try (Block<ByteBuffer> block = new Block<ByteBuffer>(blockByteBuffer, byteCompare, MemoryManagers.heap(),
+                    noopDecoder, noopCallable)) {
+                assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+
+                try (BlockIterator<ByteBuffer> blockIterator = block.iterator()) {
+                    BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
+                    BlockHelper.assertSequence(blockIterator, entries);
+                    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+
+                    blockIterator.seekToFirst();
+                    BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
+                    BlockHelper.assertSequence(blockIterator, entries);
+                    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+
+                    blockIterator.seekToLast();
+                    if (reverseEntries.size() > 0) {
+                        BlockHelper.assertSequence(blockIterator, reverseEntries.get(0));
+                        blockIterator.seekToLast();
+                        BlockHelper.assertReverseSequence(blockIterator,
+                                reverseEntries.subList(1, reverseEntries.size()));
+                    }
+                    BlockHelper.assertSequence(blockIterator, entries);
+
+                    blockIterator.seekToEnd();
+                    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+
+                    for (BlockEntry<ByteBuffer> entry : entries) {
+                        List<BlockEntry<ByteBuffer>> nextEntries = entries.subList(entries.indexOf(entry),
+                                entries.size());
+                        List<BlockEntry<ByteBuffer>> prevEntries = reverseEntries.subList(
+                                reverseEntries.indexOf(entry), reverseEntries.size());
+                        blockIterator.seek(entry.getKey());
+                        BlockHelper.assertSequence(blockIterator, nextEntries);
+
+                        blockIterator.seek(BlockHelper.before(entry));
+                        BlockHelper.assertSequence(blockIterator, nextEntries);
+
+                        blockIterator.seek(BlockHelper.after(entry));
+                        BlockHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
+
+                        blockIterator.seek(BlockHelper.before(entry));
+                        BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+
+                        blockIterator.seek(entry.getKey());
+                        BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+
+                        blockIterator.seek(BlockHelper.after(entry));
+                        BlockHelper.assertReverseSequence(blockIterator, prevEntries);
+                    }
+
+                    blockIterator.seek(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF }));
+                    BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
+                    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+                }
+            }
         }
-
-        assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-        ByteBuffer blockByteBuffer = builder.finish();
-        assertEquals(builder.currentSizeEstimate(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-
-        Block<ByteBuffer> block = new Block<ByteBuffer>(blockByteBuffer, byteCompare, MemoryManagers.heap(),
-                noopDecoder);
-        assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
-
-        BlockIterator<ByteBuffer> blockIterator = block.iterator();
-        BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
-        BlockHelper.assertSequence(blockIterator, entries);
-        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
-
-        blockIterator.seekToFirst();
-        BlockHelper.assertReverseSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
-        BlockHelper.assertSequence(blockIterator, entries);
-        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
-
-        blockIterator.seekToLast();
-        if (reverseEntries.size() > 0) {
-            BlockHelper.assertSequence(blockIterator, reverseEntries.get(0));
-            blockIterator.seekToLast();
-            BlockHelper.assertReverseSequence(blockIterator, reverseEntries.subList(1, reverseEntries.size()));
-        }
-        BlockHelper.assertSequence(blockIterator, entries);
-
-        blockIterator.seekToEnd();
-        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
-
-        for (BlockEntry<ByteBuffer> entry : entries) {
-            List<BlockEntry<ByteBuffer>> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
-            List<BlockEntry<ByteBuffer>> prevEntries = reverseEntries.subList(reverseEntries.indexOf(entry),
-                    reverseEntries.size());
-            blockIterator.seek(entry.getKey());
-            BlockHelper.assertSequence(blockIterator, nextEntries);
-
-            blockIterator.seek(BlockHelper.before(entry));
-            BlockHelper.assertSequence(blockIterator, nextEntries);
-
-            blockIterator.seek(BlockHelper.after(entry));
-            BlockHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
-
-            blockIterator.seek(BlockHelper.before(entry));
-            BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
-
-            blockIterator.seek(entry.getKey());
-            BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
-
-            blockIterator.seek(BlockHelper.after(entry));
-            BlockHelper.assertReverseSequence(blockIterator, prevEntries);
-        }
-
-        blockIterator.seek(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF }));
-        BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>> emptyList());
-        BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
     }
 }

@@ -67,8 +67,14 @@ public class FileChannelTable
             Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
         }
 
-        return new Block<InternalKey>(uncompressIfNecessary(compressedData, blockTrailer.getCompressionId()),
-                comparator, memory, INTERNAL_KEY_DECODER);
+        ByteBuffer blockData = uncompressIfNecessary(compressedData, blockTrailer.getCompressionId());
+        boolean didUncompress = blockData != compressedData;
+        if (didUncompress) {
+            memory.free(readBuffer);
+        }
+
+        return new Block<InternalKey>(blockData, comparator, memory, INTERNAL_KEY_DECODER, ByteBuffers.freer(
+                didUncompress ? blockData : readBuffer, memory));
     }
 
     private ByteBuffer read(long offset, int length)

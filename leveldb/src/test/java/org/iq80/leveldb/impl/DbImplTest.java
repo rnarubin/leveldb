@@ -73,6 +73,7 @@ import org.testng.annotations.Test;
 
 import com.google.common.base.FinalizablePhantomReference;
 import com.google.common.base.FinalizableReferenceQueue;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapMaker;
@@ -1232,11 +1233,11 @@ public class DbImplTest
         {
             phantomQueue.close();
             if (backgroundException != null) {
-                // Throwables.propagate(backgroundException);
+                Throwables.propagate(backgroundException);
             }
             for (Entry<ByteBuffer, AtomicBoolean> entry : bufMap.entrySet()) {
                 if (!entry.getValue().get()) {
-                    // throw new IllegalStateException("buffer not freed before closing memory manager");
+                    throw new IllegalStateException("buffer not freed before closing memory manager");
                 }
             }
         }

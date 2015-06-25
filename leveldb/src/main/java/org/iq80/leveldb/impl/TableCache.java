@@ -36,6 +36,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.ExecutionException;
 
@@ -47,7 +48,8 @@ public class TableCache
     public TableCache(final File databaseDir,
             int tableCacheSize,
             final InternalKeyComparator userComparator,
-            final Options options)
+            final Options options,
+            final UncaughtExceptionHandler backgroundExceptionHandler)
     {
         Preconditions.checkNotNull(databaseDir, "databaseName is null");
 
@@ -60,7 +62,12 @@ public class TableCache
                     {
                         Table table = notification.getValue().getTable();
                         finalizer.addCleanup(table, table.closer());
-                        table.release(); // corresponding to constructor implicit retain
+                        try {
+                            table.release(); // corresponding to constructor implicit retain
+                        }
+                        catch (Exception e) {
+                            backgroundExceptionHandler.uncaughtException(Thread.currentThread(), e);
+                        }
                     }
                 })
                 .build(new CacheLoader<Long, TableAndFile>()
@@ -126,10 +133,7 @@ public class TableCache
         private final Table table;
         private FileChannel fileChannel;
 
-        private TableAndFile(File databaseDir,
-                long fileNumber,
- InternalKeyComparator userComparator,
-                Options options)
+        private TableAndFile(File databaseDir, long fileNumber, InternalKeyComparator userComparator, Options options)
                 throws IOException
         {
             String tableFileName = Filename.tableFileName(fileNumber);

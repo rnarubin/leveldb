@@ -27,9 +27,11 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.ByteBuffers.CloseableByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -37,6 +39,7 @@ import java.nio.channels.FileChannel;
 import static org.iq80.leveldb.impl.VersionSet.TARGET_FILE_SIZE;
 
 public class TableBuilder
+        implements Closeable
 {
     /**
      * TABLE_MAGIC_NUMBER was picked by running
@@ -227,20 +230,17 @@ public class TableBuilder
         BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(),
                 this.memory);
         // TODO(postrelease): Add stats and other meta blocks
-        BlockHandle metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);
+        BlockHandle metaindexBlockHandle;
+        try {
+            metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);
+        }
+        finally {
+            metaIndexBlockBuilder.close();
+        }
 
         // add last handle to index block
         if (pendingIndexEntry) {
             indexBlockBuilder.addHandle(lastKey, null, pendingHandle);
-            // TODO handle handle manually
-            // ByteBuffer shortSuccessor = userComparator.findShortSuccessor(lastKey);
-            //
-            // ByteBuffer handleEncoding = memory.allocate(BlockHandle.MAX_ENCODED_LENGTH);
-            // handleEncoding.mark();
-            // BlockHandle.writeBlockHandleTo(pendingHandle, handleEncoding);
-            // handleEncoding.limit(handleEncoding.position()).reset();
-            //
-            // indexBlockBuilder.add(shortSuccessor, handleEncoding);
             pendingIndexEntry = false;
         }
 
@@ -249,10 +249,12 @@ public class TableBuilder
 
         // write footer
         Footer footer = new Footer(metaindexBlockHandle, indexBlockHandle);
-        // TODO FIXME flip
-        ByteBuffer footerEncoding = Footer.writeFooter(footer, this.memory.allocate(Footer.ENCODED_LENGTH));
-        footerEncoding.flip();
-        position += fileChannel.write(footerEncoding);
+        try (CloseableByteBuffer footerEncoding = ByteBuffers.closeable(this.memory.allocate(Footer.ENCODED_LENGTH),
+                memory)) {
+            footerEncoding.buffer.mark();
+            Footer.writeFooter(footer, footerEncoding.buffer).reset();
+            position += fileChannel.write(footerEncoding.buffer);
+        }
     }
 
     public void abandon()
@@ -267,5 +269,12 @@ public class TableBuilder
         crc32.update(data, data.position(), data.remaining());
         crc32.update(compressionId & 0xFF);
         return ByteBuffers.maskChecksum(crc32.getIntValue());
+    }
+
+    @Override
+    public void close()
+    {
+        dataBlockBuilder.close();
+        indexBlockBuilder.close();
     }
 }

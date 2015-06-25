@@ -115,8 +115,7 @@ public abstract class TableTest
         tableTest(1, Integer.MAX_VALUE, entries);
 
         // about 3 blocks
-        // TODO FIXME
-        // tableTest(BlockHelper.estimateBlockSize(Integer.MAX_VALUE, entries) / 3, Integer.MAX_VALUE, entries);
+        tableTest(BlockHelper.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3, Integer.MAX_VALUE, entries);
     }
 
     @SafeVarargs
@@ -144,6 +143,7 @@ public abstract class TableTest
             builder.add(entry.getKey(), entry.getValue());
         }
         builder.finish();
+        builder.close();
 
         try (Table table = createTable(file.getAbsolutePath(), fileChannel, byteCompare, true)) {
             ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = table.iterator();

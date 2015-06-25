@@ -11,6 +11,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.concurrent.Callable;
 
 import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
@@ -843,5 +844,30 @@ public final class ByteBuffers
     {
         int rot = maskedCrc - MASK_DELTA;
         return ((rot >>> 17) | (rot << 15));
+    }
+
+    public static Callable<?> freer(ByteBuffer b, MemoryManager m)
+    {
+        return new MemoryFreer(b, m);
+    }
+
+    private static class MemoryFreer
+            implements Callable<Void>
+    {
+        private final ByteBuffer buffer;
+        private final MemoryManager memory;
+
+        public MemoryFreer(ByteBuffer buffer, MemoryManager memory)
+        {
+            this.buffer = buffer;
+            this.memory = memory;
+        }
+
+        @Override
+        public Void call()
+        {
+            memory.free(buffer);
+            return null;
+        }
     }
 }

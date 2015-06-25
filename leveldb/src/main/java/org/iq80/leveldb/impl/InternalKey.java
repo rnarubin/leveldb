@@ -29,13 +29,21 @@ public abstract class InternalKey
     public static final InternalKey MINIMUM_KEY = new TransientInternalKey(ByteBuffers.EMPTY_BUFFER, 0,
             ValueType.getValueTypeByPersistentId((byte) 0));
 
+    private final boolean freeKey, freeValue;
+
+    public InternalKey(boolean freeKey, boolean freeValue)
+    {
+        this.freeKey = freeKey;
+        this.freeValue = freeValue;
+    }
+
     public abstract ByteBuffer getUserKey();
 
     public abstract long getSequenceNumber();
 
     public abstract ValueType getValueType();
 
-    public abstract void writeToBuffer(ByteBuffer dst);
+    public abstract ByteBuffer writeToBuffer(ByteBuffer dst);
 
     public abstract ByteBuffer writeUnsharedAndValue(GrowingBuffer buffer,
             boolean restart,
@@ -45,6 +53,16 @@ public abstract class InternalKey
     public int getEncodedSize()
     {
         return getUserKey().remaining() + SizeOf.SIZE_OF_LONG;
+    }
+
+    public boolean freeKey()
+    {
+        return freeKey;
+    }
+
+    public boolean freeValue()
+    {
+        return freeValue;
     }
 
     @Override

@@ -29,11 +29,11 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.ReferenceCounted;
 import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -42,6 +42,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class Table
+        extends ReferenceCounted<Table>
         implements SeekingIterable<InternalKey, ByteBuffer>, AutoCloseable
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
@@ -53,13 +54,12 @@ public abstract class Table
     protected final BlockHandle metaindexBlockHandle;
     protected final MemoryManager memory;
     private final Compression compression;
-    private final AtomicInteger refCount;
     protected static final Decoder<InternalKey> INTERNAL_KEY_DECODER = new Decoder<InternalKey>()
     {
         @Override
         public InternalKey decode(ByteBuffer b)
         {
-            return new EncodedInternalKey(b);
+            return new EncodedInternalKey(b, true, false);
         }
     };
 
@@ -72,7 +72,6 @@ public abstract class Table
         Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH, "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
-        this.refCount = new AtomicInteger(1);
         this.memory = options.memoryManager();
         this.compression = options.compression();
 
@@ -174,53 +173,38 @@ public abstract class Table
         return sb.toString();
     }
 
-    public final Table retain()
+    @Override
+    protected final Table getThis()
     {
-        int count;
-        do {
-            count = refCount.get();
-            if (count == 0) {
-                // raced with a final release,
-                // force the caller to re-read from cache
-                return null;
-            }
-        }
-        while (!refCount.compareAndSet(count, count + 1));
         return this;
     }
 
-    public final void release()
-    {
-        if (refCount.decrementAndGet() == 0) {
-            try {
-                closer().call();
-            }
-            catch (Exception e) {
-            }
-        }
-    }
-
     @Override
-    public void close()
+    protected void dispose()
     {
-        release();
+        try {
+            closer().call();
+        }
+        catch (Exception e) {
+            Throwables.propagate(e);
+        }
     }
 
     public Callable<?> closer()
     {
-        return new Closer(fileChannel, refCount);
+        return new Closer(getReferenceCount(), fileChannel, indexBlock);
     }
 
     private static class Closer
             implements Callable<Void>
     {
-        private final Closeable closeable;
+        private final AutoCloseable[] closeables;
         private final AtomicInteger refCount;
 
-        public Closer(Closeable closeable, AtomicInteger refCount)
+        public Closer(AtomicInteger refCount, AutoCloseable... closeables)
         {
-            this.closeable = closeable;
             this.refCount = refCount;
+            this.closeables = closeables;
         }
 
         @Override
@@ -229,8 +213,11 @@ public abstract class Table
             if (refCount.get() != 0) {
                 LOGGER.warn("table finalized with {} open refs", refCount.get());
             }
-            Closeables.closeQuietly(closeable);
+            for (AutoCloseable c : closeables) {
+                Closeables.closeQuietly(c);
+            }
             return null;
         }
     }
+
 }

@@ -25,7 +25,6 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
@@ -36,7 +35,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -213,11 +211,9 @@ public abstract class LogTest
             writer.close();
         }
 
-        // test readRecord
-        @SuppressWarnings("resource")
-        FileChannel fileChannel = new FileInputStream(writer.getFile()).getChannel();
-        try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-                LogReader reader = new LogReader(fileChannel, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
+        try (FileInputStream fileInput = new FileInputStream(writer.getFile());
+                StrictMemoryManager strictMemory = new StrictMemoryManager();
+                LogReader reader = new LogReader(fileInput.getChannel(), NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
 
             for (ByteBuffer expected : records) {
                 ByteBuffer actual = reader.readRecord();
@@ -225,10 +221,6 @@ public abstract class LogTest
                 strictMemory.free(actual);
             }
             assertNull(reader.readRecord());
-        }
-        finally {
-            // TODO check quiet close
-            Closeables.closeQuietly(fileChannel);
         }
     }
 

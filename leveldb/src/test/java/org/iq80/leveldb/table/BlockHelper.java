@@ -24,11 +24,13 @@ import org.iq80.leveldb.impl.SequenceNumber;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 
 import com.google.common.collect.Maps;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map.Entry;
@@ -46,6 +48,18 @@ public final class BlockHelper
 {
     private BlockHelper()
     {
+    }
+
+    public static int estimateBlockSizeInternalKey(int blockRestartInterval,
+            List<Entry<InternalKey, ByteBuffer>> entries)
+    {
+        List<BlockEntry<ByteBuffer>> blockEntries = new ArrayList<>(entries.size());
+        for (Entry<InternalKey, ByteBuffer> entry : entries) {
+            ByteBuffer encoded = MemoryManagers.heap().allocate(entry.getKey().getEncodedSize());
+            entry.getKey().writeToBuffer(encoded).flip();
+            blockEntries.add(BlockEntry.of(encoded, entry.getValue()));
+        }
+        return estimateBlockSize(blockRestartInterval, blockEntries);
     }
 
     public static int estimateBlockSize(int blockRestartInterval, List<BlockEntry<ByteBuffer>> entries)

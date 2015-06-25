@@ -158,8 +158,6 @@ public class BlockEntry<T>
     {
         StringBuilder sb = new StringBuilder();
         sb.append("BlockEntry");
-        // sb.append("{key=").append(key.toString(UTF_8)); // TODO don't print the real value
-        // sb.append(", value=").append(value.toString(UTF_8));
         sb.append("{key=").append(key.toString());
         sb.append(", value=").append(value.toString());
         sb.append('}');

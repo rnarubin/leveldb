@@ -17,16 +17,17 @@
  */
 package org.iq80.leveldb.util;
 
-import java.io.Closeable;
-import java.io.IOException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class Closeables
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Closeables.class);
     private Closeables()
     {
     }
 
-    public static void closeQuietly(Closeable closeable)
+    public static void closeQuietly(AutoCloseable closeable)
     {
         if (closeable == null) {
             return;
@@ -34,7 +35,8 @@ public final class Closeables
         try {
             closeable.close();
         }
-        catch (IOException ignored) {
+        catch (Exception ignored) {
+            LOGGER.warn("exception in closing {} ", closeable, ignored);
         }
     }
 }
