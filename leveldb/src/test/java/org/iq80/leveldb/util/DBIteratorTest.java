@@ -492,6 +492,40 @@ public class DBIteratorTest
     }
 
     @Test
+    public void testFailureWithoutSeek() throws IOException
+    {
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().next();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().prev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().hasNext();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().hasPrev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().peekNext();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().peekPrev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+    }
+
+    @Test
     public void testMixedIteration()
             throws IOException
     {
@@ -501,6 +535,7 @@ public class DBIteratorTest
         ReversePeekingIterator<Entry<String, String>> expected =
                 ReverseIterators.reversePeekingIterator(ordered);
         try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+            actual.seekToFirst();
             mixedIteration(entries.size(), actual, expected);
         }
     }
@@ -514,6 +549,7 @@ public class DBIteratorTest
         List<Entry<String, String>> preserved = deletePortion(db, ordered, 0.75);
 
         try (StringDbIterator iter = new StringDbIterator(db.iterator())) {
+            iter.seekToFirst();
             mixedIteration(preserved.size(), iter, ReverseIterators.reversePeekingIterator(preserved));
         }
     }

@@ -107,12 +107,15 @@ public final class SnapshotSeekingIterator
             // the last valid entry was returned by getPrevElement
             // so iterator's next must be the valid entry
         }
-        else {
+        else if (direction == FORWARD) {
             findNextUserEntry(true, savedEntry);
 
             if (!iterator.hasNext()) {
                 return null;
             }
+        }
+        else {
+            throw new IllegalStateException("must seek before iterating");
         }
 
         savedEntry = iterator.next();
@@ -133,12 +136,15 @@ public final class SnapshotSeekingIterator
             // so iterator's prev must be the valid entry
             savedEntry = iterator.prev();
         }
-        else {
+        else if (direction == REVERSE) {
             findPrevUserEntry();
 
             if (savedEntry == null) {
                 return null;
             }
+        }
+        else {
+            throw new IllegalStateException("must seek before iterating");
         }
 
         return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
@@ -250,6 +256,9 @@ public final class SnapshotSeekingIterator
             // next() is valid, which is the same as a state of coming from a reverse advance
             direction = REVERSE;
         }
+        else if (direction == null) {
+            throw new IllegalStateException("must seek before iterating");
+        }
         return iterator.hasNext();
     }
 
@@ -267,6 +276,9 @@ public final class SnapshotSeekingIterator
                 iterator.next();
                 direction = FORWARD;
             }
+        }
+        else if (direction == null) {
+            throw new IllegalStateException("must seek before iterating");
         }
         return iterator.hasPrev();
     }

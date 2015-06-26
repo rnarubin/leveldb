@@ -167,7 +167,7 @@ public final class LevelIterator
         @Override
         public void seekToEnd()
         {
-            index = files.size() - 1;
+            index = files.size();
         }
 
     }
