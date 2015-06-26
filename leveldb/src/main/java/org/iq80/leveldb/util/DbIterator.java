@@ -108,7 +108,7 @@ public final class DbIterator
         resetHeap();
     }
 
-    private Tuple<OrdinalIterator<?>, Integer> getMaxAndIndex()
+    private OrdinalIterator<?> getMaxAndIndex(int[] maxIndex)
     {
       /*
        * forward iteration can take advantage of the heap ordering but reverse iteration cannot,
@@ -119,17 +119,17 @@ public final class DbIterator
        * (the c++ implementation, as of this writing, uses linear search forwards and backwards)
        */
         OrdinalIterator<?> max = heap[0];
-        int maxIndex = 0;
+        maxIndex[0] = 0;
 
         for (int i = 1; i < heap.length; i++) {
             OrdinalIterator<?> ord = heap[i];
             if (largerPrev.compare(ord, max) > 0) {
                 max = ord;
-                maxIndex = i;
+                maxIndex[0] = i;
             }
         }
 
-        return Tuple.<OrdinalIterator<?>, Integer> of(max, maxIndex);
+        return max;
     }
 
     @Override
@@ -158,12 +158,12 @@ public final class DbIterator
         return next;
     }
 
+    private final int[] passByReference = new int[1];
     @Override
     protected Entry<InternalKey, ByteBuffer> getPrevElement()
     {
-        Tuple<OrdinalIterator<?>, Integer> maxAndIndex = getMaxAndIndex();
-        OrdinalIterator<?> ord = maxAndIndex.item1;
-        int index = maxAndIndex.item2;
+        OrdinalIterator<?> ord = getMaxAndIndex(passByReference);
+        int index = passByReference[0];
 
         Entry<InternalKey, ByteBuffer> prev = ord.iterator.prev();
         siftUp(heap, smallerNext, index, heap[index]);
@@ -181,7 +181,7 @@ public final class DbIterator
     @Override
     protected Entry<InternalKey, ByteBuffer> peekPrevInternal()
     {
-        return getMaxAndIndex().item1.iterator.peekPrev();
+        return getMaxAndIndex(passByReference).iterator.peekPrev();
     }
 
     private void resetHeap()
@@ -300,23 +300,6 @@ public final class DbIterator
                 return -1; // if o1 has no prev, return o2 as larger
             }
             return 0; //neither o1 nor o2 have a next element, consider them equals as empty iterators in this direction
-        }
-    }
-
-    private static class Tuple<T1, T2>
-    {
-        final public T1 item1;
-        final public T2 item2;
-
-        public Tuple(T1 item1, T2 item2)
-        {
-            this.item1 = item1;
-            this.item2 = item2;
-        }
-
-        public static <A, B> Tuple<A, B> of(A a, B b)
-        {
-            return new Tuple<A, B>(a, b);
         }
     }
 }

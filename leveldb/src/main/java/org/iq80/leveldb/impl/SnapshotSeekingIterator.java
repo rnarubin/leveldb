@@ -54,7 +54,6 @@ public final class SnapshotSeekingIterator
         this.userComparator = userComparator;
         this.snapshot.getVersion().retain();
         this.savedEntry = null;
-        seekToFirst();
     }
 
     @Override
