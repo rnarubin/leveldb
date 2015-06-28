@@ -96,10 +96,10 @@ public class SeekingIteratorAdapter
     }
 
     @Override
-
     public void seekToLast()
     {
-        seekingIterator.seekToLast();
+        seekingIterator.seekToEnd();
+        seekingIterator.prev();
     }
 
     @Override

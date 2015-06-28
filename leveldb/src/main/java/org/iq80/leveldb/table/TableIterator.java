@@ -20,6 +20,7 @@ package org.iq80.leveldb.table;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.TwoStageIterator;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 
 public final class TableIterator
@@ -31,6 +32,18 @@ public final class TableIterator
     {
         super(indexIterator);
         this.table = table;
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        try {
+            super.close();
+        }
+        finally {
+            table.close();
+        }
     }
 
     protected BlockIterator<InternalKey> getData(ByteBuffer blockHandle)

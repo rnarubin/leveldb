@@ -167,16 +167,6 @@ public class MemTable
         }
 
         @Override
-        public void seekToLast()
-        {
-            if (entryList.size() == 0) {
-                seekToFirst();
-                return;
-            }
-            makeIteratorAtIndex(this.entryList.size() - 1);
-        }
-
-        @Override
         public void seekToEnd()
         {
             makeIteratorAtIndex(this.entryList.size());

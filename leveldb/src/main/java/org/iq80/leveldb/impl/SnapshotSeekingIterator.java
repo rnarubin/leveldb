@@ -72,13 +72,6 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected void seekToLastInternal()
-    {
-        seekToEndInternal();
-        getPrevElement();
-    }
-
-    @Override
     public void seekToEndInternal()
     {
         iterator.seekToEnd();

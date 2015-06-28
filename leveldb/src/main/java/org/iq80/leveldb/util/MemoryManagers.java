@@ -15,9 +15,9 @@ public class MemoryManagers
     {
         INSTANCE;
         @Override
-        public ByteBuffer allocate(int capacity)
+        public ByteBuffer allocate(int size)
         {
-            return ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
+            return ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN);
         }
 
         @Override
@@ -30,23 +30,5 @@ public class MemoryManagers
     public static MemoryManager heap()
     {
         return Heap.INSTANCE;
-    }
-
-    public static MemoryManager sanitize(final MemoryManager userManager)
-    {
-        return userManager == null ? heap() : new MemoryManager()
-        {
-            @Override
-            public ByteBuffer allocate(int capacity)
-            {
-                return userManager.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
-            }
-
-            @Override
-            public void free(ByteBuffer buffer)
-            {
-                userManager.free(buffer);
-            }
-        };
     }
 }

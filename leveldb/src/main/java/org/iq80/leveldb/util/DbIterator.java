@@ -84,13 +84,6 @@ public final class DbIterator
     }
 
     @Override
-    protected void seekToLastInternal()
-    {
-        seekToEndInternal();
-        getPrevElement();
-    }
-
-    @Override
     public void seekToEndInternal()
     {
         for (OrdinalIterator<?> ord : heap) {
@@ -258,7 +251,7 @@ public final class DbIterator
         }
     }
 
-    protected class SmallerNextElementComparator
+    protected final class SmallerNextElementComparator
             implements Comparator<OrdinalIterator<?>>
     {
         @Override
@@ -281,7 +274,7 @@ public final class DbIterator
         }
     }
 
-    protected class LargerPrevElementComparator
+    protected final class LargerPrevElementComparator
             implements Comparator<OrdinalIterator<?>>
     {
         @Override

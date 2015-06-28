@@ -814,7 +814,6 @@ public class DBIteratorTest
             return iterator.hasPrev();
         }
 
-        @Override
         public void seekToLast()
         {
             iterator.seekToLast();

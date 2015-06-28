@@ -25,7 +25,7 @@ public interface SeekingIterator<K, V>
         extends PeekingIterator<Entry<K, V>>
 {
     /**
-     * Repositions the iterator so the beginning of this block.
+     * Repositions the iterator to the beginning of this block.
      */
     void seekToFirst();
 

@@ -1490,7 +1490,6 @@ public class DbImplTest
             return iterator.hasPrev();
         }
 
-        @Override
         public void seekToLast()
         {
             iterator.seekToLast();

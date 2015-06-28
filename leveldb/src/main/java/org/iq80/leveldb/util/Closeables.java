@@ -17,6 +17,8 @@
  */
 package org.iq80.leveldb.util;
 
+import java.io.IOException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,14 +31,63 @@ public final class Closeables
 
     public static void closeQuietly(AutoCloseable closeable)
     {
-        if (closeable == null) {
-            return;
-        }
         try {
-            closeable.close();
+            close(closeable);
         }
         catch (Exception ignored) {
             LOGGER.warn("exception in closing {} ", closeable, ignored);
+        }
+    }
+
+    public static void close(AutoCloseable closeable)
+            throws Exception
+    {
+        if (closeable != null) {
+            closeable.close();
+        }
+    }
+
+    public static void closeIO(AutoCloseable closeable)
+            throws IOException
+    {
+        try {
+            close(closeable);
+        }
+        catch (Exception e) {
+            throw new IOException(e);
+        }
+    }
+
+    public static void closeIO(AutoCloseable c1, AutoCloseable c2)
+            throws IOException
+    {
+        try {
+            closeIO(c1);
+        }
+        finally {
+            closeIO(c2);
+        }
+    }
+
+    public static void closeIO(AutoCloseable... closeables)
+            throws IOException
+    {
+        closeIO(closeables.length - 1, closeables);
+    }
+
+    private static void closeIO(int index, AutoCloseable[] closeables)
+            throws IOException
+    {
+        int i = index;
+        try {
+            for (; i >= 0; i--) {
+                closeIO(closeables[i]);
+            }
+        }
+        finally {
+            if (i > 0) {
+                closeIO(i - 1, closeables);
+            }
         }
     }
 }

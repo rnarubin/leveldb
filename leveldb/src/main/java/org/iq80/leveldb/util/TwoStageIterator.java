@@ -22,8 +22,6 @@ import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
 import org.iq80.leveldb.util.InternalIterator;
 
-import com.google.common.base.Throwables;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -38,6 +36,7 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
         implements InternalIterator
 {
     private final I index;
+    private Closeable last;
     private D current;
     private CurrentOrigin currentOrigin = NONE;
     private boolean closed;
@@ -55,7 +54,6 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
     public TwoStageIterator(I indexIterator)
     {
         this.index = indexIterator;
-        clearCurrent();
     }
 
     @Override
@@ -64,41 +62,46 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
     {
         if (!closed) {
             closed = true;
-            closeCurrent();
-            index.close();
+            Closeables.closeIO(last, current, index);
+        }
+        else {
+            // TODO check if this ever happens
+            throw new IllegalStateException("double close on iterator");
         }
     }
 
     @Override
     protected final void seekToFirstInternal()
+            throws IOException
     {
         // reset index to before first and clear the data iterator
         index.seekToFirst();
-        clearCurrent();
-    }
-
-    @Override
-    protected final void seekToLastInternal()
-    {
-        seekToEndInternal();
-        if (currentHasPrev()) {
-            current.prev();
-        }
+        Closeables.closeIO(last, current);
+        last = null;
+        current = null;
+        currentOrigin = NONE;
     }
 
     @Override
     public final void seekToEndInternal()
+            throws IOException
     {
         index.seekToEnd();
-        clearCurrent();
+        Closeables.closeIO(last, current);
+        last = null;
+        current = null;
+        currentOrigin = NONE;
     }
 
     @Override
     protected final void seekInternal(InternalKey targetKey)
+            throws IOException
     {
         // seek the index to the block containing the key
         index.seek(targetKey);
 
+        Closeables.closeIO(last, current);
+        last = null;
         // if indexIterator does not have a next, it mean the key does not exist in this iterator
         if (index.hasNext()) {
             // seek the current iterator to the key
@@ -107,25 +110,33 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
             current.seek(targetKey);
         }
         else {
-            clearCurrent();
+            current = null;
+            currentOrigin = NONE;
         }
     }
 
     @Override
     protected final boolean hasNextInternal()
+            throws IOException
     {
         return currentHasNext();
     }
 
     @Override
     protected final boolean hasPrevInternal()
+            throws IOException
     {
         return currentHasPrev();
     }
 
     @Override
     protected final Entry<InternalKey, ByteBuffer> getNextElement()
+            throws IOException
     {
+        if (current != null) {
+            Closeables.closeIO(last);
+            last = null;
+        }
         // note: it must be here & not where 'current' is assigned,
         // because otherwise we'll have called inputs.next() before throwing
         // the first NPE, and the next time around we'll call inputs.next()
@@ -135,23 +146,31 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
 
     @Override
     protected final Entry<InternalKey, ByteBuffer> getPrevElement()
+            throws IOException
     {
+        if (current != null) {
+            Closeables.closeIO(last);
+            last = null;
+        }
         return currentHasPrev() ? current.prev() : null;
     }
 
     @Override
     protected final Entry<InternalKey, ByteBuffer> peekInternal()
+            throws IOException
     {
         return currentHasNext() ? current.peek() : null;
     }
 
     @Override
     protected final Entry<InternalKey, ByteBuffer> peekPrevInternal()
+            throws IOException
     {
         return currentHasPrev() ? current.peekPrev() : null;
     }
 
     private boolean currentHasNext()
+            throws IOException
     {
         boolean currentHasNext = false;
         while (true) {
@@ -168,25 +187,30 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
                     // so we pass into the next if
                 }
                 if (index.hasNext()) {
+                    Closeables.closeIO(last);
+                    last = current;
                     current = getData(index.next().getValue());
                     currentOrigin = NEXT;
                     current.seekToFirst();
                 }
                 else {
-                    break;
+                    if (current != null) {
+                        Closeables.closeIO(last);
+                        last = current;
+                        current = null;
+                        currentOrigin = NONE;
+                    }
+                    return false;
                 }
             }
             else {
-                break;
+                return true;
             }
         }
-        if (!currentHasNext) {
-            clearCurrent();
-        }
-        return currentHasNext;
     }
 
     private boolean currentHasPrev()
+            throws IOException
     {
         boolean currentHasPrev = false;
         while (true) {
@@ -198,44 +222,29 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
                     index.prev();
                 }
                 if (index.hasPrev()) {
+                    Closeables.closeIO(last);
+                    last = current;
                     current = getData(index.prev().getValue());
                     currentOrigin = PREV;
                     current.seekToEnd();
                 }
                 else {
-                    break;
+                    if (current != null) {
+                        Closeables.closeIO(last);
+                        last = current;
+                        current = null;
+                        currentOrigin = NONE;
+                    }
+                    return false;
                 }
             }
             else {
-                break;
+                return true;
             }
         }
-        if (!currentHasPrev) {
-            clearCurrent();
-        }
-        return currentHasPrev;
     }
     
     protected abstract D getData(V indexValue);
-
-    private void closeCurrent()
-    {
-        if (current != null) {
-            try {
-                current.close();
-            }
-            catch (IOException e) {
-                Throwables.propagate(e);
-            }
-        }
-    }
-
-    private void clearCurrent()
-    {
-        closeCurrent();
-        current = null;
-        currentOrigin = NONE;
-    }
 
     @Override
     public String toString()

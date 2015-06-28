@@ -18,8 +18,10 @@
 
 package org.iq80.leveldb.util;
 
+import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
+import java.io.IOException;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
@@ -33,47 +35,71 @@ public abstract class AbstractReverseSeekingIterator<K, V>
     public final void seekToFirst()
     {
         rPeekedElement = peekedElement = null;
-        seekToFirstInternal();
-    }
-
-    @Override
-    public void seekToLast()
-    {
-        rPeekedElement = peekedElement = null;
-        seekToLastInternal();
+        try {
+            seekToFirstInternal();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
     }
 
     @Override
     public final void seek(K targetKey)
     {
         rPeekedElement = peekedElement = null;
-        seekInternal(targetKey);
+        try {
+            seekInternal(targetKey);
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
     }
 
     @Override
     public final void seekToEnd()
     {
         rPeekedElement = peekedElement = null;
-        seekToEndInternal();
+        try {
+            seekToEndInternal();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
     }
 
     @Override
     public final boolean hasNext()
     {
-        return peekedElement != null || hasNextInternal();
+        try {
+            return peekedElement != null || hasNextInternal();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
     }
 
     @Override
     public final boolean hasPrev()
     {
-        return rPeekedElement != null || hasPrevInternal();
+        try {
+            return rPeekedElement != null || hasPrevInternal();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
     }
 
     @Override
     public final Entry<K, V> next()
     {
         peekedElement = null;
-        Entry<K, V> next = getNextElement();
+        Entry<K, V> next;
+        try {
+            next = getNextElement();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
         if (next == null) {
             throw new NoSuchElementException();
         }
@@ -85,7 +111,13 @@ public abstract class AbstractReverseSeekingIterator<K, V>
     public final Entry<K, V> prev()
     {
         rPeekedElement = null;
-        Entry<K, V> prev = getPrevElement();
+        Entry<K, V> prev;
+        try {
+            prev = getPrevElement();
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
         if (prev == null) {
             throw new NoSuchElementException();
         }
@@ -97,7 +129,12 @@ public abstract class AbstractReverseSeekingIterator<K, V>
     public final Entry<K, V> peek()
     {
         if (peekedElement == null) {
-            peekedElement = peekInternal();
+            try {
+                peekedElement = peekInternal();
+            }
+            catch (IOException e) {
+                throw new DBException(e);
+            }
             if (peekedElement == null) {
                 throw new NoSuchElementException();
             }
@@ -109,7 +146,12 @@ public abstract class AbstractReverseSeekingIterator<K, V>
     public final Entry<K, V> peekPrev()
     {
         if (rPeekedElement == null) {
-            rPeekedElement = peekPrevInternal();
+            try {
+                rPeekedElement = peekPrevInternal();
+            }
+            catch (IOException e) {
+                throw new DBException(e);
+            }
             if (rPeekedElement == null) {
                 throw new NoSuchElementException();
             }
@@ -123,41 +165,30 @@ public abstract class AbstractReverseSeekingIterator<K, V>
         throw new UnsupportedOperationException();
     }
 
-    // non-abstract; in case the iterator implementation provides
-    // a more efficient means of peeking, it can override this method
-    protected Entry<K, V> peekInternal()
-    {
-        Entry<K, V> ret = getNextElement();
-        if (ret == null) {
-            throw new NoSuchElementException();
-        }
-        getPrevElement();
-        return ret;
-    }
+    protected abstract Entry<K, V> peekInternal()
+            throws IOException;
 
-    protected Entry<K, V> peekPrevInternal()
-    {
-        Entry<K, V> ret = getPrevElement();
-        if (ret == null) {
-            throw new NoSuchElementException();
-        }
-        getNextElement();
-        return ret;
-    }
+    protected abstract Entry<K, V> peekPrevInternal()
+            throws IOException;
 
-    protected abstract void seekToLastInternal();
+    protected abstract void seekToFirstInternal()
+            throws IOException;
 
-    protected abstract void seekToFirstInternal();
+    protected abstract void seekToEndInternal()
+            throws IOException;
 
-    protected abstract void seekToEndInternal();
+    protected abstract void seekInternal(K targetKey)
+            throws IOException;
 
-    protected abstract void seekInternal(K targetKey);
+    protected abstract boolean hasNextInternal()
+            throws IOException;
 
-    protected abstract boolean hasNextInternal();
+    protected abstract boolean hasPrevInternal()
+            throws IOException;
 
-    protected abstract boolean hasPrevInternal();
+    protected abstract Entry<K, V> getNextElement()
+            throws IOException;
 
-    protected abstract Entry<K, V> getNextElement();
-
-    protected abstract Entry<K, V> getPrevElement();
+    protected abstract Entry<K, V> getPrevElement()
+            throws IOException;
 }

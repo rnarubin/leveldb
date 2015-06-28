@@ -36,7 +36,7 @@ import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
-public class BlockIterator<T>
+public final class BlockIterator<T>
         implements ReverseSeekingIterator<T, ByteBuffer>, Closeable
 {
     private final ByteBuffer data;
@@ -131,6 +131,7 @@ public class BlockIterator<T>
             throw new NoSuchElementException();
         }
 
+        resetCache();
         if (prevEntry != null)
             memory.free(prevEntry.getEncodedKey());
         prevEntry = nextEntry;
@@ -142,7 +143,6 @@ public class BlockIterator<T>
             // read entry at current data position
             nextEntry = readEntry(data, prevEntry);
         }
-        resetCache();
         return prevEntry;
     }
 
@@ -217,8 +217,7 @@ public class BlockIterator<T>
         }
     }
 
-    @Override
-    public void seekToLast()
+    void seekToLast()
     {
         if (restartCount > 0) {
             seekToRestartPosition(Math.max(0, restartCount - 1));
@@ -292,11 +291,16 @@ public class BlockIterator<T>
         // seek data readIndex to the beginning of the restart block
         data.position(getRestartPoint(restartPosition));
 
+        resetCache();
         // clear the entries to assure key is not prefixed
+        if (nextEntry != null) {
+            memory.free(nextEntry.getEncodedKey());
+        }
+        if (prevEntry != null) {
+            memory.free(prevEntry.getEncodedKey());
+        }
         nextEntry = null;
         prevEntry = null;
-
-        resetCache();
 
         restartIndex = restartPosition;
 
@@ -354,9 +358,8 @@ public class BlockIterator<T>
             for (CacheEntry<?> cachedEntry : prevCache) {
                 memory.free(cachedEntry.entry.getEncodedKey());
             }
-
+            prevCache.clear();
         }
-        prevCache.clear();
         prevCacheRestartIndex = -1;
     }
 

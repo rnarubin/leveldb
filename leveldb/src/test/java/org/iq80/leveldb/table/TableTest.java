@@ -149,10 +149,6 @@ public abstract class TableTest
             try (Table table = createTable(file.getAbsolutePath(), fileChannel, options);
                     TableIterator tableIter = table.retain().iterator()) {
                 ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
-                BlockHelper.assertReverseSequence(seekingIterator,
-                        Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
-                BlockHelper.assertSequence(seekingIterator, entries);
-                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
                 seekingIterator.seekToFirst();
                 BlockHelper.assertReverseSequence(seekingIterator,
@@ -160,12 +156,9 @@ public abstract class TableTest
                 BlockHelper.assertSequence(seekingIterator, entries);
                 BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-                seekingIterator.seekToLast();
-                if (reverseEntries.size() > 0) {
-                    BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
-                    seekingIterator.seekToLast();
-                    BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
-                }
+                seekingIterator.seekToEnd();
+                BlockHelper.assertSequence(seekingIterator, Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
                 BlockHelper.assertSequence(seekingIterator, entries);
 
                 long lastApproximateOffset = 0;

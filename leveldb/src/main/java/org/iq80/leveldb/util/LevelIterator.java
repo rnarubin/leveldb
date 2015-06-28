@@ -159,12 +159,6 @@ public final class LevelIterator
         }
 
         @Override
-        public void seekToLast()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public void seekToEnd()
         {
             index = files.size();

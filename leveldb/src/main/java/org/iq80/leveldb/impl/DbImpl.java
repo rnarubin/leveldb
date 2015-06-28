@@ -239,7 +239,9 @@ public class DbImpl
     private static Options sanitizeOptions(Options userOptions)
     {
         Options ret = Options.copy(userOptions);
-        ret.memoryManager(MemoryManagers.sanitize(ret.memoryManager()));
+        if (ret.memoryManager() == null) {
+            ret.memoryManager(MemoryManagers.heap());
+        }
 
         if (ret.compression() != null) {
             if (ret.compression().equals(org.iq80.leveldb.CompressionType.SNAPPY)) {
