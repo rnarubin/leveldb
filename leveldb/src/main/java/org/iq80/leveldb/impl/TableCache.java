@@ -61,7 +61,7 @@ public class TableCache
                     public void onRemoval(RemovalNotification<Long, TableAndFile> notification)
                     {
                         Table table = notification.getValue().getTable();
-                        finalizer.addCleanup(table, table.closer());
+                        // finalizer.addCleanup(table, table.closer());
                         try {
                             table.release(); // corresponding to constructor implicit retain
                         }

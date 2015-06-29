@@ -49,6 +49,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
@@ -78,6 +79,7 @@ public class DBIteratorTest
     private DB db;
     private File tempDir;
     private String testName;
+    private StrictMemoryManager strictMemory;
 
     static {
         Random rand = new Random(0);
@@ -105,7 +107,8 @@ public class DBIteratorTest
     {
         testName = method.getName();
         tempDir = FileUtils.createTempDir("java-leveldb-testing-temp");
-        db = Iq80DBFactory.factory.open(tempDir, options);
+        strictMemory = new StrictMemoryManager();
+        db = Iq80DBFactory.factory.open(tempDir, options.memoryManager(strictMemory));
     }
 
     @AfterMethod
@@ -113,7 +116,12 @@ public class DBIteratorTest
             throws Exception
     {
         try {
-            db.close();
+            try {
+                strictMemory.close();
+            }
+            finally {
+                db.close();
+            }
         }
         finally {
             FileUtils.deleteRecursively(tempDir);

@@ -344,7 +344,9 @@ public class LogReader
         }
         blockScratch.limit(blockScratch.position()).reset();
         // TODO check this copy
-        memory.free(currentBlock);
+        if (currentBlock != ByteBuffers.EMPTY_BUFFER) {
+            memory.free(currentBlock);
+        }
         currentBlock = blockScratch;// ByteBuffers.copy(blockScratch, this.memory);
         blockScratch = memory.allocate(BLOCK_SIZE);
         blockScratch.mark();

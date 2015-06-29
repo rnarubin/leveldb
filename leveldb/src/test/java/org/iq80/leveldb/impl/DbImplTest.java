@@ -99,16 +99,19 @@ public class DbImplTest
     public void testBackgroundCompaction()
             throws Exception
     {
-        Options options = Options.make();
-        options.maxOpenFiles(100);
-        options.createIfMissing(true);
-        try (DbImpl db = new DbImpl(options, this.databaseDir)) {
-            Random random = new Random(301);
-            for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, WriteOptions.make().sync(false));
-                db.get(randomString(random, 64).getBytes());
-                if ((i % 50000) == 0 && i != 0) {
-                    System.out.println(i + " rows written");
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make().memoryManager(strictMemory);
+            options.maxOpenFiles(100);
+            options.createIfMissing(true);
+            try (DbImpl db = new DbImpl(options, this.databaseDir)) {
+                Random random = new Random(301);
+                for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+                    db.put(strictMemory.wrap(randomString(random, 64).getBytes()),
+                            strictMemory.wrap(new byte[] { 0x01 }), WriteOptions.make().sync(false));
+                    db.get(randomString(random, 64).getBytes());
+                    if ((i % 50000) == 0 && i != 0) {
+                        System.out.println(i + " rows written");
+                    }
                 }
             }
         }
@@ -118,15 +121,17 @@ public class DbImplTest
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
-        Options options = Options.make();
-        options.createIfMissing(true);
-        try (DbImpl db = new DbImpl(options, databaseDir)) {
-            for (int index = 0; index < 5000000; index++) {
-                String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
-                String value = "This is element "
-                        + index
-                        + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
-                db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make().memoryManager(strictMemory);
+            options.createIfMissing(true);
+            try (DbImpl db = new DbImpl(options, databaseDir)) {
+                for (int index = 0; index < 5000000; index++) {
+                    String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
+                    String value = "This is element "
+                            + index
+                            + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
+                    db.put(strictMemory.wrap(key.getBytes("UTF-8")), strictMemory.wrap(value.getBytes("UTF-8")));
+                }
             }
         }
     }
@@ -1195,8 +1200,17 @@ public class DbImplTest
         @Override
         public ByteBuffer allocate(int capacity)
         {
-            final ByteBuffer buf = ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
-            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable(), "cap:" + capacity);
+            return trackBuffer(ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN));
+        }
+
+        public ByteBuffer wrap(byte[] arr)
+        {
+            return trackBuffer(ByteBuffer.wrap(arr));
+        }
+
+        private ByteBuffer trackBuffer(ByteBuffer buf)
+        {
+            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable());
             bufMap.put(buf, metaData);
             refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
             {

@@ -24,12 +24,12 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.annotations.Test;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertEquals;
@@ -45,12 +45,11 @@ public class BlockTest
             return b;
         }
     };
-    private static final Callable<?> noopCallable = new Callable<Void>()
+    private static final Closeable noopCloseable = new Closeable()
     {
         @Override
-        public Void call()
+        public void close()
         {
-            return null;
         }
     };
 
@@ -58,7 +57,7 @@ public class BlockTest
     public void testEmptyBuffer()
             throws Exception
     {
-        new Block<ByteBuffer>(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap(), noopDecoder, noopCallable).close();
+        new Block<ByteBuffer>(ByteBuffers.EMPTY_BUFFER, byteCompare, MemoryManagers.heap(), noopDecoder, noopCloseable).close();
     }
 
     @Test

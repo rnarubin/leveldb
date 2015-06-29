@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -38,17 +39,6 @@ public class EncodedInternalKey
 
     public EncodedInternalKey(ByteBuffer data)
     {
-        this(data, false);
-    }
-
-    public EncodedInternalKey(ByteBuffer data, boolean freeKey)
-    {
-        this(data, freeKey, false);
-    }
-
-    public EncodedInternalKey(ByteBuffer data, boolean freeKey, boolean freeValue)
-    {
-        super(freeKey, freeValue);
         Preconditions.checkNotNull(data, "data is null");
         Preconditions.checkArgument(data.remaining() >= SIZE_OF_LONG, "data must be at least %s bytes", SIZE_OF_LONG);
         this.userKey = ByteBuffers.duplicate(data, data.position(), data.limit() - SIZE_OF_LONG);
@@ -106,6 +96,10 @@ public class EncodedInternalKey
 
         return data;
     }
+
+    @Override
+    public void free(MemoryManager memory)
+    {
+        memory.free(data);
+    }
 }
-
-

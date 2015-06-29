@@ -59,7 +59,7 @@ public abstract class Table
         @Override
         public InternalKey decode(ByteBuffer b)
         {
-            return new EncodedInternalKey(b, true, false);
+            return new EncodedInternalKey(b);
         }
     };
 

@@ -22,9 +22,13 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.InternalIterator;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -32,12 +36,13 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class MemTable
+public final class MemTable
         implements SeekingIterable<InternalKey, ByteBuffer>
 {
     private final ConcurrentSkipListMap<InternalKey, ByteBuffer> table;
     private final AtomicLong approximateMemoryUsage = new AtomicLong();
     private final Comparator<Entry<InternalKey, ByteBuffer>> iteratorComparator;
+    private final List<AutoCloseable> cleanup;
 
     public MemTable(final InternalKeyComparator internalKeyComparator)
     {
@@ -49,6 +54,18 @@ public class MemTable
                 return internalKeyComparator.compare(o1.getKey(), o2.getKey());
             }
         };
+        this.cleanup = new ArrayList<>();
+    }
+
+    public void registerCleanup(Closeable cleaner)
+    {
+        this.cleanup.add(cleaner);
+    }
+
+    public void cleanup()
+            throws IOException
+    {
+        Closeables.closeIO(cleanup);
     }
 
     public void clear()
@@ -98,13 +115,18 @@ public class MemTable
         return null;
     }
 
+    public Iterable<Entry<InternalKey, ByteBuffer>> simpleIterable()
+    {
+        return table.entrySet();
+    }
+
     @Override
     public MemTableIterator iterator()
     {
         return new MemTableIterator();
     }
 
-    public class MemTableIterator
+    public final class MemTableIterator
             implements
             InternalIterator,
             ReverseSeekingIterator<InternalKey, ByteBuffer>
@@ -114,7 +136,7 @@ public class MemTable
 
         public MemTableIterator()
         {
-            entryList = Lists.newArrayList(table.entrySet());
+            entryList = Lists.newArrayList(simpleIterable());
             seekToFirst();
         }
 

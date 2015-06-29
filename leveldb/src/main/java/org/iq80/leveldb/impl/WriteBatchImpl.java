@@ -23,59 +23,28 @@ import com.google.common.collect.Maps;
 import org.iq80.leveldb.WriteBatch;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map.Entry;
 
-import static com.google.common.collect.Lists.newArrayList;
-
-public class WriteBatchImpl
+public abstract class WriteBatchImpl
         implements WriteBatch
 {
-    private final List<Entry<ByteBuffer, ByteBuffer>> batch;
-    protected int approximateSize;
+    private int approximateSize;
     
-    public WriteBatchImpl()
+    WriteBatchImpl()
     {
-        batch = newArrayList();
+        this(0);
     }
 
-    public int getApproximateSize()
+    WriteBatchImpl(int initApproxSize)
+    {
+        this.approximateSize = initApproxSize;
+    }
+
+    public final int getApproximateSize()
     {
         return approximateSize;
-    }
-
-    public int size()
-    {
-        return batch.size();
-    }
-
-    @Override
-    public WriteBatchImpl put(byte[] key, byte[] value)
-    {
-        return put(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
-    }
-
-    public WriteBatchImpl put(ByteBuffer key, ByteBuffer value)
-    {
-        Preconditions.checkNotNull(key, "key is null");
-        Preconditions.checkNotNull(value, "value is null");
-        batch.add(Maps.immutableEntry(key, value));
-        approximateSize += 12 + key.remaining() + value.remaining();
-        return this;
-    }
-
-    @Override
-    public WriteBatchImpl delete(byte[] key)
-    {
-        return delete(ByteBuffer.wrap(key));
-    }
-
-    public WriteBatchImpl delete(ByteBuffer key)
-    {
-        Preconditions.checkNotNull(key, "key is null");
-        batch.add(Maps.immutableEntry(key, (ByteBuffer) null));
-        approximateSize += 6 + key.remaining();
-        return this;
     }
 
     @Override
@@ -83,19 +52,44 @@ public class WriteBatchImpl
     {
     }
 
-    public void forEach(Handler handler)
+
+    public WriteBatchImpl put(byte[] key, byte[] value)
     {
-        for (Entry<ByteBuffer, ByteBuffer> entry : batch) {
-            ByteBuffer key = entry.getKey();
-            ByteBuffer value = entry.getValue();
-            if (value != null) {
-                handler.put(key, value);
-            }
-            else {
-                handler.delete(key);
-            }
-        }
+        Preconditions.checkNotNull(key, "key is null");
+        Preconditions.checkNotNull(value, "value is null");
+        return put(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
     }
+
+    public WriteBatchImpl put(ByteBuffer key, ByteBuffer value)
+    {
+        Preconditions.checkNotNull(key, "key is null");
+        Preconditions.checkNotNull(value, "value is null");
+        approximateSize += 12 + key.remaining() + value.remaining();
+        putInternal(key, value);
+        return this;
+    }
+
+    public WriteBatchImpl delete(byte[] key)
+    {
+        Preconditions.checkNotNull(key, "key is null");
+        return delete(ByteBuffer.wrap(key));
+    }
+
+    public WriteBatchImpl delete(ByteBuffer key)
+    {
+        Preconditions.checkNotNull(key, "key is null");
+        approximateSize += 6 + key.remaining();
+        deleteInternal(key);
+        return this;
+    }
+
+    public abstract int size();
+
+    abstract void putInternal(ByteBuffer key, ByteBuffer value);
+
+    abstract void deleteInternal(ByteBuffer key);
+
+    abstract void forEach(Handler handler);
 
     public interface Handler
     {
@@ -104,33 +98,64 @@ public class WriteBatchImpl
         void delete(ByteBuffer key);
     }
     
-    static class WriteBatchSingle
+    static final class WriteBatchMulti
+            extends WriteBatchImpl
+    {
+        private final List<Entry<ByteBuffer, ByteBuffer>> batch = new ArrayList<>();;
+
+        @Override
+        public int size()
+        {
+            return batch.size();
+        }
+
+        @Override
+        void putInternal(ByteBuffer key, ByteBuffer value)
+        {
+            batch.add(Maps.immutableEntry(key, value));
+        }
+
+        @Override
+        void deleteInternal(ByteBuffer key)
+        {
+            batch.add(Maps.immutableEntry(key, (ByteBuffer) null));
+        }
+
+        @Override
+        public void forEach(Handler handler)
+        {
+            for (Entry<ByteBuffer, ByteBuffer> entry : batch) {
+                ByteBuffer key = entry.getKey();
+                ByteBuffer value = entry.getValue();
+                if (value != null) {
+                    handler.put(key, value);
+                }
+                else {
+                    handler.delete(key);
+                }
+            }
+        }
+
+
+    }
+
+    static final class WriteBatchSingle
             extends WriteBatchImpl
     {
         private final ByteBuffer key, value;
 
-        WriteBatchSingle(byte[] key, byte[] value)
-        {
-            this(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
-        }
-
         WriteBatchSingle(ByteBuffer key, ByteBuffer value)
         {
+            super(12 + key.remaining() + value.remaining());
             this.key = key;
             this.value = value;
-            this.approximateSize = 12 + key.remaining() + value.remaining();
-        }
-
-        WriteBatchSingle(byte[] key)
-        {
-            this(ByteBuffer.wrap(key));
         }
 
         WriteBatchSingle(ByteBuffer key)
         {
+            super(6 + key.remaining());
             this.key = key;
             this.value = null;
-            this.approximateSize = 6 + key.remaining();
         }
 
         @Override
@@ -148,6 +173,18 @@ public class WriteBatchImpl
             else {
                 handler.delete(key);
             }
+        }
+
+        @Override
+        void putInternal(ByteBuffer key, ByteBuffer value)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        void deleteInternal(ByteBuffer key)
+        {
+            throw new UnsupportedOperationException();
         }
     }
 }

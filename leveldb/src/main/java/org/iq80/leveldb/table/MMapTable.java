@@ -24,6 +24,7 @@ import org.iq80.leveldb.util.ByteBuffers;
 
 import com.google.common.base.Preconditions;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -37,12 +38,11 @@ import java.util.concurrent.Callable;
 public class MMapTable
         extends Table
 {
-    private static final Callable<?> NOOP = new Callable<Void>()
+    private static final Closeable NOOP = new Closeable()
     {
         @Override
-        public Void call()
+        public void close()
         {
-            return null;
         }
     };
 

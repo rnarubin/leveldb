@@ -1,5 +1,6 @@
 package org.iq80.leveldb.util;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -10,7 +11,6 @@ import java.nio.MappedByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.util.concurrent.Callable;
 
 import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
@@ -762,6 +762,14 @@ public final class ByteBuffers
         return copy(src, MemoryManagers.heap());
     }
 
+    public static ByteBuffer copy(byte[] src, MemoryManager memory)
+    {
+        ByteBuffer ret = memory.allocate(src.length);
+        ret.mark();
+        ret.put(src).limit(ret.position()).reset();
+        return ret;
+    }
+
     public static byte[] toArray(ByteBuffer src, byte[] dst)
     {
         src.mark();
@@ -790,33 +798,6 @@ public final class ByteBuffers
         dst.put(src);
         src.limit(oldlim);
         return dst;
-    }
-
-    public static void safeFree(MemoryManager memory, ByteBuffer buffer1, ByteBuffer buffer2)
-    {
-        try {
-            memory.free(buffer1);
-        }
-        finally {
-            memory.free(buffer2);
-        }
-    }
-
-    public static void safeFree(MemoryManager memory, ByteBuffer... buffers)
-    {
-        safeFree(memory, buffers, buffers.length - 1);
-    }
-
-    private static void safeFree(MemoryManager memory, ByteBuffer[] buffers, int index)
-    {
-        try {
-            memory.free(buffers[index]);
-        }
-        finally {
-            if (index == 0)
-                return;
-            safeFree(memory, buffers, index - 1);
-        }
     }
 
     public static ByteBufferCrc32 crc32()
@@ -848,13 +829,13 @@ public final class ByteBuffers
         return ((rot >>> 17) | (rot << 15));
     }
 
-    public static Callable<?> freer(ByteBuffer b, MemoryManager m)
+    public static Closeable freer(ByteBuffer b, MemoryManager m)
     {
         return new MemoryFreer(b, m);
     }
 
     private static class MemoryFreer
-            implements Callable<Void>
+            implements Closeable
     {
         private final ByteBuffer buffer;
         private final MemoryManager memory;
@@ -866,10 +847,9 @@ public final class ByteBuffers
         }
 
         @Override
-        public Void call()
+        public void close()
         {
             memory.free(buffer);
-            return null;
         }
     }
 }

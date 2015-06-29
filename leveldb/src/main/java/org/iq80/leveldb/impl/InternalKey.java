@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.SizeOf;
@@ -28,14 +29,6 @@ public abstract class InternalKey
 {
     public static final InternalKey MINIMUM_KEY = new TransientInternalKey(ByteBuffers.EMPTY_BUFFER, 0,
             ValueType.getValueTypeByPersistentId((byte) 0));
-
-    private final boolean freeKey, freeValue;
-
-    public InternalKey(boolean freeKey, boolean freeValue)
-    {
-        this.freeKey = freeKey;
-        this.freeValue = freeValue;
-    }
 
     public abstract ByteBuffer getUserKey();
 
@@ -55,15 +48,7 @@ public abstract class InternalKey
         return getUserKey().remaining() + SizeOf.SIZE_OF_LONG;
     }
 
-    public boolean freeKey()
-    {
-        return freeKey;
-    }
-
-    public boolean freeValue()
-    {
-        return freeValue;
-    }
+    public abstract void free(MemoryManager memory);
 
     @Override
     public boolean equals(Object o)

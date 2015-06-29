@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.VariableLengthQuantity;
@@ -40,21 +41,6 @@ public class TransientInternalKey
 
     public TransientInternalKey(ByteBuffer userKey, long sequenceNumber, ValueType valueType)
     {
-        this(userKey, sequenceNumber, valueType, false);
-    }
-
-    public TransientInternalKey(ByteBuffer userKey, long sequenceNumber, ValueType valueType, boolean freeKey)
-    {
-        this(userKey, sequenceNumber, valueType, freeKey, false);
-    }
-
-    public TransientInternalKey(ByteBuffer userKey,
-            long sequenceNumber,
-            ValueType valueType,
-            boolean freeKey,
-            boolean freeValue)
-    {
-        super(freeKey, freeValue);
         Preconditions.checkNotNull(userKey, "userKey is null");
         Preconditions.checkArgument(sequenceNumber >= 0, "sequenceNumber is negative");
         Preconditions.checkNotNull(valueType, "valueType is null");
@@ -120,6 +106,9 @@ public class TransientInternalKey
         return userKey;
     }
 
+    @Override
+    public void free(MemoryManager memory)
+    {
+        memory.free(userKey);
+    }
 }
-
-

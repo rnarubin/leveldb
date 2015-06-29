@@ -18,6 +18,7 @@
 package org.iq80.leveldb.util;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,6 +83,28 @@ public final class Closeables
         try {
             for (; i >= 0; i--) {
                 closeIO(closeables[i]);
+            }
+        }
+        finally {
+            if (i > 0) {
+                closeIO(i - 1, closeables);
+            }
+        }
+    }
+
+    public static void closeIO(List<AutoCloseable> closeables)
+            throws IOException
+    {
+        closeIO(closeables.size() - 1, closeables);
+    }
+
+    private static void closeIO(int index, List<AutoCloseable> closeables)
+            throws IOException
+    {
+        int i = index;
+        try {
+            for (; i >= 0; i--) {
+                closeIO(closeables.get(i));
             }
         }
         finally {

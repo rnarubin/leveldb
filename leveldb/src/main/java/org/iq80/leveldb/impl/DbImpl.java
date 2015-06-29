@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -47,6 +48,7 @@ import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -93,6 +95,7 @@ public class DbImpl
     private static final Logger LOGGER = LoggerFactory.getLogger(DbImpl.class);
 
     private final Options options;
+    private final UserOptions userOptions;
     private final File databaseDir;
     private final TableCache tableCache;
     private final DbLock dbLock;
@@ -131,6 +134,7 @@ public class DbImpl
     {
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
+        this.userOptions = new UserOptions(userOptions);
         this.options = sanitizeOptions(userOptions);
 
         this.databaseDir = databaseDir;
@@ -216,7 +220,13 @@ public class DbImpl
             long logFileNumber = versions.getNextFileNumber();
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
                     logFileNumber, options, scratchCache);
-            this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator), log), null);
+            MemTable table = new MemTable(internalKeyComparator);
+            this.memTables = new MemTables(new MemTableAndLog(table, log), null);
+
+            if (this.userOptions.specifiedMemoryManager()) {
+                table.registerCleanup(new MemTableCleaner(table, options.memoryManager()));
+            }
+
             edit.setLogNumber(log.getFileNumber());
 
             // apply recovered edits
@@ -255,6 +265,21 @@ public class DbImpl
         return ret;
     }
 
+    private class UserOptions
+    {
+        private final Options options;
+
+        public UserOptions(Options options)
+        {
+            this.options = options;
+        }
+
+        public boolean specifiedMemoryManager()
+        {
+            return this.options.memoryManager() != null;
+        }
+    }
+
     @Override
     public void close()
     {
@@ -277,12 +302,35 @@ public class DbImpl
         catch (IOException e) {
             LOGGER.error("{} error in closing", this, e);
         }
+
+        memTables.mutable.acquireAll();
         try {
-            memTables.mutable.log.close();
+            try {
+                memTables.mutable.log.close();
+            }
+            finally {
+                memTables.mutable.memTable.cleanup();
+            }
         }
         catch (IOException e) {
             LOGGER.error("{} error in closing", this, e);
         }
+
+        if (memTables.immutableExists()) {
+            memTables.immutable.acquireAll();
+            try {
+                try {
+                    memTables.immutable.log.close();
+                }
+                finally {
+                    memTables.immutable.memTable.cleanup();
+                }
+            }
+            catch (IOException e) {
+                LOGGER.error("{} error in closing", this, e);
+            }
+        }
+
         tableCache.close();
         dbLock.release();
     }
@@ -528,7 +576,6 @@ public class DbImpl
 
                 // read entries
                 WriteBatchImpl writeBatch = readWriteBatch(record, updateSize);
-                options.memoryManager().free(record);
 
                 // apply entries to memTable
                 if (memTable == null) {
@@ -536,6 +583,7 @@ public class DbImpl
                 }
                 memTable.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
                 writeBatch.forEach(new InsertIntoHandler(memTable, sequenceBegin));
+                memTable.registerCleanup(ByteBuffers.freer(record, options.memoryManager()));
 
                 // update the maxSequence
                 long lastSequence = sequenceBegin + updateSize - 1;
@@ -545,14 +593,24 @@ public class DbImpl
 
                 // flush mem table if necessary
                 if (memTable.approximateMemoryUsage() > options.writeBufferSize()) {
-                    writeLevel0Table(memTable, edit, null);
+                    try {
+                        writeLevel0Table(memTable, edit, null);
+                    }
+                    finally {
+                        memTable.cleanup();
+                    }
                     memTable = null;
                 }
             }
 
             // flush mem table
             if (memTable != null && !memTable.isEmpty()) {
-                writeLevel0Table(memTable, edit, null);
+                try {
+                    writeLevel0Table(memTable, edit, null);
+                }
+                finally {
+                    memTable.cleanup();
+                }
             }
 
             return maxSequence;
@@ -641,10 +699,28 @@ public class DbImpl
     }
 
     @Override
-    public Snapshot put(byte[] key, byte[] value, WriteOptions options)
+    public Snapshot put(byte[] key, byte[] value, WriteOptions writeOptions)
             throws DBException
     {
-        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key, value), options);
+        if (userOptions.specifiedMemoryManager()) {
+            return put(ByteBuffers.copy(key, options.memoryManager()),
+                    ByteBuffers.copy(value, options.memoryManager()), writeOptions);
+        }
+        else {
+            return put(ByteBuffer.wrap(key), ByteBuffer.wrap(value), writeOptions);
+        }
+    }
+
+    public Snapshot put(ByteBuffer key, ByteBuffer value)
+            throws DBException
+    {
+        return put(key, value, DEFAULT_WRITE_OPTIONS);
+    }
+
+    public Snapshot put(ByteBuffer key, ByteBuffer value, WriteOptions writeOptions)
+            throws DBException
+    {
+        return writeInternal(new WriteBatchImpl.WriteBatchSingle(key, value), writeOptions);
     }
 
     @Override
@@ -655,7 +731,24 @@ public class DbImpl
     }
 
     @Override
-    public Snapshot delete(byte[] key, WriteOptions options)
+    public Snapshot delete(byte[] key, WriteOptions writeOptions)
+            throws DBException
+    {
+        if (userOptions.specifiedMemoryManager()) {
+            return delete(ByteBuffers.copy(key, options.memoryManager()), writeOptions);
+        }
+        else {
+            return delete(ByteBuffer.wrap(key), writeOptions);
+        }
+    }
+
+    public Snapshot delete(ByteBuffer key)
+            throws DBException
+    {
+        return delete(key, DEFAULT_WRITE_OPTIONS);
+    }
+
+    public Snapshot delete(ByteBuffer key, WriteOptions options)
             throws DBException
     {
         return writeInternal(new WriteBatchImpl.WriteBatchSingle(key), options);
@@ -700,6 +793,9 @@ public class DbImpl
                 catch (IOException e) {
                     throw Throwables.propagate(e);
                 }
+                finally {
+                    options.memoryManager().free(record);
+                }
 
                 // Update memtable
                 updates.forEach(new InsertIntoHandler(memlog.memTable, sequenceBegin));
@@ -724,7 +820,7 @@ public class DbImpl
     public WriteBatch createWriteBatch()
     {
         checkBackgroundException();
-        return new WriteBatchImpl();
+        return new WriteBatchImpl.WriteBatchMulti();
     }
 
     @Override
@@ -861,8 +957,9 @@ public class DbImpl
                 }
 
                 long logNumber = versions.getNextFileNumber();
+                MemTable table = new MemTable(internalKeyComparator);
                 try {
-                    this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator),
+                    this.memTables = new MemTables(new MemTableAndLog(table,
                             Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber,
                                     options, scratchCache)), current);
                 }
@@ -872,6 +969,9 @@ public class DbImpl
                     setBackgroundException(e);
                     current.release();
                     throw new DBException(e);
+                }
+                if (userOptions.specifiedMemoryManager()) {
+                    table.registerCleanup(new MemTableCleaner(table, options.memoryManager()));
                 }
 
                 scheduleCompaction();
@@ -930,10 +1030,15 @@ public class DbImpl
             versions.logAndApply(edit);
 
             this.memTables = new MemTables(this.memTables.mutable, null);
+            immutable.memTable.cleanup();
         }
         finally {
-            tables.finishCompaction();
-            immutable.releaseAll();
+            try {
+                tables.finishCompaction();
+            }
+            finally {
+                immutable.releaseAll();
+            }
         }
 
         deleteObsoleteFiles();
@@ -952,7 +1057,7 @@ public class DbImpl
         long fileNumber = versions.getNextFileNumber();
         pendingOutputs.add(fileNumber);
         FileMetaData meta;
-        meta = buildTable(mem, fileNumber);
+        meta = buildTable(mem.simpleIterable(), fileNumber);
         pendingOutputs.remove(fileNumber);
 
         // Note that if file size is zero, the file has been deleted and
@@ -968,7 +1073,7 @@ public class DbImpl
         }
     }
 
-    private FileMetaData buildTable(SeekingIterable<InternalKey, ByteBuffer> data, long fileNumber)
+    private FileMetaData buildTable(Iterable<Entry<InternalKey, ByteBuffer>> data, long fileNumber)
             throws IOException
     {
         File file = new File(databaseDir, Filename.tableFileName(fileNumber));
@@ -979,7 +1084,6 @@ public class DbImpl
             try (FileOutputStream fileOutput = new FileOutputStream(file);
                     FileChannel channel = fileOutput.getChannel()) {
                 try (TableBuilder tableBuilder = new TableBuilder(options, channel, internalKeyComparator)) {
-
                     for (Entry<InternalKey, ByteBuffer> entry : data) {
                         // update keys
                         InternalKey key = entry.getKey();
@@ -1299,21 +1403,19 @@ public class DbImpl
             throws IOException
     {
         @SuppressWarnings("resource")
-        WriteBatchImpl writeBatch = new WriteBatchImpl();
+        WriteBatchImpl writeBatch = new WriteBatchImpl.WriteBatchMulti();
         int entries = 0;
         while (record.hasRemaining()) {
             entries++;
             ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
             if (valueType == VALUE) {
-                ByteBuffer key = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
-                        options.memoryManager());
-                ByteBuffer value = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record),
-                        options.memoryManager());
+                ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
+                ByteBuffer value = ByteBuffers.readLengthPrefixedBytes(record);
                 // TODO trace write batch internal keys
                 writeBatch.put(key, value);
             }
             else if (valueType == DELETION) {
-                ByteBuffer key = ByteBuffers.copy(ByteBuffers.readLengthPrefixedBytes(record), options.memoryManager());
+                ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
                 writeBatch.delete(key);
             }
             else {
@@ -1330,6 +1432,7 @@ public class DbImpl
 
     private ByteBuffer writeWriteBatch(WriteBatchImpl updates, long sequenceBegin)
     {
+        // TODO send write batch straight down to logs, rework LogWriter as necessary
         final ByteBuffer record = options.memoryManager().allocate(
                 SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
         record.mark();
@@ -1553,6 +1656,29 @@ public class DbImpl
         public String toString()
         {
             return "MemTables [mutable=" + mutable + ", immutable=" + immutable + "]";
+        }
+    }
+
+    private static class MemTableCleaner
+            implements Closeable
+    {
+        private final MemTable memTable;
+        private final MemoryManager memory;
+
+        public MemTableCleaner(MemTable memTable, MemoryManager memory)
+        {
+            this.memTable = memTable;
+            this.memory = memory;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            for(Entry<InternalKey, ByteBuffer> entry : memTable.simpleIterable()){
+                entry.getKey().free(memory);
+                memory.free(entry.getValue());
+            }
         }
     }
 }

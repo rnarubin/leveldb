@@ -78,7 +78,7 @@ public abstract class LogWriter
     protected abstract CloseableLogBuffer requestSpace(LongToIntFunction len)
             throws IOException;
 
-    protected void buildRecord(final ByteBuffer input)
+    private void buildRecord(final ByteBuffer input)
             throws IOException
     {
         // Fragment the record into chunks as necessary and write it.  Note that if record
@@ -176,7 +176,7 @@ public abstract class LogWriter
         return HEADER_SIZE + length;
     }
 
-    public void addRecord(ByteBuffer record, boolean sync)
+    public final void addRecord(ByteBuffer record, boolean sync)
             throws IOException
     {
         Preconditions.checkState(!isClosed(), "Log is closed");
@@ -188,7 +188,7 @@ public abstract class LogWriter
         }
     }
 
-    abstract void sync()
+    protected abstract void sync()
             throws IOException;
 
     /**

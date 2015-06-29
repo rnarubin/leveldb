@@ -25,9 +25,9 @@ import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ReferenceCounted;
 
+import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
-import java.util.concurrent.Callable;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
@@ -76,13 +76,13 @@ public class Block<T>
     private final ByteBuffer restartPositions;
     private final MemoryManager memory;
     private Decoder<T> decoder;
-    private final Callable<?> cleaner;
+    private final Closeable cleaner;
 
     public Block(ByteBuffer block,
             Comparator<T> comparator,
             MemoryManager memory,
             Decoder<T> decoder,
-            Callable<?> cleaner)
+            Closeable cleaner)
     {
         Preconditions.checkNotNull(block, "block is null");
         Preconditions.checkArgument(block.remaining() >= SIZE_OF_INT, "Block is corrupt: size must be at least %s block", SIZE_OF_INT);
@@ -138,7 +138,7 @@ public class Block<T>
     protected void dispose()
     {
         try {
-            cleaner.call();
+            cleaner.close();
         }
         catch (Exception e) {
             Throwables.propagate(e);
