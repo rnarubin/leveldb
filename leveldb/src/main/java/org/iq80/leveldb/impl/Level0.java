@@ -23,11 +23,8 @@ import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Lists;
 
 import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.impl.MemTable.MemTableIterator;
-import org.iq80.leveldb.table.TableIterator;
-import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.LevelIterator;
+import org.iq80.leveldb.util.MergingIterator;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -178,12 +175,11 @@ public class Level0
             List<FileMetaData> files,
             InternalKeyComparator internalKeyComparator)
     {
-        Builder<TableIterator> builder = ImmutableList.builder();
+        Builder<InternalIterator> builder = ImmutableList.builder();
         for (FileMetaData file : files) {
             builder.add(tableCache.newIterator(file));
         }
-        return new DbIterator((MemTableIterator) null, (MemTableIterator) null, builder.build(),
-                Collections.<LevelIterator> emptyList(), internalKeyComparator);
+        return new MergingIterator(builder.build(), internalKeyComparator);
     }
 
     @Override

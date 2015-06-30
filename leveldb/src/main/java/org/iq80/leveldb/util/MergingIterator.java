@@ -15,184 +15,266 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.util;
 
-import com.google.common.primitives.Ints;
+package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.InternalKey;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.NoSuchElementException;
-import java.util.PriorityQueue;
 
 public final class MergingIterator
-        extends AbstractSeekingIterator<InternalKey, ByteBuffer>
-        implements Closeable
+        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
+        implements
+        InternalIterator
 {
-    private final List<? extends InternalIterator> levels;
-    private final PriorityQueue<ComparableIterator> priorityQueue;
-    private final Comparator<InternalKey> comparator;
 
-    public MergingIterator(List<? extends InternalIterator> levels, Comparator<InternalKey> comparator)
+    private final OrdinalIterator[] heap;
+    private final Comparator<OrdinalIterator> smallerNext, largerPrev;
+
+    private final Comparator<InternalKey> internalKeyComparator;
+
+    public MergingIterator(List<InternalIterator> iterators,
+            Comparator<InternalKey> internalKeyComparator)
     {
-        this.levels = levels;
-        this.comparator = comparator;
+        this.internalKeyComparator = internalKeyComparator;
 
-        this.priorityQueue = new PriorityQueue<>(levels.size() + 1);
-        resetPriorityQueue(comparator);
+        int ordinal = 0;
+        this.heap = new OrdinalIterator[iterators.size()];
+        for (InternalIterator iter : iterators) {
+            heap[ordinal] = new OrdinalIterator(ordinal, iter);
+            ordinal++;
+        }
+
+        smallerNext = new SmallerNextElementComparator();
+        largerPrev = new LargerPrevElementComparator();
+
+        resetHeap();
     }
 
     @Override
-    protected void seekToFirstInternal()
+    protected final void seekToFirstInternal()
     {
-        for (InternalIterator level : levels) {
-            level.seekToFirst();
+        for (OrdinalIterator ord : heap) {
+            ord.iterator.seekToFirst();
         }
-        resetPriorityQueue(comparator);
+        resetHeap();
     }
 
     @Override
-    protected void seekInternal(InternalKey targetKey)
+    public final void seekToEndInternal()
     {
-        for (InternalIterator level : levels) {
-            level.seek(targetKey);
+        for (OrdinalIterator ord : heap) {
+            ord.iterator.seekToEnd();
         }
-        resetPriorityQueue(comparator);
+        resetHeap();
     }
 
-    private void resetPriorityQueue(Comparator<InternalKey> comparator)
+    @Override
+    protected final void seekInternal(InternalKey targetKey)
     {
-        int i = 1;
-        for (InternalIterator level : levels) {
-            if (level.hasNext()) {
-                priorityQueue.add(new ComparableIterator(level, comparator, i++, level.next()));
+        for (OrdinalIterator ord : heap) {
+            ord.iterator.seek(targetKey);
+        }
+        resetHeap();
+    }
+
+    private OrdinalIterator getMaxAndIndex(int[] maxIndex)
+    {
+      /*
+       * forward iteration can take advantage of the heap ordering but reverse iteration cannot,
+       * requiring linear search. there were attempts to maintain two parallel heaps, one min-heap
+       * and one max-heap each containing the same iterators. however, these proved to be difficult
+       * to coordinate. on the bright side, there tends to be only a small number of iterators (less
+       * than 10) even when the database contains a substantial number of items (in the millions)
+       * (the c++ implementation, as of this writing, uses linear search forwards and backwards)
+       */
+        OrdinalIterator max = heap[0];
+        maxIndex[0] = 0;
+
+        for (int i = 1; i < heap.length; i++) {
+            OrdinalIterator ord = heap[i];
+            if (largerPrev.compare(ord, max) > 0) {
+                max = ord;
+                maxIndex[0] = i;
             }
         }
+
+        return max;
     }
 
     @Override
-    protected Entry<InternalKey, ByteBuffer> getNextElement()
+    protected final boolean hasNextInternal()
     {
-        Entry<InternalKey, ByteBuffer> result = null;
-        ComparableIterator nextIterator = priorityQueue.poll();
-        if (nextIterator != null) {
-            result = nextIterator.next();
-            if (nextIterator.hasNext()) {
-                priorityQueue.add(nextIterator);
+        return heap[0].iterator.hasNext();
+    }
+
+    @Override
+    protected final boolean hasPrevInternal()
+    {
+        for (OrdinalIterator ord : heap) {
+            if (ord.iterator.hasPrev()) {
+                return true;
             }
         }
-        return result;
+        return false;
+    }
+
+    @Override
+    protected final Entry<InternalKey, ByteBuffer> getNextElement()
+    {
+        Entry<InternalKey, ByteBuffer> next = heap[0].iterator.next();
+        siftDown(heap, smallerNext, 0, heap[0]);
+
+        return next;
+    }
+
+    private final int[] passByReference = new int[1];
+    @Override
+    protected final Entry<InternalKey, ByteBuffer> getPrevElement()
+    {
+        OrdinalIterator ord = getMaxAndIndex(passByReference);
+        int index = passByReference[0];
+
+        Entry<InternalKey, ByteBuffer> prev = ord.iterator.prev();
+        siftUp(heap, smallerNext, index, heap[index]);
+        siftDown(heap, smallerNext, index, heap[index]);
+
+        return prev;
+    }
+
+    @Override
+    protected final Entry<InternalKey, ByteBuffer> peekInternal()
+    {
+        return heap[0].iterator.peek();
+    }
+
+    @Override
+    protected final Entry<InternalKey, ByteBuffer> peekPrevInternal()
+    {
+        return getMaxAndIndex(passByReference).iterator.peekPrev();
+    }
+
+    private void resetHeap()
+    {
+        // heapify
+        for (int i = (heap.length >>> 1) - 1; i >= 0; i--) {
+            siftDown(heap, smallerNext, i, heap[i]);
+        }
+    }
+
+    private static <E> void siftDown(E[] queue, Comparator<E> comparator, int k, E x)
+    {
+        int half = queue.length >>> 1;
+        while (k < half) {
+            int child = (k << 1) + 1;
+            E c = queue[child];
+            int right = child + 1;
+            if (right < queue.length &&
+                    comparator.compare(c, queue[right]) > 0) {
+                c = queue[child = right];
+            }
+            if (comparator.compare(x, c) <= 0) {
+                break;
+            }
+            queue[k] = c;
+            k = child;
+        }
+        queue[k] = x;
+    }
+
+    private static <E> void siftUp(E[] queue, Comparator<E> comparator, int k, E x)
+    {
+        while (k > 0) {
+            int parent = (k - 1) >>> 1;
+            E e = queue[parent];
+            if (comparator.compare(x, e) >= 0) {
+                break;
+            }
+            queue[k] = e;
+            k = parent;
+        }
+        queue[k] = x;
+    }
+
+    @Override
+    public final void close()
+            throws IOException
+    {
+        for (OrdinalIterator ord : heap) {
+            ord.iterator.close();
+        }
     }
 
     @Override
     public String toString()
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MergingIterator");
-        sb.append("{levels=").append(levels);
-        sb.append(", comparator=").append(comparator);
+        final StringBuilder sb = new StringBuilder();
+        sb.append("DbIterator");
+        sb.append("{iterators=").append(Arrays.asList(heap));
+        sb.append(", userComparator=").append(internalKeyComparator);
         sb.append('}');
         return sb.toString();
     }
 
-    @Override
-    public void close()
-            throws IOException
+    private class OrdinalIterator
     {
-        for (InternalIterator iter : levels) {
-            iter.close();
+        final public InternalIterator iterator;
+        final public int ordinal;
+
+        public OrdinalIterator(int ordinal, InternalIterator iterator)
+        {
+            this.ordinal = ordinal;
+            this.iterator = iterator;
         }
     }
 
-    private static class ComparableIterator
-            implements Iterator<Entry<InternalKey, ByteBuffer>>, Comparable<ComparableIterator>
+    private final class SmallerNextElementComparator
+            implements Comparator<OrdinalIterator>
     {
-        private final InternalIterator iterator;
-        private final Comparator<InternalKey> comparator;
-        private final int ordinal;
-        private Entry<InternalKey, ByteBuffer> nextElement;
-
-        private ComparableIterator(InternalIterator iterator, Comparator<InternalKey> comparator, int ordinal, Entry<InternalKey, ByteBuffer> nextElement)
-        {
-            this.iterator = iterator;
-            this.comparator = comparator;
-            this.ordinal = ordinal;
-            this.nextElement = nextElement;
-        }
-
         @Override
-        public boolean hasNext()
+        public int compare(OrdinalIterator o1, OrdinalIterator o2)
         {
-            return nextElement != null;
+            if (o1.iterator.hasNext()) {
+                if (o2.iterator.hasNext()) {
+                    // both iterators have a next element
+                    int result =
+                            internalKeyComparator.compare(o1.iterator.peek().getKey(),
+                                    o2.iterator.peek().getKey());
+                    return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
+                }
+                return -1; // o2 does not have a next element, consider o1 less than the empty o2
+            }
+            if (o2.iterator.hasNext()) {
+                return 1; // o1 does not have a next element, consider o2 less than the empty o1
+            }
+            return 0; // neither o1 nor o2 have a next element, consider them equals as empty iterators in this direction
         }
+    }
 
+    private final class LargerPrevElementComparator
+            implements Comparator<OrdinalIterator>
+    {
         @Override
-        public Entry<InternalKey, ByteBuffer> next()
+        public int compare(OrdinalIterator o1, OrdinalIterator o2)
         {
-            if (nextElement == null) {
-                throw new NoSuchElementException();
+            if (o1.iterator.hasPrev()) {
+                if (o2.iterator.hasPrev()) {
+                    int result =
+                            internalKeyComparator.compare(o1.iterator.peekPrev().getKey(),
+                                    o2.iterator.peekPrev().getKey());
+                    return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
+                }
+                return 1; // if o2 has no prev, return o1 as larger
             }
-
-            Entry<InternalKey, ByteBuffer> result = nextElement;
-            if (iterator.hasNext()) {
-                nextElement = iterator.next();
+            if (o2.iterator.hasPrev()) {
+                return -1; // if o1 has no prev, return o2 as larger
             }
-            else {
-                nextElement = null;
-            }
-            return result;
-        }
-
-        @Override
-        public void remove()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-
-            ComparableIterator comparableIterator = (ComparableIterator) o;
-
-            if (ordinal != comparableIterator.ordinal) {
-                return false;
-            }
-            if (nextElement != null ? !nextElement.equals(comparableIterator.nextElement) : comparableIterator.nextElement != null) {
-                return false;
-            }
-
-            return true;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            int result = ordinal;
-            result = 31 * result + (nextElement != null ? nextElement.hashCode() : 0);
-            return result;
-        }
-
-        @Override
-        public int compareTo(ComparableIterator that)
-        {
-            int result = comparator.compare(this.nextElement.getKey(), that.nextElement.getKey());
-            if (result == 0) {
-                result = Ints.compare(this.ordinal, that.ordinal);
-            }
-            return result;
+            return 0; //neither o1 nor o2 have a next element, consider them equals as empty iterators in this direction
         }
     }
 }

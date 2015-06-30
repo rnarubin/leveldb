@@ -99,7 +99,9 @@ public class SeekingIteratorAdapter
     public void seekToLast()
     {
         seekingIterator.seekToEnd();
-        seekingIterator.prev();
+        if (seekingIterator.hasPrev()) {
+            seekingIterator.prev();
+        }
     }
 
     @Override

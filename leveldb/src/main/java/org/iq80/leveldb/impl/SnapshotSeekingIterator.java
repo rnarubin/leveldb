@@ -21,7 +21,7 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
-import org.iq80.leveldb.util.DbIterator;
+import org.iq80.leveldb.util.MergingIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -35,7 +35,7 @@ public final class SnapshotSeekingIterator
         extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
         implements Closeable
 {
-    private final DbIterator iterator;
+    private final MergingIterator iterator;
     private final SnapshotImpl snapshot;
     private final Comparator<ByteBuffer> userComparator;
     // indicates the direction in which the iterator was last advanced
@@ -47,7 +47,7 @@ public final class SnapshotSeekingIterator
         FORWARD, REVERSE
     }
 
-    public SnapshotSeekingIterator(DbIterator iterator, SnapshotImpl snapshot, Comparator<ByteBuffer> userComparator)
+    public SnapshotSeekingIterator(MergingIterator iterator, SnapshotImpl snapshot, Comparator<ByteBuffer> userComparator)
     {
         this.iterator = iterator;
         this.snapshot = snapshot;

@@ -43,12 +43,17 @@ public abstract class InternalKey
             ByteBuffer lastKeyBuffer,
             ByteBuffer value);
 
-    public int getEncodedSize()
+    public final int getEncodedSize()
     {
         return getUserKey().remaining() + SizeOf.SIZE_OF_LONG;
     }
 
     public abstract void free(MemoryManager memory);
+
+    public final InternalKey heapCopy()
+    {
+        return new TransientInternalKey(ByteBuffers.heapCopy(getUserKey()), getSequenceNumber(), getValueType());
+    }
 
     @Override
     public boolean equals(Object o)

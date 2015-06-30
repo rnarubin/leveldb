@@ -22,8 +22,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.InternalIterator;
+import org.iq80.leveldb.util.ReferenceCounted;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -37,6 +40,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class MemTable
+        extends ReferenceCounted<MemTable>
         implements SeekingIterable<InternalKey, ByteBuffer>
 {
     private final ConcurrentSkipListMap<InternalKey, ByteBuffer> table;
@@ -44,7 +48,7 @@ public final class MemTable
     private final Comparator<Entry<InternalKey, ByteBuffer>> iteratorComparator;
     private final List<AutoCloseable> cleanup;
 
-    public MemTable(final InternalKeyComparator internalKeyComparator)
+    public MemTable(final InternalKeyComparator internalKeyComparator, boolean bufferCleaner, MemoryManager memory)
     {
         this.table = new ConcurrentSkipListMap<InternalKey, ByteBuffer>(internalKeyComparator);
         this.iteratorComparator = new Comparator<Entry<InternalKey, ByteBuffer>>()
@@ -54,18 +58,16 @@ public final class MemTable
                 return internalKeyComparator.compare(o1.getKey(), o2.getKey());
             }
         };
+
         this.cleanup = new ArrayList<>();
+        if (bufferCleaner) {
+            registerCleanup(new MemTableCleaner(this, memory));
+        }
     }
 
     public void registerCleanup(Closeable cleaner)
     {
         this.cleanup.add(cleaner);
-    }
-
-    public void cleanup()
-            throws IOException
-    {
-        Closeables.closeIO(cleanup);
     }
 
     public void clear()
@@ -126,16 +128,32 @@ public final class MemTable
         return new MemTableIterator();
     }
 
+    @Override
+    protected MemTable getThis()
+    {
+        return this;
+    }
+
+    @Override
+    protected void dispose()
+    {
+        try {
+            Closeables.closeIO(cleanup);
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
+    }
+
     public final class MemTableIterator
-            implements
-            InternalIterator,
-            ReverseSeekingIterator<InternalKey, ByteBuffer>
+            implements InternalIterator
     {
         private ReversePeekingIterator<Entry<InternalKey, ByteBuffer>> iterator;
         private final List<Entry<InternalKey, ByteBuffer>> entryList;
 
         public MemTableIterator()
         {
+            retain();
             entryList = Lists.newArrayList(simpleIterable());
             seekToFirst();
         }
@@ -220,7 +238,30 @@ public final class MemTable
         @Override
         public void close()
         {
-            // noop
+            release();
+        }
+    }
+
+    private static class MemTableCleaner
+            implements Closeable
+    {
+        private final MemTable memTable;
+        private final MemoryManager memory;
+
+        public MemTableCleaner(MemTable memTable, MemoryManager memory)
+        {
+            this.memTable = memTable;
+            this.memory = memory;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            for (Entry<InternalKey, ByteBuffer> entry : memTable.simpleIterable()) {
+                entry.getKey().free(memory);
+                memory.free(entry.getValue());
+            }
         }
     }
 }

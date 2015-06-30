@@ -205,12 +205,10 @@ public enum VersionEditTag
 
             // smallest key
             // store on heap to leverage GC and make our lives easier. these keys make up only a small portion of all data
-            InternalKey smallestKey = new EncodedInternalKey(
-                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+            InternalKey smallestKey = new EncodedInternalKey(ByteBuffers.readLengthPrefixedBytes(buffer)).heapCopy();
 
             // largest key
-            InternalKey largestKey = new EncodedInternalKey(
-                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+            InternalKey largestKey = new EncodedInternalKey(ByteBuffers.readLengthPrefixedBytes(buffer)).heapCopy();
 
             versionEdit.addFile(level, fileNumber, fileSize, smallestKey, largestKey);
         }

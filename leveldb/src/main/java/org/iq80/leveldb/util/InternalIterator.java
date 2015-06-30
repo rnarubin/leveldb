@@ -21,7 +21,7 @@ import java.io.Closeable;
 import java.nio.ByteBuffer;
 
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.SeekingIterator;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 
 /**
  * <p>A common interface for internal iterators.</p>
@@ -29,6 +29,6 @@ import org.iq80.leveldb.impl.SeekingIterator;
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
 public interface InternalIterator
-        extends SeekingIterator<InternalKey, ByteBuffer>, Closeable
+        extends ReverseSeekingIterator<InternalKey, ByteBuffer>, Closeable
 {
 }

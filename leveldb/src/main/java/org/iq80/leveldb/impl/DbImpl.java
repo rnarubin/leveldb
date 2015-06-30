@@ -25,7 +25,6 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBException;
-import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -34,21 +33,20 @@ import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.impl.Filename.FileInfo;
 import org.iq80.leveldb.impl.Filename.FileType;
-import org.iq80.leveldb.impl.MemTable.MemTableIterator;
 import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
 import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.DbIterator;
-import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.ObjectPool;
 import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -57,6 +55,7 @@ import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
@@ -220,12 +219,9 @@ public class DbImpl
             long logFileNumber = versions.getNextFileNumber();
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
                     logFileNumber, options, scratchCache);
-            MemTable table = new MemTable(internalKeyComparator);
+            MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
+                    options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
-
-            if (this.userOptions.specifiedMemoryManager()) {
-                table.registerCleanup(new MemTableCleaner(table, options.memoryManager()));
-            }
 
             edit.setLogNumber(log.getFileNumber());
 
@@ -303,28 +299,21 @@ public class DbImpl
             LOGGER.error("{} error in closing", this, e);
         }
 
-        memTables.mutable.acquireAll();
+        MemTables tables = memTables;
+        tables.mutable.acquireAll();
         try {
-            try {
-                memTables.mutable.log.close();
-            }
-            finally {
-                memTables.mutable.memTable.cleanup();
-            }
+            tables.mutable.log.close();
+            // TODO table release
         }
         catch (IOException e) {
             LOGGER.error("{} error in closing", this, e);
         }
 
-        if (memTables.immutableExists()) {
-            memTables.immutable.acquireAll();
+        if (tables.immutableExists()) {
+            tables.immutable.acquireAll();
             try {
-                try {
-                    memTables.immutable.log.close();
-                }
-                finally {
-                    memTables.immutable.memTable.cleanup();
-                }
+                tables.immutable.log.close();
+                // TODO table release
             }
             catch (IOException e) {
                 LOGGER.error("{} error in closing", this, e);
@@ -397,8 +386,9 @@ public class DbImpl
         makeRoomForWrite(options.writeBufferSize()).release();
 
         // todo bg_error code
-        while (memTables.immutableExists()) {
-            memTables.waitForImmutableCompaction();
+        MemTables tables;
+        while ((tables = memTables).immutableExists()) {
+            tables.waitForImmutableCompaction();
         }
         checkBackgroundException();
     }
@@ -579,7 +569,7 @@ public class DbImpl
 
                 // apply entries to memTable
                 if (memTable == null) {
-                    memTable = new MemTable(internalKeyComparator);
+                    memTable = new MemTable(internalKeyComparator, false, null);
                 }
                 memTable.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
                 writeBatch.forEach(new InsertIntoHandler(memTable, sequenceBegin));
@@ -597,7 +587,7 @@ public class DbImpl
                         writeLevel0Table(memTable, edit, null);
                     }
                     finally {
-                        memTable.cleanup();
+                        memTable.release();
                     }
                     memTable = null;
                 }
@@ -609,7 +599,7 @@ public class DbImpl
                     writeLevel0Table(memTable, edit, null);
                 }
                 finally {
-                    memTable.cleanup();
+                    memTable.release();
                 }
             }
 
@@ -834,7 +824,7 @@ public class DbImpl
         checkBackgroundException();
         mutex.lock();
         try {
-            DbIterator rawIterator = internalIterator();
+            MergingIterator rawIterator = internalIterator();
 
             // filter any entries not visible in our snapshot
             SnapshotImpl snapshot = getSnapshot(readOptions);
@@ -842,23 +832,45 @@ public class DbImpl
                     internalKeyComparator.getUserComparator());
             return new SeekingIteratorAdapter(snapshotIterator);
         }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
         finally {
             mutex.unlock();
         }
     }
 
-    DbIterator internalIterator()
+    MergingIterator internalIterator()
+            throws IOException
     {
         mutex.lock();
         try {
             // merge together the memTable, immutableMemTable, and tables in version set
-            MemTableIterator iterator = null;
-            MemTables tables = memTables;
-            if (tables.immutableExists()) {
-                iterator = tables.immutable.memTable.iterator();
+            List<InternalIterator> iterators = new ArrayList<>();
+            MemTable immutable = null, mutable;
+            do {
+                MemTables tables = memTables;
+                if (tables.immutableExists() && (immutable = tables.immutable.memTable.retain()) == null) {
+                    continue;
+                }
+                if ((mutable = tables.mutable.memTable.retain()) == null) {
+                    Closeables.closeIO(immutable);
+                    continue;
+                }
+                break;
             }
+            while (true);
+
+            if (immutable != null) {
+                iterators.add(immutable.iterator());
+            }
+            iterators.add(mutable.iterator());
+            Closeables.closeIO(mutable, immutable);
+
             Version current = versions.getCurrent();
-            return new DbIterator(tables.mutable.memTable.iterator(), iterator, current.getLevel0Files(), current.getLevelIterators(), internalKeyComparator);
+            iterators.addAll(current.getLevel0Files());
+            iterators.addAll(current.getLevelIterators());
+            return new MergingIterator(iterators, internalKeyComparator);
         }
         finally {
             mutex.unlock();
@@ -941,10 +953,11 @@ public class DbImpl
                 //so here we swap the memtables
 
                 //if the previous memtable hasn't been flushed yet, we must wait
-                while (this.memTables.immutableExists()) {
+                MemTables tables;
+                while ((tables = this.memTables).immutableExists()) {
                     current.acquireUpgraded(); // block other writers that might be spinning in wait for a new memtable
                     try {
-                        this.memTables.waitForImmutableCompaction();
+                        tables.waitForImmutableCompaction();
                         checkBackgroundException();
                     }
                     catch (Throwable e) {
@@ -957,11 +970,11 @@ public class DbImpl
                 }
 
                 long logNumber = versions.getNextFileNumber();
-                MemTable table = new MemTable(internalKeyComparator);
                 try {
-                    this.memTables = new MemTables(new MemTableAndLog(table,
-                            Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logNumber)), logNumber,
-                                    options, scratchCache)), current);
+                    this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
+                            userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
+                            new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options, scratchCache)),
+                            current);
                 }
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
@@ -969,9 +982,6 @@ public class DbImpl
                     setBackgroundException(e);
                     current.release();
                     throw new DBException(e);
-                }
-                if (userOptions.specifiedMemoryManager()) {
-                    table.registerCleanup(new MemTableCleaner(table, options.memoryManager()));
                 }
 
                 scheduleCompaction();
@@ -1030,7 +1040,7 @@ public class DbImpl
             versions.logAndApply(edit);
 
             this.memTables = new MemTables(this.memTables.mutable, null);
-            immutable.memTable.cleanup();
+            immutable.memTable.release();
         }
         finally {
             try {
@@ -1105,7 +1115,8 @@ public class DbImpl
             if (smallest == null) {
                 return null;
             }
-            FileMetaData fileMetaData = new FileMetaData(fileNumber, file.length(), smallest, largest);
+            FileMetaData fileMetaData = new FileMetaData(fileNumber, file.length(), smallest.heapCopy(),
+                    largest.heapCopy());
 
             // verify table can be opened
             tableCache.newIterator(fileMetaData).close();
@@ -1165,7 +1176,7 @@ public class DbImpl
                     {
                         if (!hasCurrentUserKey || internalKeyComparator.getUserComparator().compare(key.getUserKey(), currentUserKey) != 0) {
                             // First occurrence of this user key
-                            currentUserKey = key.getUserKey();
+                            currentUserKey = ByteBuffers.heapCopy(key.getUserKey());
                             hasCurrentUserKey = true;
                             lastSequenceForKey = MAX_SEQUENCE_NUMBER;
                         }
@@ -1197,7 +1208,7 @@ public class DbImpl
                             openCompactionOutputFile(compactionState);
                         }
                         if (compactionState.builder.getEntryCount() == 0) {
-                            compactionState.currentSmallest = key;
+                            compactionState.currentSmallest = key.heapCopy();
                         }
                         compactionState.currentLargest = key;
                         compactionState.builder.add(key, iterator.peek().getValue());
@@ -1205,11 +1216,13 @@ public class DbImpl
                         // Close output file if it is big enough
                         if (compactionState.builder.getFileSize() >=
                                 compactionState.compaction.getMaxOutputFileSize()) {
+                            compactionState.currentLargest = compactionState.currentLargest.heapCopy();
                             finishCompactionOutputFile(compactionState);
                         }
                     }
                     iterator.next();
                 }
+                compactionState.currentLargest = compactionState.currentLargest.heapCopy();
             }
 
             if (shuttingDown.get()) {
@@ -1656,29 +1669,6 @@ public class DbImpl
         public String toString()
         {
             return "MemTables [mutable=" + mutable + ", immutable=" + immutable + "]";
-        }
-    }
-
-    private static class MemTableCleaner
-            implements Closeable
-    {
-        private final MemTable memTable;
-        private final MemoryManager memory;
-
-        public MemTableCleaner(MemTable memTable, MemoryManager memory)
-        {
-            this.memTable = memTable;
-            this.memory = memory;
-        }
-
-        @Override
-        public void close()
-                throws IOException
-        {
-            for(Entry<InternalKey, ByteBuffer> entry : memTable.simpleIterable()){
-                entry.getKey().free(memory);
-                memory.free(entry.getValue());
-            }
         }
     }
 }

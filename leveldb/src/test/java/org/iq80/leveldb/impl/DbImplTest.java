@@ -65,7 +65,7 @@ import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
-import org.iq80.leveldb.util.DbIterator;
+import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.FileUtils;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -316,6 +316,7 @@ public class DbImplTest
         db.put("a", "va");
 
         try(StringDbIterator iter = db.iterator()){
+            iter.seekToFirst();
            assertSequence(iter, immutableEntry("a", "va"));
         }
     }
@@ -330,6 +331,7 @@ public class DbImplTest
         db.put("c", "vc");
 
         try(StringDbIterator iterator = db.iterator()){
+            iterator.seekToFirst();
             assertSequence(iterator,
                     immutableEntry("a", "va"),
                     immutableEntry("b", "vb"),
@@ -633,7 +635,7 @@ public class DbImplTest
         db.put("foo", "hello");
 
         try (StringDbIterator iterator = db.iterator()) {
-
+            iterator.seekToFirst();
             db.put("foo", "newvalue1");
             for (int i = 0; i < 100; i++) {
                 db.put(key(i), key(i) + longString(100000, 'v'));
@@ -892,6 +894,7 @@ public class DbImplTest
         }
 
         try (StringDbIterator seekingIterator = db.iterator()) {
+            seekingIterator.seekToFirst();
             for (Entry<String, String> entry : entries) {
                 assertTrue(seekingIterator.hasNext());
                 assertEquals(seekingIterator.peek(), entry);
@@ -983,10 +986,6 @@ public class DbImplTest
         }
 
         try (StringDbIterator seekingIterator = db.iterator()) {
-            assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
-            assertSequence(seekingIterator, entries);
-            assertReverseSequence(seekingIterator, reverseEntries);
-
             seekingIterator.seekToFirst();
             assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
             assertSequence(seekingIterator, entries);
@@ -1200,17 +1199,19 @@ public class DbImplTest
         @Override
         public ByteBuffer allocate(int capacity)
         {
-            return trackBuffer(ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN));
+            return ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
+            // return trackBuffer(ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN));
         }
 
         public ByteBuffer wrap(byte[] arr)
         {
-            return trackBuffer(ByteBuffer.wrap(arr));
+            return ByteBuffer.wrap(arr).order(ByteOrder.LITTLE_ENDIAN);
+            // return trackBuffer(ByteBuffer.wrap(arr));
         }
 
         private ByteBuffer trackBuffer(ByteBuffer buf)
         {
-            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable());
+            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable(), new Object());
             bufMap.put(buf, metaData);
             refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
             {
@@ -1219,7 +1220,8 @@ public class DbImplTest
                 {
                     refSet.remove(this);
                     if (!metaData.freed.get()) {
-                        backgroundException = new IllegalStateException("buffer GC without free", metaData.stackHolder);
+                        backgroundException = new IllegalStateException("buffer GC without free",
+                                metaData.allocStackHolder);
                     }
                 }
             });
@@ -1229,16 +1231,20 @@ public class DbImplTest
         @Override
         public void free(ByteBuffer buffer)
         {
-            MetaData metaData = bufMap.get(buffer);
-            if (metaData == null) {
-                throw new IllegalStateException("free called on buffer from foreign source");
-            }
-            if (!metaData.freed.compareAndSet(false, true)) {
-                throw new IllegalStateException("double free", metaData.stackHolder);
-            }
-
-            // force data corruption on use-after-free
-            Arrays.fill(buffer.array(), (byte) 0xff);
+            //MetaData metaData = bufMap.get(buffer);
+            //if (metaData == null) {
+            //    throw new IllegalStateException("free called on buffer from foreign source");
+            //}
+            //if (metaData.freed.compareAndSet(false, true)) {
+            //    metaData.freeStackHolder = new Throwable();
+            //    metaData.info[0] = metaData.freeStackHolder.getStackTrace();
+            //}
+            //else {
+            //    throw new IllegalStateException("double free", metaData.allocStackHolder);
+            //}
+            //
+            //// force data corruption on use-after-free
+            //Arrays.fill(buffer.array(), (byte) 0xff);
         }
 
         @Override
@@ -1251,7 +1257,7 @@ public class DbImplTest
             }
             for (Entry<ByteBuffer, MetaData> entry : bufMap.entrySet()) {
                 if (!entry.getValue().freed.get()) {
-                    throw new IllegalStateException("buffer never freed", entry.getValue().stackHolder);
+                    throw new IllegalStateException("buffer never freed", entry.getValue().allocStackHolder);
                 }
             }
         }
@@ -1259,20 +1265,22 @@ public class DbImplTest
         private static class MetaData
         {
             public final AtomicBoolean freed;
-            public final Throwable stackHolder;
+            public final Throwable allocStackHolder;
+            public Throwable freeStackHolder = null;
             private final Object[] info;
 
             public MetaData(AtomicBoolean freed, Throwable stackHolder, Object... info)
             {
                 this.freed = freed;
-                this.stackHolder = stackHolder;
+                this.allocStackHolder = stackHolder;
                 this.info = info;
             }
 
             @Override
             public String toString()
             {
-                return "MetaData [freed=" + freed + ", info=" + Arrays.deepToString(info) + "]";
+                return "MetaData [freed=" + freed + ", info=" + Arrays.deepToString(info) + ", holders="
+                        + allocStackHolder + ", " + freeStackHolder + "]";
             }
         }
 
@@ -1410,7 +1418,7 @@ public class DbImplTest
                 throws IOException
         {
             ImmutableList.Builder<String> result = ImmutableList.builder();
-            try (final DbIterator iter = db.internalIterator()) {
+            try (final MergingIterator iter = db.internalIterator()) {
                 for (Entry<InternalKey, ByteBuffer> entry : new Iterable<Entry<InternalKey, ByteBuffer>>()
                 {
                     @Override
