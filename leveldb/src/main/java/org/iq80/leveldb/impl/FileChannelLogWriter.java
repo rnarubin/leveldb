@@ -18,8 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.util.LongToIntFunction;
-import org.iq80.leveldb.util.ObjectPool;
-import org.iq80.leveldb.util.ObjectPool.PooledObject;
 import org.iq80.leveldb.util.SizeOf;
 
 import java.io.File;
@@ -37,14 +35,12 @@ public class FileChannelLogWriter
 
     private final FileChannel fileChannel;
     private final AtomicLong filePosition = new AtomicLong(0);
-    private final ObjectPool<ByteBuffer> scratchCache;
 
     @SuppressWarnings("resource")
-    public FileChannelLogWriter(File file, long fileNumber, ObjectPool<ByteBuffer> scratchCache)
+    public FileChannelLogWriter(File file, long fileNumber)
             throws IOException
     {
         super(file, fileNumber);
-        this.scratchCache = scratchCache;
         this.fileChannel = new FileOutputStream(file, false).getChannel();
     }
 
@@ -76,14 +72,22 @@ public class FileChannelLogWriter
         return new CloseableFileLogBuffer(state, length);
     }
 
+    private static final ThreadLocal<ByteBuffer> scratch = new ThreadLocal<ByteBuffer>()
+    {
+        @Override
+        public synchronized ByteBuffer initialValue()
+        {
+            return ByteBuffer.allocateDirect(4096).order(ByteOrder.LITTLE_ENDIAN);
+        }
+    };
+
     private class CloseableFileLogBuffer
             extends CloseableLogBuffer
     {
         private long position;
         private final long limit;
         // use scratch space and a minimum flush size to improve small write performance
-        private PooledObject<ByteBuffer> scratch = scratchCache.acquire();
-        private ByteBuffer buffer = scratch.get().order(ByteOrder.LITTLE_ENDIAN);
+        private ByteBuffer buffer = scratch.get();
 
         protected CloseableFileLogBuffer(final long startPosition, final int length)
         {
@@ -166,8 +170,7 @@ public class FileChannelLogWriter
         {
             buffer.flip();
             write(buffer);
-            buffer = null;
-            scratch.close();
+            buffer.clear();
         }
     }
 }

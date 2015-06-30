@@ -47,12 +47,14 @@ public class BytewiseComparator
         if (sharedBytes < Math.min(start.remaining(), limit.remaining())) {
             // if we can add one to the last shared byte without overflow and the two keys differ by more than
             // one increment at this location.
-            int lastSharedByte = ByteBuffers.getUnsignedByte(start, sharedBytes);
-            if (lastSharedByte < 0xff && lastSharedByte + 1 < ByteBuffers.getUnsignedByte(limit, sharedBytes)) {
-                start.put(sharedBytes, (byte) (lastSharedByte + 1));
-                start.limit(sharedBytes + 1);
+            int startShared = start.position() + sharedBytes;
+            int lastSharedByte = ByteBuffers.getUnsignedByte(start, startShared);
+            if (lastSharedByte < 0xff
+                    && lastSharedByte + 1 < ByteBuffers.getUnsignedByte(limit, limit.position() + sharedBytes)) {
+                start.put(startShared, (byte) (lastSharedByte + 1));
+                start.limit(startShared + 1);
 
-                assert (compare(start, limit) < 0) : "start must be less than last limit";
+                assert (compare(start, limit) < 0) : "start must be less than limit";
                 return true;
             }
         }
@@ -64,10 +66,11 @@ public class BytewiseComparator
     {
         // Find first character that can be incremented
         for (int i = 0; i < key.remaining(); i++) {
-            int b = ByteBuffers.getUnsignedByte(key, i);
+            int pos = key.position() + i;
+            int b = ByteBuffers.getUnsignedByte(key, pos);
             if (b != 0xff) {
-                key.put(i, (byte) (b + 1));
-                key.limit(i + 1);
+                key.put(pos, (byte) (b + 1));
+                key.limit(pos + 1);
                 return true;
             }
         }

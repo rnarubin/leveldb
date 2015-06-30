@@ -1199,7 +1199,11 @@ public class DbImplTest
         @Override
         public ByteBuffer allocate(int capacity)
         {
-            return ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer b = ByteBuffer.allocate(capacity + 16).order(ByteOrder.LITTLE_ENDIAN);
+            b.putLong(0, -1L).putLong(b.capacity() - 8, -1L);
+            b.limit(b.capacity() - 8).position(8);
+            return b;
+            // return ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
             // return trackBuffer(ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN));
         }
 

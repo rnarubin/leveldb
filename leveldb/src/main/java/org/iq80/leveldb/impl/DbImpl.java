@@ -41,8 +41,6 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.MemoryManagers;
-import org.iq80.leveldb.util.ObjectPool;
-import org.iq80.leveldb.util.ObjectPools;
 import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,8 +121,6 @@ public class DbImpl
 
     private final ThreadPoolExecutor compactionExecutor;
     private final BlockingQueue<Runnable> backgroundCompaction = new ArrayBlockingQueue<>(1);
-
-    private final ObjectPool<ByteBuffer> scratchCache = ObjectPools.directBufferPool(16, 4096);
 
     private ManualCompaction manualCompaction;
 
@@ -218,7 +214,7 @@ public class DbImpl
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
             LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
-                    logFileNumber, options, scratchCache);
+                    logFileNumber, options);
             MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
                     options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
@@ -973,7 +969,7 @@ public class DbImpl
                 try {
                     this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
                             userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
-                            new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options, scratchCache)),
+                            new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options)),
                             current);
                 }
                 catch (IOException e) {

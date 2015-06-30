@@ -12,13 +12,13 @@ public class GrowingBuffer
 {
     private final MemoryManager memory;
     private ByteBuffer buffer;
-    private int oldpos;
+    private int startPos;
 
     public GrowingBuffer(final int initialSize, MemoryManager memory)
     {
         this.memory = memory;
-        this.buffer = this.memory.allocate(nextPowerOf2(initialSize));
-        this.oldpos = this.buffer.position();
+        this.buffer = this.memory.allocate(initialSize);
+        this.startPos = this.buffer.position();
     }
 
     /**
@@ -29,9 +29,9 @@ public class GrowingBuffer
         final int deficit = length - buffer.remaining();
         if (deficit > 0) {
             ByteBuffer oldBuffer = buffer;
-            oldBuffer.limit(oldBuffer.position()).position(oldpos);
-            buffer = memory.allocate(nextPowerOf2(oldBuffer.capacity() + deficit));
-            oldpos = buffer.position();
+            buffer = memory.allocate(sizeUp(oldBuffer.limit() - startPos, deficit));
+            oldBuffer.limit(oldBuffer.position()).position(startPos);
+            startPos = buffer.position();
             buffer.put(oldBuffer);
             memory.free(oldBuffer);
         }
@@ -74,25 +74,31 @@ public class GrowingBuffer
 
     public int filled()
     {
-        return buffer.position() - oldpos;
+        return buffer.position() - startPos;
     }
 
     public void clear()
     {
-        buffer.clear();
+        buffer.position(startPos);
     }
 
     public ByteBuffer get()
     {
-        return ByteBuffers.duplicate(buffer, oldpos, buffer.position());
+        return ByteBuffers.duplicate(buffer, startPos, buffer.position());
     }
 
-    /**
-     * inclusive, e.g. nextPowerOf2(1024) -> 1024
-     */
-    private static int nextPowerOf2(final int num)
+    private static int sizeUp(final int oldSize, final int deficit)
     {
-        return 1 << (Integer.SIZE - Integer.numberOfLeadingZeros(num - 1));
+        assert deficit > 0;
+        final int minSize = oldSize + deficit;
+        int newSize = oldSize + (oldSize >> 1);
+        if (newSize < minSize) {
+            newSize = Integer.highestOneBit(minSize - 1) << 1;
+        }
+        if (newSize < 0) {
+            newSize = Integer.MAX_VALUE;
+        }
+        return newSize;
     }
 
     @Override
