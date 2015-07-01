@@ -21,7 +21,7 @@ public class ReadOptions
         implements Cloneable
 {
     private static final ReadOptions DEFAULT_READ_OPTIONS = OptionsConfiguration.populateFromProperties(
-            "leveldb.ReadOptions.", new ReadOptions(null));
+            "leveldb.readOptions.", new ReadOptions(null));
 
     /**
      * @deprecated use {@link ReadOptions#make()}

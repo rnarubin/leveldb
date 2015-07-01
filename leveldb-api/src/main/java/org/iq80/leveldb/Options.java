@@ -22,7 +22,18 @@ import java.util.Objects;
 public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
-    private static final Options DEFAULT_OPTIONS = OptionsConfiguration.populateFromProperties("leveldb.Options.",
+    @Override
+    public String toString()
+    {
+        return "Options [createIfMissing=" + createIfMissing + ", errorIfExists=" + errorIfExists
+                + ", writeBufferSize=" + writeBufferSize + ", maxOpenFiles=" + maxOpenFiles + ", blockRestartInterval="
+                + blockRestartInterval + ", blockSize=" + blockSize + ", verifyChecksums=" + verifyChecksums
+                + ", paranoidChecks=" + paranoidChecks + ", comparator=" + comparator + ", logger=" + logger
+                + ", cacheSize=" + cacheSize + ", throttleLevel0=" + throttleLevel0 + ", io=" + io + ", mem=" + mem
+                + ", compression=" + compression + "]";
+    }
+
+    private static final Options DEFAULT_OPTIONS = OptionsConfiguration.populateFromProperties("leveldb.options.",
             new Options(null));
 
     /**

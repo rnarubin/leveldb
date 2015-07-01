@@ -250,9 +250,10 @@ public class DbImpl
                 // Disable snappy if it's not available.
                 ret.compression(Snappy.available() ? Snappy.instance() : null);
             }
-
-            // should be sanitized by options insertion as well
-            Preconditions.checkArgument(ret.compression().persistentId() != 0, "User compression cannot use id 0");
+            else {
+                // should be sanitized by options insertion as well
+                Preconditions.checkArgument(ret.compression().persistentId() != 0, "User compression cannot use id 0");
+            }
         }
         return ret;
     }

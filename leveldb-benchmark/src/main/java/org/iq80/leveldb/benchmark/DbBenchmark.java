@@ -23,8 +23,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
 
-import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.DBIterator;
@@ -56,6 +54,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.base.Charsets.UTF_8;
 import static org.iq80.leveldb.benchmark.DbBenchmark.DBState.EXISTING;
@@ -281,7 +280,7 @@ public class DbBenchmark
 
     void printOptions()
     {
-       System.out.println(ReflectionToStringBuilder.toString(defaultOptions(), ToStringStyle.MULTI_LINE_STYLE));
+        System.out.println(defaultOptions());
     }
 
     void printWarnings()
@@ -699,6 +698,7 @@ public class DbBenchmark
 
         compressedLength = Snappy.instance().compress(ByteBuffers.duplicate(raw),
                 ByteBuffers.duplicate(compressedOutput));
+        compressedOutput.limit(compressedLength);
 
         ByteBuffer uncompressedBuffer = memory.allocate(inputSize);
         ByteBuffer compressedBuffer = memory.allocate(compressedLength);
@@ -803,8 +803,11 @@ public class DbBenchmark
                 "readseq",
                 "readreverse",
                 "fill100K",
- "crc32c",
+                "crc32c",
                 "snappycomp",
+                "snappyuncomp",
+                "snap-array",
+                "snap-direct",
                 "unsnap-array",
                 "unsnap-direct"
                 // "acquireload"

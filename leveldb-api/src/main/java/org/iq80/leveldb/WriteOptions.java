@@ -21,7 +21,7 @@ public class WriteOptions
         implements Cloneable
 {
     private static final WriteOptions DEFAULT_WRITE_OPTIONS = OptionsConfiguration.populateFromProperties(
-            "leveldb.WriteOptions.", new WriteOptions(null));
+            "leveldb.writeOptions.", new WriteOptions(null));
 
     /**
      * @deprecated use {@link WriteOptions#make()}
