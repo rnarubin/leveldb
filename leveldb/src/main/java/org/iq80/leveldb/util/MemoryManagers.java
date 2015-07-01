@@ -10,6 +10,33 @@ public class MemoryManagers
     {
     }
 
+    private enum Direct
+            implements MemoryManager
+    {
+        INSTANCE;
+
+        @Override
+        public ByteBuffer allocate(int capacity)
+        {
+            return ByteBuffer.allocateDirect(capacity).order(ByteOrder.LITTLE_ENDIAN);
+        }
+
+        @Override
+        public void free(ByteBuffer buffer)
+        {
+            ByteBuffers.freeDirect(buffer);
+        }
+    }
+
+    /**
+     * simple standard lib direction allocation. generally performs poorly for naive allocations,
+     * not recommended for production use
+     */
+    public static MemoryManager direct()
+    {
+        return Direct.INSTANCE;
+    }
+
     private enum Heap
             implements MemoryManager
     {

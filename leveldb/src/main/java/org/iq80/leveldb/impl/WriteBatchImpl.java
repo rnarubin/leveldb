@@ -27,7 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map.Entry;
 
-public abstract class WriteBatchImpl
+abstract class WriteBatchImpl
         implements WriteBatch
 {
     private int approximateSize;
@@ -53,14 +53,16 @@ public abstract class WriteBatchImpl
     }
 
 
-    public WriteBatchImpl put(byte[] key, byte[] value)
+    @Override
+    public final WriteBatchImpl put(byte[] key, byte[] value)
     {
         Preconditions.checkNotNull(key, "key is null");
         Preconditions.checkNotNull(value, "value is null");
         return put(ByteBuffer.wrap(key), ByteBuffer.wrap(value));
     }
 
-    public WriteBatchImpl put(ByteBuffer key, ByteBuffer value)
+    @Override
+    public final WriteBatchImpl put(ByteBuffer key, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
         Preconditions.checkNotNull(value, "value is null");
@@ -69,13 +71,15 @@ public abstract class WriteBatchImpl
         return this;
     }
 
-    public WriteBatchImpl delete(byte[] key)
+    @Override
+    public final WriteBatchImpl delete(byte[] key)
     {
         Preconditions.checkNotNull(key, "key is null");
         return delete(ByteBuffer.wrap(key));
     }
 
-    public WriteBatchImpl delete(ByteBuffer key)
+    @Override
+    public final WriteBatchImpl delete(ByteBuffer key)
     {
         Preconditions.checkNotNull(key, "key is null");
         approximateSize += 6 + key.remaining();
@@ -91,7 +95,7 @@ public abstract class WriteBatchImpl
 
     abstract void forEach(Handler handler);
 
-    public interface Handler
+    interface Handler
     {
         void put(ByteBuffer key, ByteBuffer value);
 

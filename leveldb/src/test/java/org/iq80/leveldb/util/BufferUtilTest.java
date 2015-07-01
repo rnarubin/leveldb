@@ -20,7 +20,6 @@ package org.iq80.leveldb.util;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -90,7 +89,7 @@ public abstract class BufferUtilTest
 
     private void testCompare(String a, String b, int o1, int l1, int o2, int l2, int expected)
     {
-        MemoryManager heap = MemoryManagers.heap(), direct = Direct.INSTANCE;
+        MemoryManager heap = MemoryManagers.heap(), direct = MemoryManagers.direct();
         Assert.assertEquals(util.compare(buf(a, heap), o1, l1, buf(b, heap), o2, l2), expected);
         Assert.assertEquals(util.compare(buf(b, heap), o2, l2, buf(a, heap), o1, l1), -expected);
         Assert.assertEquals(util.compare(buf(a, direct), o1, l1, buf(b, heap), o2, l2), expected);
@@ -128,7 +127,7 @@ public abstract class BufferUtilTest
 
     private void testSharedBytes(String a, String b, int expected)
     {
-        MemoryManager heap = MemoryManagers.heap(), direct = Direct.INSTANCE;
+        MemoryManager heap = MemoryManagers.heap(), direct = MemoryManagers.direct();
         Assert.assertEquals(util.calculateSharedBytes(buf(a, heap), buf(b, heap)), expected);
         Assert.assertEquals(util.calculateSharedBytes(buf(b, heap), buf(a, heap)), expected);
         Assert.assertEquals(util.calculateSharedBytes(buf(a, direct), buf(b, heap)), expected);
@@ -235,8 +234,8 @@ public abstract class BufferUtilTest
     {
         List<ByteBuffer> bufs = new ArrayList<>();
         bufs.add((ByteBuffer) MemoryManagers.heap().allocate(data.length).put(data).flip());
-        bufs.add((ByteBuffer) Direct.INSTANCE.allocate(data.length).put(data).flip());
-        for (MemoryManager memory : Arrays.asList(MemoryManagers.heap(), Direct.INSTANCE)) {
+        bufs.add((ByteBuffer) MemoryManagers.direct().allocate(data.length).put(data).flip());
+        for (MemoryManager memory : Arrays.asList(MemoryManagers.heap(), MemoryManagers.direct())) {
             for (int i = 1; i <= 16; i++) {
                 ByteBuffer b = memory.allocate(data.length + i);
                 b.position(i);
@@ -280,24 +279,6 @@ public abstract class BufferUtilTest
         ByteBuffer ret = memory.allocate(s.length()).put(s.getBytes(StandardCharsets.UTF_8));
         ret.flip();
         return ret;
-    }
-
-    private enum Direct
-            implements MemoryManager
-    {
-        INSTANCE;
-
-        @Override
-        public ByteBuffer allocate(int capacity)
-        {
-            return ByteBuffer.allocateDirect(capacity).order(ByteOrder.LITTLE_ENDIAN);
-        }
-
-        @Override
-        public void free(ByteBuffer buffer)
-        {
-            ByteBuffers.freeDirect(buffer);
-        }
     }
 
     protected abstract BufferUtil getUtil();

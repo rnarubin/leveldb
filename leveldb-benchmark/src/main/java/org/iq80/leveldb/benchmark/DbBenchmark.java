@@ -19,7 +19,6 @@ package org.iq80.leveldb.benchmark;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Files;
@@ -29,6 +28,7 @@ import org.apache.commons.lang3.builder.ToStringStyle;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
@@ -37,9 +37,7 @@ import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.FileUtils;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
 
 import java.io.File;
@@ -217,12 +215,22 @@ public class DbBenchmark
             }
             else if (benchmark.equals("snappycomp")) {
                 if( Snappy.available() ) {
-                    snappyCompress();
+                    snappyCompressDirectBuffer();
                 }
             }
             else if (benchmark.equals("snappyuncomp")) {
                 if( Snappy.available() ) {
                     snappyUncompressDirectBuffer();
+                }
+            }
+            else if (benchmark.equals("snap-array")) {
+                if (Snappy.available()) {
+                    snappyCompressArray();
+                }
+            }
+            else if (benchmark.equals("snap-direct")) {
+                if (Snappy.available()) {
+                    snappyCompressDirectBuffer();
                 }
             }
             else if (benchmark.equals("unsnap-array")) {
@@ -288,7 +296,7 @@ public class DbBenchmark
         String text = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy";
         byte[] compressedText = null;
         try {
-            compressedText = Snappy.compress(text);
+            compressedText = Snappy.instance().compress(text);
         }
         catch (Exception ignored) {
         }
@@ -400,9 +408,9 @@ public class DbBenchmark
 
     }
 
-    protected byte[] keygen(Order order, int val){
+    protected ByteBuffer keygen(Order order, int val){
        int k = (order == SEQUENTIAL) ? val : rand_.nextInt(num_);
-       return formatNumber(k);
+        return ByteBuffer.wrap(formatNumber(k));
     }
 
     private void write(WriteOptions writeOptions, Order order, DBState state, int numEntries, int valueSize, int entries_per_batch) throws IOException
@@ -432,9 +440,10 @@ public class DbBenchmark
                WriteBatch batch = db_.createWriteBatch();
                for (int j = 0; j < entries_per_batch; j++) {
                    int k = (order == SEQUENTIAL) ? i + j : rand_.nextInt(num_);
-                   byte[] key = keygen(order, k);
-                   batch.put(key, gen_.generate(valueSize));
-                   bytes_ += valueSize + key.length;
+                    ByteBuffer key = keygen(order, k);
+                    int len = key.remaining();
+                    batch.put(key, gen_.generate(valueSize));
+                    bytes_ += valueSize + len;
                    finishedSingleOp();
                }
                db_.write(batch, writeOptions);
@@ -454,9 +463,10 @@ public class DbBenchmark
                         WriteBatch batch = db_.createWriteBatch();
                         for (int j = 0; j < entries_per_batch; j++) {
                            int k = (order == SEQUENTIAL) ? i + j : ThreadLocalRandom.current().nextInt(num_);
-                           byte[] key = keygen(order, k);
+                           ByteBuffer key = keygen(order, k);
+                           int len = key.remaining();
                            batch.put(key, gen_.generate(valueSize));
-                           bytes_ += valueSize + key.length;
+                           bytes_ += valueSize + len;
                            if(start == 0)
                            {
                               //avoid contention in counting with a small cheat
@@ -640,24 +650,30 @@ public class DbBenchmark
         //To change body of created methods use File | Settings | File Templates.
     }
 
-    private void snappyCompress()
+    private void snappyCompressArray()
     {
-        byte[] raw = gen_.generate(defaultOptions().blockSize());
-        byte[] compressedOutput = new byte[Snappy.maxCompressedLength(raw.length)];
+        snappyCompress(MemoryManagers.heap());
+    }
+
+    private void snappyCompressDirectBuffer()
+    {
+        snappyCompress(MemoryManagers.direct());
+    }
+
+    private void snappyCompress(MemoryManager memory)
+    {
+        ByteBuffer raw = ByteBuffers.copy(gen_.generate(defaultOptions().blockSize()), memory);
+        ByteBuffer compressedOutput = memory.allocate(Snappy.instance().maxCompressedLength(raw));
 
         long produced = 0;
 
         // attempt to compress the block
         while (bytes_ < 1024 * 1048576) {  // Compress 1G
-            try {
-                int compressedSize = Snappy.compress(raw, 0, raw.length, compressedOutput, 0);
-                bytes_ += raw.length;
-                produced += compressedSize;
-            }
-            catch (IOException ignored) {
-                throw Throwables.propagate(ignored);
-            }
-
+            int compressedSize = Snappy.instance().compress(raw, compressedOutput);
+            raw.clear();
+            compressedOutput.clear();
+            bytes_ += raw.limit();
+            produced += compressedSize;
             finishedSingleOp();
         }
 
@@ -666,59 +682,35 @@ public class DbBenchmark
 
     private void snappyUncompressArray()
     {
-        int inputSize = defaultOptions().blockSize();
-        byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
-        byte raw[] = gen_.generate(inputSize);
-        int compressedLength;
-        try {
-            compressedLength = Snappy.compress(raw, 0, raw.length, compressedOutput, 0);
-        }
-        catch (IOException e) {
-            throw Throwables.propagate(e);
-        }
-        // attempt to uncompress the block
-        while (bytes_ < 5L * 1024 * 1048576) {  // Compress 1G
-            try {
-                Snappy.uncompress(compressedOutput, 0, compressedLength, raw, 0);
-                bytes_ += inputSize;
-            }
-            catch (IOException ignored) {
-                throw Throwables.propagate(ignored);
-            }
-
-            finishedSingleOp();
-        }
+        snappyUncompress(MemoryManagers.heap());
     }
 
     private void snappyUncompressDirectBuffer()
     {
-        int inputSize = defaultOptions().blockSize();
-        byte[] compressedOutput = new byte[Snappy.maxCompressedLength(inputSize)];
-        byte raw[] = gen_.generate(inputSize);
-        int compressedLength;
-        try {
-            compressedLength = Snappy.compress(raw, 0, raw.length, compressedOutput, 0);
-        }
-        catch (IOException e) {
-            throw Throwables.propagate(e);
-        }
+        snappyUncompress(MemoryManagers.direct());
+    }
 
-        ByteBuffer uncompressedBuffer = ByteBuffer.allocateDirect(inputSize);
-        ByteBuffer compressedBuffer = ByteBuffer.allocateDirect(compressedLength);
-        compressedBuffer.put(compressedOutput, 0, compressedLength);
+    private void snappyUncompress(MemoryManager memory)
+    {
+        int inputSize = defaultOptions().blockSize();
+        ByteBuffer raw = gen_.generate(inputSize);
+        ByteBuffer compressedOutput = ByteBuffer.allocate(Snappy.instance().maxCompressedLength(raw));
+        int compressedLength;
+
+        compressedLength = Snappy.instance().compress(ByteBuffers.duplicate(raw),
+                ByteBuffers.duplicate(compressedOutput));
+
+        ByteBuffer uncompressedBuffer = memory.allocate(inputSize);
+        ByteBuffer compressedBuffer = memory.allocate(compressedLength);
+        compressedBuffer.put(compressedOutput).flip();
 
         // attempt to uncompress the block
-        while (bytes_ < 5L * 1024 * 1048576) {  // Compress 1G
-            try {
-                uncompressedBuffer.clear();
-                compressedBuffer.position(0);
-                compressedBuffer.limit(compressedLength);
-                Snappy.uncompress(compressedBuffer, uncompressedBuffer);
-                bytes_ += inputSize;
-            }
-            catch (IOException ignored) {
-                throw Throwables.propagate(ignored);
-            }
+        while (bytes_ < 1L * 1024 * 1048576) {  // Compress 1G
+            uncompressedBuffer.clear();
+            compressedBuffer.position(0);
+            compressedBuffer.limit(compressedLength);
+            Snappy.instance().uncompress(compressedBuffer, uncompressedBuffer);
+            bytes_ += inputSize;
 
             finishedSingleOp();
         }
@@ -811,7 +803,7 @@ public class DbBenchmark
                 "readseq",
                 "readreverse",
                 "fill100K",
-                // "crc32c",
+ "crc32c",
                 "snappycomp",
                 "unsnap-array",
                 "unsnap-direct"
@@ -966,8 +958,7 @@ public class DbBenchmark
 
     private static class RandomGenerator
     {
-        private final Slice data;
-        private int position;
+        private final ByteBuffer data;
 
         private RandomGenerator(double compressionRatio)
         {
@@ -975,51 +966,49 @@ public class DbBenchmark
             // that it is larger than the compression window (32KB), and also
             // large enough to serve all typical value sizes we want to write.
             Random rnd = new Random(301);
-            data = Slices.allocate(1048576 + 100);
-            SliceOutput sliceOutput = data.output();
-            while (sliceOutput.size() < 1048576) {
+            data = ByteBuffer.allocate(1048576 + 100);
+            while (data.position() < 1048576) {
                 // Add a short fragment that is as compressible as specified
                 // by FLAGS_compression_ratio.
-                sliceOutput.writeBytes(compressibleString(rnd, compressionRatio, 100));
+                data.put(compressibleString(rnd, compressionRatio, 100));
             }
+            data.rewind();
         }
 
-        private byte[] generate(int length)
+        private ByteBuffer generate(int length)
         {
-            if (position + length > data.length()) {
-                position = 0;
-                assert (length < data.length());
+            return ByteBuffers.duplicateByLength(data, ThreadLocalRandom.current().nextInt(data.limit() - length),
+                    length);
+        }
+
+        private static ByteBuffer compressibleString(Random rnd, double compressionRatio, int len)
+        {
+            int raw = (int) (len * compressionRatio);
+            if (raw < 1) {
+                raw = 1;
             }
-            Slice slice = data.slice(position, length);
-            position += length;
-            return slice.getBytes();
+            ByteBuffer rawData = generateRandomSlice(rnd, raw);
+
+            // Duplicate the random data until we have filled "len" bytes
+            ByteBuffer dst = ByteBuffer.allocate(len);
+            while (dst.position() < len) {
+                rawData.rewind().limit(Math.min(rawData.limit(), dst.remaining()));
+                dst.put(rawData);
+            }
+            dst.flip();
+            return dst;
         }
+
+        private static ByteBuffer generateRandomSlice(Random random, int length)
+        {
+            ByteBuffer rawData = ByteBuffer.allocate(length);
+            while (rawData.hasRemaining()) {
+                rawData.put((byte) (' ' + random.nextInt(95)));
+            }
+            rawData.flip();
+            return rawData;
+        }
+
     }
 
-    private static Slice compressibleString(Random rnd, double compressionRatio, int len)
-    {
-        int raw = (int) (len * compressionRatio);
-        if (raw < 1) {
-            raw = 1;
-        }
-        Slice rawData = generateRandomSlice(rnd, raw);
-
-        // Duplicate the random data until we have filled "len" bytes
-        Slice dst = Slices.allocate(len);
-        SliceOutput sliceOutput = dst.output();
-        while (sliceOutput.size() < len) {
-            sliceOutput.writeBytes(rawData, 0, Math.min(rawData.length(), sliceOutput.writableBytes()));
-        }
-        return dst;
-    }
-
-    private static Slice generateRandomSlice(Random random, int length)
-    {
-        Slice rawData = Slices.allocate(length);
-        SliceOutput sliceOutput = rawData.output();
-        while (sliceOutput.isWritable()) {
-            sliceOutput.writeByte((byte) (' ' + random.nextInt(95)));
-        }
-        return rawData;
-    }
 }

@@ -336,7 +336,7 @@ public final class Snappy
         return SNAPPY != null;
     }
 
-    public static Compression instance()
+    public static SPI instance()
     {
         return SNAPPY;
     }
