@@ -17,6 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
@@ -24,7 +25,6 @@ import org.iq80.leveldb.util.GrowingBuffer;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 import static org.iq80.leveldb.impl.LogChunkType.BAD_CHUNK;
 import static org.iq80.leveldb.impl.LogChunkType.EOF;
@@ -38,7 +38,7 @@ import static org.iq80.leveldb.impl.Logs.getChunkChecksum;
 public class LogReader
         implements Closeable
 {
-    private final FileChannel fileChannel;
+    private final SequentialReadFile file;
 
     private final LogMonitor monitor;
 
@@ -86,13 +86,13 @@ public class LogReader
 
     private final MemoryManager memory;
 
-    public LogReader(FileChannel fileChannel,
+    public LogReader(SequentialReadFile file,
             LogMonitor monitor,
             boolean verifyChecksums,
             long initialOffset,
             MemoryManager memory)
     {
-        this.fileChannel = fileChannel;
+        this.file = file;
         this.monitor = monitor;
         this.verifyChecksums = verifyChecksums;
         this.initialOffset = initialOffset;
@@ -129,7 +129,7 @@ public class LogReader
         // Skip to start of first block that can contain the initial record
         if (blockStartLocation > 0) {
             try {
-                fileChannel.position(blockStartLocation);
+                file.skip(blockStartLocation);
             }
             catch (IOException e) {
                 reportDrop(blockStartLocation, e);
@@ -325,7 +325,7 @@ public class LogReader
         // read the next full block
         while (blockScratch.hasRemaining()) {
             try {
-                int bytesRead = fileChannel.read(blockScratch);
+                int bytesRead = file.read(blockScratch);
                 if (bytesRead < 0) {
                     // no more bytes to read
                     eof = true;
@@ -384,6 +384,6 @@ public class LogReader
         if (currentBlock != ByteBuffers.EMPTY_BUFFER) {
             memory.free(currentBlock);
         }
-        fileChannel.close();
+        file.close();
     }
 }

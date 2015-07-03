@@ -66,16 +66,6 @@ public class Footer
         return new Footer(metaindexBlockHandle, indexBlockHandle);
     }
 
-    private static final ByteBuffer zeros;
-    static {
-        ByteBuffer b = ByteBuffer.allocateDirect(ENCODED_LENGTH - SIZE_OF_LONG);
-        while (b.hasRemaining()) {
-            b.put((byte) 0);
-        }
-        b.flip();
-        zeros = b.asReadOnlyBuffer();
-    }
-
     public static ByteBuffer writeFooter(Footer footer, ByteBuffer buffer)
     {
         // remember the starting write index so we can calculate the padding
@@ -86,8 +76,8 @@ public class Footer
         writeBlockHandleTo(footer.getIndexBlockHandle(), buffer);
 
         // write padding
-        buffer.put(ByteBuffers.duplicateByLength(zeros, 0, ENCODED_LENGTH - SIZE_OF_LONG
-                - (buffer.position() - startingWriteIndex)));
+        buffer.put(ByteBuffers.duplicateByLength(ByteBuffers.ZERO64, 0,
+                ENCODED_LENGTH - SIZE_OF_LONG - (buffer.position() - startingWriteIndex)));
 
         // sliceOutput.writeZero();
 

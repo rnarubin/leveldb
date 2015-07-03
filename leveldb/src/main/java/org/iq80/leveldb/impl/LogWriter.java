@@ -17,13 +17,13 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.Env.MultiWriteFile;
+import org.iq80.leveldb.Env.MultiWriteFile.WriteRegion;
+import org.iq80.leveldb.LongToIntFunction;
 
 import com.google.common.base.Preconditions;
 
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,14 +31,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
 import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 
-public abstract class LogWriter
+public final class LogWriter
         implements Closeable
 {
-    private final File file;
+    private final MultiWriteFile file;
     private final long fileNumber;
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    protected LogWriter(File file, long fileNumber)
+    LogWriter(MultiWriteFile file, long fileNumber)
     {
         Preconditions.checkNotNull(file, "file is null");
         Preconditions.checkArgument(fileNumber >= 0, "fileNumber is negative");
@@ -56,18 +56,7 @@ public abstract class LogWriter
             throws IOException
     {
         closed.set(true);
-    }
-
-    public void delete()
-    {
-        Closeables.closeQuietly(this);
-        // try to delete the file
-        getFile().delete();
-    }
-
-    public File getFile()
-    {
-        return file;
+        file.close();
     }
 
     public long getFileNumber()
@@ -75,17 +64,15 @@ public abstract class LogWriter
         return fileNumber;
     }
 
-    protected abstract CloseableLogBuffer requestSpace(LongToIntFunction len)
-            throws IOException;
-
-    private void buildRecord(final ByteBuffer input)
+    public void addRecord(final ByteBuffer input, boolean sync)
             throws IOException
     {
+        Preconditions.checkState(!isClosed(), "Log is closed");
         // Fragment the record into chunks as necessary and write it.  Note that if record
         // is empty, we still want to iterate once to write a single
         // zero-length chunk.
 
-        try (CloseableLogBuffer buffer = requestSpace(new LongToIntFunction()
+        try (WriteRegion buffer = file.requestRegion(new LongToIntFunction()
         {
             @Override
             public int applyAsInt(long previousWrite)
@@ -95,17 +82,27 @@ public abstract class LogWriter
         })) {
             // used to track first, middle and last blocks
             boolean begin = true;
-            int blockOffset = (int) (buffer.lastEndPosition % BLOCK_SIZE);
+            int blockOffset = (int) (buffer.startPosition() % BLOCK_SIZE);
             do {
                 int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
                 assert (bytesRemainingInBlock >= 0);
 
                 // Switch to a new block if necessary
                 if (bytesRemainingInBlock < HEADER_SIZE) {
-                    if (bytesRemainingInBlock > 0) {
+                    if (bytesRemainingInBlock >= 4) {
                         // Fill the rest of the block with zeros
-                        // todo lame... need a better way to write zeros
-                        buffer.put(new byte[bytesRemainingInBlock]);
+                        buffer.putInt(0);
+                        bytesRemainingInBlock -= 4;
+                    }
+                    switch (bytesRemainingInBlock) {
+                        case 3:
+                            buffer.put((byte) 0);
+                        case 2:
+                            buffer.put((byte) 0);
+                        case 1:
+                            buffer.put((byte) 0);
+                        case 0: // do nothing
+                            break;
                     }
                     blockOffset = 0;
                     bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
@@ -154,10 +151,13 @@ public abstract class LogWriter
                 begin = false;
             }
             while (input.hasRemaining());
+            if (sync) {
+                buffer.sync();
+            }
         }
     }
 
-    private static int appendChunk(CloseableLogBuffer buffer, LogChunkType type, ByteBuffer data)
+    private static int appendChunk(WriteRegion buffer, LogChunkType type, ByteBuffer data)
             throws IOException
     {
         final int length = data.remaining();
@@ -175,21 +175,6 @@ public abstract class LogWriter
 
         return HEADER_SIZE + length;
     }
-
-    public final void addRecord(ByteBuffer record, boolean sync)
-            throws IOException
-    {
-        Preconditions.checkState(!isClosed(), "Log is closed");
-
-        buildRecord(record);
-
-        if (sync) {
-            sync();
-        }
-    }
-
-    protected abstract void sync()
-            throws IOException;
 
     /**
      * calculates the size of this write's data within the log file given the previous writes position,
@@ -222,28 +207,5 @@ public abstract class LogWriter
         final int newBlockWrite = dataRemaining + (headerCount * HEADER_SIZE);
 
         return newBlockWrite + firstBlockWrite;
-    }
-
-    protected abstract static class CloseableLogBuffer
-            implements Closeable
-    {
-        private final long lastEndPosition;
-
-        protected CloseableLogBuffer(long startPosition)
-        {
-            this.lastEndPosition = startPosition;
-        }
-
-        public abstract CloseableLogBuffer put(byte b)
-                throws IOException;
-
-        public abstract CloseableLogBuffer put(byte[] b)
-                throws IOException;
-
-        public abstract CloseableLogBuffer put(ByteBuffer b)
-                throws IOException;
-
-        public abstract CloseableLogBuffer putInt(int b)
-                throws IOException;
     }
 }

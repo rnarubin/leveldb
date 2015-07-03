@@ -24,9 +24,11 @@ import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
+import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ReferenceCounted;
@@ -34,27 +36,20 @@ import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public abstract class Table
+public final class Table
         extends ReferenceCounted<Table>
         implements SeekingIterable<InternalKey, ByteBuffer>, AutoCloseable
 {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
-    protected final String name;
-    protected final FileChannel fileChannel;
-    protected final Comparator<InternalKey> comparator;
-    protected final boolean verifyChecksums;
-    protected final Block<InternalKey> indexBlock;
-    protected final BlockHandle metaindexBlockHandle;
-    protected final MemoryManager memory;
-    private final Compression compression;
-    protected static final Decoder<InternalKey> INTERNAL_KEY_DECODER = new Decoder<InternalKey>()
+    private static final Decoder<InternalKey> INTERNAL_KEY_DECODER = new Decoder<InternalKey>()
     {
         @Override
         public InternalKey decode(ByteBuffer b)
@@ -62,31 +57,48 @@ public abstract class Table
             return new EncodedInternalKey(b);
         }
     };
+    private final String name;
+    private final RandomReadFile file;
+    private final Comparator<InternalKey> comparator;
+    private final Block<InternalKey> indexBlock;
+    private final BlockHandle metaindexBlockHandle;
+    private final MemoryManager memory;
+    private final Compression compression;
+    private final boolean verifyChecksums;
 
-    public Table(String name, FileChannel fileChannel, Comparator<InternalKey> comparator, Options options)
+    public Table(String name, RandomReadFile file, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");
-        Preconditions.checkNotNull(fileChannel, "fileChannel is null");
-        long size = fileChannel.size();
+        Preconditions.checkNotNull(file, "fileChannel is null");
+        long size = file.size();
         Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH, "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
+        this.verifyChecksums = options.verifyChecksums();
         this.memory = options.memoryManager();
         this.compression = options.compression();
 
         this.name = name;
-        this.fileChannel = fileChannel;
-        this.verifyChecksums = options.verifyChecksums();
+        this.file = file;
         this.comparator = comparator;
 
-        Footer footer = init();
+        Footer footer;
+        {
+            ByteBuffer footerBuf = null;
+            try {
+                footerBuf = file.read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
+                footer = Footer.readFooter(footerBuf);
+            }
+            finally {
+                if (footerBuf != null) {
+                    file.deallocator().free(footerBuf);
+                }
+            }
+        }
         this.indexBlock = readBlock(footer.getIndexBlockHandle());
         this.metaindexBlockHandle = footer.getMetaindexBlockHandle();
     }
-
-    protected abstract Footer init()
-            throws IOException;
 
     @Override
     public TableIterator iterator()
@@ -107,7 +119,58 @@ public abstract class Table
         return dataBlock;
     }
 
-    protected ByteBuffer uncompressIfNecessary(ByteBuffer compressedData, byte compressionId)
+    private static ByteBuffer uncompress(Compression compression, ByteBuffer compressedData, MemoryManager memory)
+    {
+        ByteBuffer dst = memory.allocate(compression.maxUncompressedLength(compressedData));
+        final int oldpos = dst.position();
+        final int length = compression.uncompress(compressedData, dst);
+        dst.limit(oldpos + length).position(oldpos);
+        return dst;
+    }
+
+    private Block<InternalKey> readBlock(BlockHandle blockHandle)
+            throws IOException
+    {
+        // read block trailer
+        ByteBuffer readBuffer = file.read(blockHandle.getOffset(), blockHandle.getDataSize()
+                + BlockTrailer.ENCODED_LENGTH);
+
+        Preconditions.checkState(readBuffer != null, "block handle offset greater than file size (%s, %d)",
+                blockHandle.toString(), file.size());
+        Preconditions.checkState(readBuffer.remaining() == blockHandle.getDataSize() + BlockTrailer.ENCODED_LENGTH,
+                "read buffer incorrect size (%d, %d)", readBuffer.remaining(), blockHandle.getDataSize()
+                        + BlockTrailer.ENCODED_LENGTH);
+
+        final int dataStart = readBuffer.position();
+        readBuffer.position(readBuffer.limit() - BlockTrailer.ENCODED_LENGTH);
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(readBuffer);
+        readBuffer.limit(readBuffer.limit() - BlockTrailer.ENCODED_LENGTH).position(dataStart);
+
+        // only verify check sums if explicitly asked by the user
+        if (verifyChecksums) {
+            // checksum data and the compression type in the trailer
+            ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            checksum.update(readBuffer, dataStart, blockHandle.getDataSize() + 1);
+            int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
+
+            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
+        }
+
+        ByteBuffer blockData = uncompressIfNecessary(readBuffer, blockTrailer.getCompressionId());
+        boolean didUncompress = blockData != readBuffer;
+        Closeable cleaner;
+        if (didUncompress) {
+            file.deallocator().free(readBuffer);
+            cleaner = ByteBuffers.freer(blockData, memory);
+        }
+        else {
+            cleaner = ByteBuffers.freer(readBuffer, file.deallocator());
+        }
+
+        return new Block<InternalKey>(blockData, comparator, memory, INTERNAL_KEY_DECODER, cleaner);
+    }
+
+    private ByteBuffer uncompressIfNecessary(ByteBuffer compressedData, byte compressionId)
     {
         if (compressionId == 0) {
             // not compressed
@@ -125,18 +188,6 @@ public abstract class Table
             throw new DBException("Unknown compression identifier: " + compressionId);
         }
     }
-
-    private static ByteBuffer uncompress(Compression compression, ByteBuffer compressedData, MemoryManager memory)
-    {
-        ByteBuffer dst = memory.allocate(compression.maxUncompressedLength(compressedData));
-        final int oldpos = dst.position();
-        final int length = compression.uncompress(compressedData, dst);
-        dst.limit(oldpos + length).position(oldpos);
-        return dst;
-    }
-
-    protected abstract Block<InternalKey> readBlock(BlockHandle blockHandle)
-            throws IOException;
 
     /**
      * Given a key, return an approximate byte offset in the file where
@@ -193,7 +244,7 @@ public abstract class Table
 
     public Callable<?> closer()
     {
-        return new Closer(getReferenceCount(), fileChannel, indexBlock);
+        return new Closer(getReferenceCount(), file, indexBlock);
     }
 
     private static class Closer

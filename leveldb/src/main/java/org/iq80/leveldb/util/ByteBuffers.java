@@ -16,6 +16,7 @@ import sun.nio.ch.DirectBuffer;
 import sun.nio.ch.FileChannelImpl;
 import sun.misc.Unsafe;
 
+import org.iq80.leveldb.Deallocator;
 import org.iq80.leveldb.MemoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -584,6 +585,16 @@ public final class ByteBuffers
 
     public static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0).order(ByteOrder.LITTLE_ENDIAN);
 
+    public static final ByteBuffer ZERO64;
+    static {
+        ByteBuffer b = ByteBuffer.allocateDirect(64);
+        while (b.hasRemaining()) {
+            b.put((byte) 0);
+        }
+        b.flip();
+        ZERO64 = b.asReadOnlyBuffer();
+    }
+
     private static final boolean directBufferSupport;
     static {
         boolean success = false;
@@ -829,7 +840,7 @@ public final class ByteBuffers
         return ((rot >>> 17) | (rot << 15));
     }
 
-    public static Closeable freer(ByteBuffer b, MemoryManager m)
+    public static Closeable freer(ByteBuffer b, Deallocator m)
     {
         return new MemoryFreer(b, m);
     }
@@ -838,9 +849,9 @@ public final class ByteBuffers
             implements Closeable
     {
         private final ByteBuffer buffer;
-        private final MemoryManager memory;
+        private final Deallocator memory;
 
-        public MemoryFreer(ByteBuffer buffer, MemoryManager memory)
+        public MemoryFreer(ByteBuffer buffer, Deallocator memory)
         {
             this.buffer = buffer;
             this.memory = memory;

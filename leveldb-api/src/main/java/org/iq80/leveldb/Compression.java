@@ -23,8 +23,8 @@ import java.nio.ByteBuffer;
 public interface Compression
 {
     /**
-     * Compress the content of the {@code src} buffer, writing the compressed output to the {@code dst} buffer
-     * starting at {@code dst.position()}
+     * Compress the content of the {@code src} buffer, writing the compressed
+     * output to the {@code dst} buffer starting at {@code dst.position()}
      * 
      * @param src
      *            Buffer containing uncompressed data
@@ -35,8 +35,9 @@ public interface Compression
     int compress(ByteBuffer src, ByteBuffer dst);
 
     /**
-     * Uncompress the content of the {@code src} buffer, writing the uncompressed output to the {@code dst} buffer
-     * starting at {@code dst.position()}
+     * Uncompress the content of the {@code src} buffer, writing the
+     * uncompressed output to the {@code dst} buffer starting at
+     * {@code dst.position()}
      * 
      * @param src
      *            Buffer containing compressed data
@@ -49,27 +50,34 @@ public interface Compression
     /**
      * @param compressed
      *            buffer of compressed data
-     * @return maximum size of a buffer yielded from decompressing the given buffer, in bytes. the buffer's fields should be unchanged
+     * @return maximum size of a buffer yielded from decompressing the given
+     *         buffer, in bytes. the buffer's fields should be unchanged
      */
     int maxUncompressedLength(ByteBuffer compressed);
 
     /**
      * @param compressed
      *            buffer of uncompressed data
-     * @return maximum size of a buffer yielded from compressing the given buffer, in bytes. the buffer's fields should be unchanged
+     * @return maximum size of a buffer yielded from compressing the given
+     *         buffer, in bytes. the buffer's fields should be unchanged
      */
     int maxCompressedLength(ByteBuffer uncompressed);
 
     /**
-     * Byte value to be stored with serialized data, used to identify the compression implementation for decompression
+     * Byte value to be stored with serialized data, used to identify the
+     * compression implementation for decompression
      * 
      * <p/>
      * NOTE: <br>
-     * value {@code 0} may not be used; it is reserved for non-compressed data. <br>
-     * value {@code 1} is used by Snappy, enabled by default. User-specified compression may use the value {@code 1}
-     * if Snappy compression was never enabled, or if the specified compression is a compatible Snappy decompressor
+     * value {@code 0} may not be used; it is reserved for non-compressed data.
+     * <br>
+     * value {@code 1} is used by Snappy, enabled by default. User-specified
+     * compression may use the value {@code 1} if Snappy compression was never
+     * enabled, or if the specified compression is a compatible Snappy
+     * decompressor
      * 
-     * @return Unique compression identifier between {@code 0x00} and {@code 0xFF}
+     * @return Unique compression identifier between {@code 0x00} and
+     *         {@code 0xFF}
      */
     byte persistentId();
 }

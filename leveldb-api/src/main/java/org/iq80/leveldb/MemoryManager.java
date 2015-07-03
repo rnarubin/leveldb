@@ -3,6 +3,7 @@ package org.iq80.leveldb;
 import java.nio.ByteBuffer;
 
 public interface MemoryManager
+        extends Deallocator
 {
     /**
      * Return a {@link ByteBuffer} with at least {@code size} remaining space.
@@ -12,6 +13,4 @@ public interface MemoryManager
      * from a different thread than the one which called {@code allocate}
      */
     ByteBuffer allocate(int size);
-
-    void free(ByteBuffer buffer);
 }

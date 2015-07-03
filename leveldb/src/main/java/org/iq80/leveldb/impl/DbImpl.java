@@ -25,6 +25,9 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialReadFile;
+import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
@@ -46,13 +49,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -213,8 +212,7 @@ public class DbImpl
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.logFileName(logFileNumber)),
-                    logFileNumber, options);
+            LogWriter log = Logs.createLogWriter(Filename.logFileName(logFileNumber), logFileNumber, options);
             MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
                     options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
@@ -540,12 +538,10 @@ public class DbImpl
             throws IOException
     {
         Preconditions.checkState(mutex.isHeldByCurrentThread());
-        File file = new File(databaseDir, Filename.logFileName(fileNumber));
 
         LogMonitor logMonitor = LogMonitors.logMonitor();
-        try (FileInputStream fileInput = new FileInputStream(file);
-                LogReader logReader = new LogReader(fileInput.getChannel(), logMonitor, true, 0,
-                        options.memoryManager())) {
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(Filename.logFileName(fileNumber));
+                LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, options.memoryManager())) {
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
 
@@ -970,8 +966,7 @@ public class DbImpl
                 try {
                     this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
                             userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
-                            new File(databaseDir, Filename.logFileName(logNumber)), logNumber, options)),
-                            current);
+                            Filename.logFileName(logNumber), logNumber, options)), current);
                 }
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
@@ -1083,14 +1078,14 @@ public class DbImpl
     private FileMetaData buildTable(Iterable<Entry<InternalKey, ByteBuffer>> data, long fileNumber)
             throws IOException
     {
-        File file = new File(databaseDir, Filename.tableFileName(fileNumber));
+        Env env = options.env();
+        String fileName = Filename.tableFileName(fileNumber);
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
-
-            try (FileOutputStream fileOutput = new FileOutputStream(file);
-                    FileChannel channel = fileOutput.getChannel()) {
-                try (TableBuilder tableBuilder = new TableBuilder(options, channel, internalKeyComparator)) {
+            FileMetaData fileMetaData = null;
+            try (SequentialWriteFile file = env.openSequentialWriteFile(fileName)) {
+                try (TableBuilder tableBuilder = new TableBuilder(options, file, internalKeyComparator)) {
                     for (Entry<InternalKey, ByteBuffer> entry : data) {
                         // update keys
                         InternalKey key = entry.getKey();
@@ -1105,15 +1100,14 @@ public class DbImpl
                     tableBuilder.finish();
                 }
                 finally {
-                   channel.force(true);
+                    file.sync();
                 }
-            }
 
-            if (smallest == null) {
-                return null;
+                if (smallest == null) {
+                    return null;
+                }
+                fileMetaData = new FileMetaData(fileNumber, file.size(), smallest.heapCopy(), largest.heapCopy());
             }
-            FileMetaData fileMetaData = new FileMetaData(fileNumber, file.length(), smallest.heapCopy(),
-                    largest.heapCopy());
 
             // verify table can be opened
             tableCache.newIterator(fileMetaData).close();
@@ -1123,7 +1117,9 @@ public class DbImpl
             return fileMetaData;
         }
         catch (IOException e) {
-            file.delete();
+            if (env.fileExists(fileName)) {
+                env.deleteFile(fileName);
+            }
             throw e;
         }
     }
@@ -1238,9 +1234,8 @@ public class DbImpl
         installCompactionResults(compactionState);
     }
 
-    @SuppressWarnings("resource")
     private void openCompactionOutputFile(CompactionState compactionState)
-            throws FileNotFoundException
+            throws IOException
     {
         Preconditions.checkNotNull(compactionState, "compactionState is null");
         Preconditions.checkArgument(compactionState.builder == null, "compactionState builder is not null");
@@ -1254,8 +1249,7 @@ public class DbImpl
             compactionState.currentSmallest = null;
             compactionState.currentLargest = null;
 
-            File file = new File(databaseDir, Filename.tableFileName(fileNumber));
-            compactionState.outfile = new FileOutputStream(file).getChannel();
+            compactionState.outfile = options.env().openSequentialWriteFile(Filename.tableFileName(fileNumber));
             compactionState.builder = new TableBuilder(options, compactionState.outfile, internalKeyComparator);
         }
         finally {
@@ -1289,7 +1283,7 @@ public class DbImpl
         compactionState.builder.close();
         compactionState.builder = null;
 
-        compactionState.outfile.force(true);
+        compactionState.outfile.sync();
         compactionState.outfile.close();
         compactionState.outfile = null;
 
@@ -1373,7 +1367,7 @@ public class DbImpl
         private long smallestSnapshot;
 
         // State kept for output being generated
-        private FileChannel outfile;
+        private SequentialWriteFile outfile;
         private TableBuilder builder;
 
         // Current file being generated

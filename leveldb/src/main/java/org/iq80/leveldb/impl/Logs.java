@@ -21,7 +21,6 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -31,17 +30,10 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(File file, long fileNumber, Options options)
+    public static LogWriter createLogWriter(String fileName, long fileNumber, Options options)
             throws IOException
     {
-        switch (options.ioImplemenation()) {
-            case MMAP:
-                return new MMapLogWriter(file, fileNumber);
-            case FILE:
-                return new FileChannelLogWriter(file, fileNumber);
-            default:
-                throw new IllegalArgumentException("Unknown log file implementation:" + options.ioImplemenation());
-        }
+        return new LogWriter(options.env().openMultiWriteFile(fileName), fileNumber);
     }
 
     public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)

@@ -18,9 +18,9 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 
 import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 import static org.iq80.leveldb.impl.VersionSet.TARGET_FILE_SIZE;
 
@@ -53,7 +52,7 @@ public class TableBuilder
     private final int blockSize;
     private final Compression compression;
 
-    private final FileChannel fileChannel;
+    private final SequentialWriteFile file;
     private final BlockBuilder dataBlockBuilder;
     private final BlockBuilder indexBlockBuilder;
     private InternalKey lastKey;
@@ -78,19 +77,13 @@ public class TableBuilder
 
     private final MemoryManager memory;
 
-    public TableBuilder(Options options, FileChannel fileChannel, InternalKeyComparator internalKeyComparator)
+    public TableBuilder(Options options, SequentialWriteFile file, InternalKeyComparator internalKeyComparator)
     {
         Preconditions.checkNotNull(options, "options is null");
-        Preconditions.checkNotNull(fileChannel, "fileChannel is null");
-        try {
-            Preconditions.checkState(position == fileChannel.position(), "Expected position %s to equal fileChannel.position %s", position, fileChannel.position());
-        }
-        catch (IOException e) {
-            throw Throwables.propagate(e);
-        }
+        Preconditions.checkNotNull(file, "file is null");
 
         this.memory = options.memoryManager();
-        this.fileChannel = fileChannel;
+        this.file = file;
         this.internalKeyComparator = internalKeyComparator;
 
         blockRestartInterval = options.blockRestartInterval();
@@ -212,7 +205,7 @@ public class TableBuilder
 
         // write data and trailer
         try {
-            position += fileChannel.write(blockContents);
+            position += file.write(blockContents);
         }
         finally {
             if (blockContents != raw) {
@@ -264,12 +257,11 @@ public class TableBuilder
         footerEncoding.mark();
         Footer.writeFooter(footer, footerEncoding).reset();
         try {
-            position += fileChannel.write(footerEncoding);
+            position += file.write(footerEncoding);
         }
         finally {
             memory.free(footerEncoding);
         }
-
     }
 
     public void abandon()

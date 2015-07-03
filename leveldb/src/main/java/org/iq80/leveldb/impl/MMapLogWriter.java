@@ -18,8 +18,8 @@
 
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.LongToIntFunction;
 import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.LongToIntFunction;
 import org.iq80.leveldb.util.SizeOf;
 
 import java.io.File;
@@ -168,13 +168,6 @@ public class MMapLogWriter
             }
 
             @Override
-            public CloseableLogBuffer put(byte[] b)
-            {
-                slice.put(b);
-                return this;
-            }
-
-            @Override
             public CloseableLogBuffer put(ByteBuffer b)
             {
                 slice.put(b);
@@ -261,18 +254,6 @@ public class MMapLogWriter
                 if (SizeOf.SIZE_OF_BYTE > currentSlice.remaining()) {
                     currentSlice = mapNext();
                 }
-                currentSlice.put(b);
-                return this;
-            }
-
-            @Override
-            public CloseableLogBuffer put(byte[] b)
-                    throws IOException
-            {
-                if (b.length > currentSlice.remaining()) {
-                    return put(ByteBuffer.wrap(b));
-                }
-
                 currentSlice.put(b);
                 return this;
             }

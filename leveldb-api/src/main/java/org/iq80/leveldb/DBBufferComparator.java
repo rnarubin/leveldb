@@ -21,17 +21,20 @@ package org.iq80.leveldb;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 
-public interface DBBufferComparator extends Comparator<ByteBuffer>
+public interface DBBufferComparator
+        extends Comparator<ByteBuffer>
 {
     /**
      * The name of the comparator. Used to check for comparator mismatches
-     * (i.e., a DB created with one comparator is accessed using a different comparator)
+     * (i.e., a DB created with one comparator is accessed using a different
+     * comparator)
      */
     String name();
 
     /**
-     * If <code>start < limit</code>, mutate {@code start} to be a short key in [start,limit).
-     * Simple comparator implementations may leave {@code start} unchanged.
+     * If <code>start < limit</code>, mutate {@code start} to be a short key in
+     * [start,limit). Simple comparator implementations may leave {@code start}
+     * unchanged.
      * 
      * @return true iff start was mutated
      */
@@ -45,5 +48,3 @@ public interface DBBufferComparator extends Comparator<ByteBuffer>
      */
     boolean findShortSuccessor(ByteBuffer key);
 }
-
-

@@ -16,13 +16,11 @@
  * limitations under the License.
  */
 
-package org.iq80.leveldb.util;
+package org.iq80.leveldb;
 
-/**
- * @see <a
- * href="https://docs.oracle.com/javase/8/docs/api/java/util/function/LongToIntFunction.html">LongToIntFunction</a>
- */
-public interface LongToIntFunction
+import java.nio.ByteBuffer;
+
+public interface Deallocator
 {
-    public int applyAsInt(long operand);
+    void free(ByteBuffer buffer);
 }

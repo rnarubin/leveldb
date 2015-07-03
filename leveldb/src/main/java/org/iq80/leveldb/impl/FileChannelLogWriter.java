@@ -17,7 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.LongToIntFunction;
+import org.iq80.leveldb.LongToIntFunction;
 import org.iq80.leveldb.util.SizeOf;
 
 import java.io.File;
@@ -122,20 +122,6 @@ public class FileChannelLogWriter
                 write(buffer);
                 buffer.clear();
             }
-        }
-
-        @Override
-        public CloseableLogBuffer put(byte[] b)
-                throws IOException
-        {
-            checkCapacity(b.length);
-            if (b.length > buffer.remaining()) {
-                write(ByteBuffer.wrap(b));
-            }
-            else {
-                buffer.put(b);
-            }
-            return this;
         }
 
         @Override
