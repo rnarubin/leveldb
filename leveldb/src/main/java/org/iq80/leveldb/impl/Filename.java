@@ -19,12 +19,13 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.List;
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
+
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialWriteFile;
 
 public final class Filename
 {
@@ -46,31 +47,31 @@ public final class Filename
     /**
      * Return the name of the log file with the specified number.
      */
-    public static String logFileName(long number)
+    public static Path logFileName(Path dbpath, long number)
     {
-        return makeFileName(number, "log");
+        return makeFileName(dbpath, number, "log");
     }
 
     /**
      * Return the name of the sstable with the specified number.
      */
-    public static String tableFileName(long number)
+    public static Path tableFileName(Path dbpath, long number)
     {
-        return makeFileName(number, "ldb");
+        return makeFileName(dbpath, number, "ldb");
     }
 
     /**
      * Return the deprecated name of the sstable with the specified number.
      */
-    public static String sstTableFileName(long number)
+    public static Path sstTableFileName(Path dbpath, long number)
     {
-        return makeFileName(number, "sst");
+        return makeFileName(dbpath, number, "sst");
     }
 
     /**
      * Return the name of the descriptor file with the specified incarnation number.
      */
-    public static String descriptorFileName(long number)
+    public static String descriptorStringName(long number)
     {
         Preconditions.checkArgument(number >= 0, "number is negative");
         return String.format("MANIFEST-%06d", number);
@@ -79,25 +80,25 @@ public final class Filename
     /**
      * Return the name of the current file.
      */
-    public static String currentFileName()
+    public static Path currentFileName(Path dbpath)
     {
-        return "CURRENT";
+        return dbpath.resolve("CURRENT");
     }
 
     /**
      * Return the name of the lock file.
      */
-    public static String lockFileName()
+    public static Path lockFileName(Path dbpath)
     {
-        return "LOCK";
+        return dbpath.resolve("LOCK");
     }
 
     /**
      * Return the name of a temporary file with the specified number.
      */
-    public static String tempFileName(long number)
+    public static Path tempFileName(Path dbpath, long number)
     {
-        return makeFileName(number, "dbtmp");
+        return makeFileName(dbpath, number, "dbtmp");
     }
 
     /**
@@ -121,7 +122,7 @@ public final class Filename
      * The number encoded in the filename is stored in *number.  If the
      * filename was successfully parsed, returns true.  Else return false.
      */
-    public static FileInfo parseFileName(File file)
+    public static FileInfo parseFileName(Path path)
     {
         // Owned filenames have the form:
         //    dbname/CURRENT
@@ -130,17 +131,14 @@ public final class Filename
         //    dbname/LOG.old
         //    dbname/MANIFEST-[0-9]+
         //    dbname/[0-9]+.(log|sst|dbtmp)
-        String fileName = file.getName();
+        String fileName = path.getFileName().toString();
         if ("CURRENT".equals(fileName)) {
             return new FileInfo(FileType.CURRENT);
         }
         else if ("LOCK".equals(fileName)) {
             return new FileInfo(FileType.DB_LOCK);
         }
-        else if ("LOG".equals(fileName)) {
-            return new FileInfo(FileType.INFO_LOG);
-        }
-        else if ("LOG.old".equals(fileName)) {
+        else if ("LOG".equals(fileName) || "LOG.old".equals(fileName)) {
             return new FileInfo(FileType.INFO_LOG);
         }
         else if (fileName.startsWith("MANIFEST-")) {
@@ -151,8 +149,8 @@ public final class Filename
             long fileNumber = Long.parseLong(removeSuffix(fileName, ".log"));
             return new FileInfo(FileType.LOG, fileNumber);
         }
-        else if (fileName.endsWith(".sst")) {
-            long fileNumber = Long.parseLong(removeSuffix(fileName, ".sst"));
+        else if (fileName.endsWith(".ldb") || fileName.endsWith(".sst")) {
+            long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
             return new FileInfo(FileType.TABLE, fileNumber);
         }
         else if (fileName.endsWith(".dbtmp")) {
@@ -168,52 +166,37 @@ public final class Filename
      *
      * @return true if successful; false otherwise
      */
-    public static boolean setCurrentFile(File databaseDir, long descriptorNumber)
+    public static void setCurrentFile(Env env, Path dbpath, long descriptorNumber)
             throws IOException
     {
-        String manifest = descriptorFileName(descriptorNumber);
-        String temp = tempFileName(descriptorNumber);
+        String manifest = descriptorStringName(descriptorNumber);
+        Path temp = tempFileName(dbpath, descriptorNumber);
 
-        File tempFile = new File(databaseDir, temp);
-        writeStringToFileSync(manifest + "\n", tempFile);
+        writeStringToFileSync(env, manifest, temp);
 
-        File to = new File(databaseDir, currentFileName());
-        boolean ok = tempFile.renameTo(to);
-        if (!ok) {
-            tempFile.delete();
-            writeStringToFileSync(manifest + "\n", to);
-        }
-        return ok;
-    }
-
-    private static void writeStringToFileSync(String str, File file)
-            throws IOException
-    {
-        FileOutputStream stream = new FileOutputStream(file);
         try {
-            stream.write(str.getBytes(Charsets.UTF_8));
-            stream.flush();
-            stream.getFD().sync();
+            env.rename(temp, currentFileName(dbpath));
         }
-        finally {
-            stream.close();
+        catch (IOException e) {
+            env.deleteFile(temp);
+            throw e;
         }
     }
 
-    public static List<File> listFiles(File dir)
+    private static void writeStringToFileSync(Env env, String str, Path path)
+            throws IOException
     {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return ImmutableList.of();
+        try (SequentialWriteFile file = env.openSequentialWriteFile(path)) {
+            file.write(ByteBuffer.wrap(str.getBytes(Charsets.UTF_8)));
+            file.sync();
         }
-        return ImmutableList.copyOf(files);
     }
 
-    private static String makeFileName(long number, String suffix)
+    private static Path makeFileName(Path dbpath, long number, String suffix)
     {
         Preconditions.checkArgument(number >= 0, "number is negative");
         Preconditions.checkNotNull(suffix, "suffix is null");
-        return String.format("%06d.%s", number, suffix);
+        return dbpath.resolve(String.format("%06d.%s", number, suffix));
     }
 
     private static String removePrefix(String value, String prefix)
@@ -224,6 +207,11 @@ public final class Filename
     private static String removeSuffix(String value, String suffix)
     {
         return value.substring(0, value.length() - suffix.length());
+    }
+
+    private static String removeSuffix(String value, int suffixLength)
+    {
+        return value.substring(0, value.length() - suffixLength);
     }
 
     public static class FileInfo

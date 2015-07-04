@@ -28,6 +28,7 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.InternalIterator;
@@ -36,7 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -110,9 +110,8 @@ public class VersionSet
             edit.setLastSequenceNumber(lastSequence.get());
 
             long fileNum;
-            try (LogWriter log = Logs.createLogWriter(
-                    new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
-                    GrowingBuffer record = edit.encode(options.memoryManager())) {
+            try (LogWriter log = Logs.createLogWriter(Filename.descriptorFileName(manifestFileNumber),
+                    manifestFileNumber, options); GrowingBuffer record = edit.encode(options.memoryManager())) {
                 fileNum = log.getFileNumber();
                 writeSnapshot(log);
                 log.addRecord(record.get(), true);
@@ -284,12 +283,13 @@ public class VersionSet
         finalizeVersion(version);
 
         boolean createdNewManifest = false;
+        String manifestFileName = Filename.descriptorFileName(manifestFileNumber);
         try {
             // Initialize new descriptor log file if necessary by creating
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
+                descriptorLog = Logs.createLogWriter(manifestFileName, manifestFileNumber, options);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
@@ -309,7 +309,7 @@ public class VersionSet
             // New manifest file was not installed, so clean up state and delete the file
             if (createdNewManifest) {
                 descriptorLog.close();
-                descriptorLog.delete();
+                options.env().deleteFile(manifestFileName);
                 descriptorLog = null;
             }
             throw e;
@@ -354,10 +354,9 @@ public class VersionSet
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        try (FileInputStream fileInput = new FileInputStream(new File(databaseDir, currentName));
-                LogReader reader = new LogReader(fileInput.getChannel(), throwExceptionMonitor(), true, 0,
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(currentName);
+                LogReader reader = new LogReader(fileInput, throwExceptionMonitor(), true, 0,
                         options.memoryManager())) {
-
             // read log edit log
             Long nextFileNumber = null;
             Long lastSequence = null;

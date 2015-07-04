@@ -52,6 +52,9 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -92,7 +95,7 @@ public class DbImpl
 
     private final Options options;
     private final UserOptions userOptions;
-    private final File databaseDir;
+    private final Path databaseDir;
     private final TableCache tableCache;
     private final DbLock dbLock;
     private final VersionSet versions;
@@ -126,10 +129,17 @@ public class DbImpl
     public DbImpl(Options userOptions, File databaseDir)
             throws IOException
     {
+        this(userOptions, databaseDir.toPath());
+    }
+
+    public DbImpl(Options userOptions, Path databaseDir)
+            throws IOException
+    {
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.userOptions = new UserOptions(userOptions);
         this.options = sanitizeOptions(userOptions);
+        Env env = this.options.env();
 
         this.databaseDir = databaseDir;
 
@@ -155,7 +165,7 @@ public class DbImpl
         // create the version set
 
         // create the database dir if it does not already exist
-        databaseDir.mkdirs();
+        env.createDir(databaseDir);
         Preconditions.checkArgument(databaseDir.exists(), "Database directory '%s' does not exist and could not be created", databaseDir);
         Preconditions.checkArgument(databaseDir.isDirectory(), "Database directory '%s' is not a directory", databaseDir);
 
@@ -327,6 +337,7 @@ public class DbImpl
     }
 
     private void deleteObsoleteFiles()
+            throws IOException
     {
         // Make a set of all of the live files
         List<Long> live = newArrayList(this.pendingOutputs);
@@ -334,45 +345,52 @@ public class DbImpl
             live.add(fileMetaData.getNumber());
         }
 
-        for (File file : Filename.listFiles(databaseDir)) {
-            FileInfo fileInfo = Filename.parseFileName(file);
-            if (fileInfo == null) {
-                continue;
-            }
-            long number = fileInfo.getFileNumber();
-            boolean keep = true;
-            switch (fileInfo.getFileType()) {
-                case LOG:
-                    keep = ((number >= versions.getLogNumber()) ||
-                            (number == versions.getPrevLogNumber()));
-                    break;
-                case DESCRIPTOR:
-                    // Keep my manifest file, and any newer incarnations'
-                    // (in case there is a race that allows other incarnations)
-                    keep = (number >= versions.getManifestFileNumber());
-                    break;
-                case TABLE:
-                    keep = live.contains(number);
-                    break;
-                case TEMP:
-                    // Any temp files that are currently being written to must
-                    // be recorded in pending_outputs_, which is inserted into "live"
-                    keep = live.contains(number);
-                    break;
-                case CURRENT:
-                case DB_LOCK:
-                case INFO_LOG:
-                    keep = true;
-                    break;
-            }
-
-            if (!keep) {
-                if (fileInfo.getFileType() == FileType.TABLE) {
-                    tableCache.evict(number);
+        try (DirectoryStream<? extends Path> files = options.env().getChildren(databaseDir)) {
+            for (Path path : files) {
+                FileInfo fileInfo = Filename.parseFileName(path);
+                if (fileInfo == null) {
+                    continue;
                 }
-                LOGGER.debug("{} delete type={} #{}", this, fileInfo.getFileType(), number);
-                file.delete();
+                long number = fileInfo.getFileNumber();
+                boolean keep = true;
+                switch (fileInfo.getFileType()) {
+                    case LOG:
+                        keep = ((number >= versions.getLogNumber()) || (number == versions.getPrevLogNumber()));
+                        break;
+                    case DESCRIPTOR:
+                        // Keep my manifest file, and any newer incarnations'
+                        // (in case there is a race that allows other
+                        // incarnations)
+                        keep = (number >= versions.getManifestFileNumber());
+                        break;
+                    case TABLE:
+                        keep = live.contains(number);
+                        break;
+                    case TEMP:
+                        // Any temp files that are currently being written to
+                        // must
+                        // be recorded in pending_outputs_, which is inserted
+                        // into "live"
+                        keep = live.contains(number);
+                        break;
+                    case CURRENT:
+                    case DB_LOCK:
+                    case INFO_LOG:
+                        keep = true;
+                        break;
+                }
+
+                if (!keep) {
+                    if (fileInfo.getFileType() == FileType.TABLE) {
+                        tableCache.evict(number);
+                    }
+                    LOGGER.debug("{} delete type={} #{}", this, fileInfo.getFileType(), number);
+                    options.env().deleteFile(path);
+                }
             }
+        }
+        catch (DirectoryIteratorException e) {
+            throw e.getCause();
         }
     }
 

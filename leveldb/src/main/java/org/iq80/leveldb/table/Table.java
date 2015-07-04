@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,7 +58,7 @@ public final class Table
             return new EncodedInternalKey(b);
         }
     };
-    private final String name;
+    private final Path name;
     private final RandomReadFile file;
     private final Comparator<InternalKey> comparator;
     private final Block<InternalKey> indexBlock;
@@ -66,7 +67,7 @@ public final class Table
     private final Compression compression;
     private final boolean verifyChecksums;
 
-    public Table(String name, RandomReadFile file, Comparator<InternalKey> comparator, Options options)
+    public Table(Path name, RandomReadFile file, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
         Preconditions.checkNotNull(name, "name is null");

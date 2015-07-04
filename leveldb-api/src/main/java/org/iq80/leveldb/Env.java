@@ -25,6 +25,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channel;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Path;
 
 /**
  * An Env is an interface used by the leveldb implementation to access operating
@@ -34,63 +36,81 @@ import java.nio.channels.WritableByteChannel;
  */
 public interface Env
 {
-
     /**
-     * Creates and opens a new {@link MultiWriteFile} with the given name. If a
-     * file already exists with this name, the existing file is first deleted.
-     * 
-     * @param name
-     *            a plain string name identifying the file
+     * Creates and opens a new {@link MultiWriteFile} with the given path. If a
+     * file already exists with this path, the existing file is first deleted.
      */
-    MultiWriteFile openMultiWriteFile(String name)
+    MultiWriteFile openMultiWriteFile(Path path)
             throws IOException;
 
     /**
-     * Creates and opens a new {@link SequentialWriteFile} with the given name.
-     * If a file already exists with this name, the existing file is first
+     * Creates and opens a new {@link SequentialWriteFile} with the given path.
+     * If a file already exists with this path, the existing file is first
      * deleted.
-     * 
-     * @param name
-     *            a plain string name identifying the file
      */
-    SequentialWriteFile openSequentialWriteFile(String name)
+    SequentialWriteFile openSequentialWriteFile(Path path)
             throws IOException;
 
     /**
-     * Opens an existing {@link SequentialReadFile} with the given name.
-     * 
-     * @param name
-     *            a plain string name identifying the file
-     * @throws FileNotFoundException
-     *             if a file with this name does not exist
-     */
-    SequentialReadFile openSequentialReadFile(String name)
-            throws IOException;
-
-    /**
-     * Opens an existing {@link RandomReadFile} with the given name.
-     * 
-     * @param name
-     *            a plain string name identifying the file
-     * @throws FileNotFoundException
-     *             if a file with this name does not exist
-     */
-    RandomReadFile openRandomReadFile(String name)
-            throws IOException;
-
-    /**
-     * Deletes the file with the given name
+     * Opens an existing {@link SequentialReadFile} with the given path.
      * 
      * @throws FileNotFoundException
-     *             if a file with this name does not exist
+     *             if a file with this path does not exist
      */
-    void deleteFile(String name)
+    SequentialReadFile openSequentialReadFile(Path path)
             throws IOException;
 
     /**
-     * @return true iff a file with the given name exists
+     * Opens an existing {@link RandomReadFile} with the given path.
+     * 
+     * @throws FileNotFoundException
+     *             if a file with this path does not exist
      */
-    boolean fileExists(String name);
+    RandomReadFile openRandomReadFile(Path path)
+            throws IOException;
+
+    /**
+     * Deletes the file with the given path
+     * 
+     * @throws FileNotFoundException
+     *             if a file with this path does not exist
+     */
+    void deleteFile(Path path)
+            throws IOException;
+
+    /**
+     * @return true iff a file with the given path exists; false iff the file
+     *         does not exist. Otherwise, i.e. the file existence cannot be
+     *         determined, throw an IOException describing the issue
+     */
+    boolean fileExists(Path path)
+            throws IOException;
+
+    /**
+     * Renames the file at <tt>src</tt> to <tt>target</tt>, replacing the target
+     * file if it exists
+     */
+    void rename(Path src, Path target)
+            throws IOException;
+
+    /**
+     * Creates the specified directory if it does not already exist. Does
+     * nothing if it does exist
+     */
+    void createDir(Path path)
+            throws IOException;
+
+    /**
+     * Deletes the specified directory
+     */
+    void deleteDir(Path path)
+            throws IOException;
+    
+    /**
+     * Returns an iterator over the children of the given directory path
+     */
+    DirectoryStream<? extends Path> getChildren(Path path)
+            throws IOException;
 
     /**
      * A file to which multiple writers may attempt to append simultaneously.
@@ -128,7 +148,7 @@ public interface Env
          */
         WriteRegion requestRegion(LongToIntFunction getSize)
                 throws IOException;
-        
+
         /**
          * A region of the {@link MultiWriteFile} which has been exclusively
          * reserved by a single writer

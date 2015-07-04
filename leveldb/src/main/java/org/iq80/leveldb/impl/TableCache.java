@@ -24,28 +24,23 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.table.FileChannelTable;
-import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.TableIterator;
-import org.iq80.leveldb.util.Finalizer;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
-import java.nio.channels.FileChannel;
+import java.nio.file.Path;
 import java.util.concurrent.ExecutionException;
 
-public class TableCache
+public final class TableCache
 {
-    private final LoadingCache<Long, TableAndFile> cache;
-    private final Finalizer<Table> finalizer = new Finalizer<>(1);
+    private final LoadingCache<Long, Table> cache;
 
-    public TableCache(final File databaseDir,
+    // private final Finalizer<Table> finalizer = new Finalizer<>(1);
+
+    public TableCache(final Path databaseDir,
             int tableCacheSize,
             final InternalKeyComparator userComparator,
             final Options options,
@@ -55,12 +50,12 @@ public class TableCache
 
         cache = CacheBuilder.newBuilder()
                 .maximumSize(tableCacheSize)
-                .removalListener(new RemovalListener<Long, TableAndFile>()
+                .removalListener(new RemovalListener<Long, Table>()
                 {
                     @Override
-                    public void onRemoval(RemovalNotification<Long, TableAndFile> notification)
+                    public void onRemoval(RemovalNotification<Long, Table> notification)
                     {
-                        Table table = notification.getValue().getTable();
+                        Table table = notification.getValue();
                         // finalizer.addCleanup(table, table.closer());
                         try {
                             table.release(); // corresponding to constructor implicit retain
@@ -70,13 +65,13 @@ public class TableCache
                         }
                     }
                 })
-                .build(new CacheLoader<Long, TableAndFile>()
+                .build(new CacheLoader<Long, Table>()
                 {
                     @Override
-                    public TableAndFile load(Long fileNumber)
+                    public Table load(Long fileNumber)
                             throws IOException
                     {
-                        return new TableAndFile(databaseDir, fileNumber, userComparator, options);
+                        return openTableFile(databaseDir, fileNumber, userComparator, options);
                     }
                 });
     }
@@ -104,7 +99,7 @@ public class TableCache
         try {
             // minuscule chance of race between cache eviction and table release.
             // re-read cache until we get a winner
-            while ((table = cache.get(number).getTable().retain()) == null)
+            while ((table = cache.get(number).retain()) == null)
                 ;
         }
         catch (ExecutionException e) {
@@ -120,7 +115,7 @@ public class TableCache
     public void close()
     {
         cache.invalidateAll();
-        finalizer.destroy();
+        // finalizer.destroy();
     }
 
     public void evict(long number)
@@ -128,53 +123,22 @@ public class TableCache
         cache.invalidate(number);
     }
 
-    private static final class TableAndFile
+    private static Table openTableFile(Path databaseDir,
+            long fileNumber,
+            InternalKeyComparator userComparator,
+            Options options)
+            throws IOException
     {
-        private final Table table;
-        private FileChannel fileChannel;
+        Path tableFileName = Filename.tableFileName(databaseDir, fileNumber);
+        Env env = options.env();
 
-        private TableAndFile(File databaseDir, long fileNumber, InternalKeyComparator userComparator, Options options)
-                throws IOException
-        {
-            String tableFileName = Filename.tableFileName(fileNumber);
-            File tableFile = new File(databaseDir, tableFileName);
-
-            try {
-                fileChannel = new FileInputStream(tableFile).getChannel();
+        if (!env.fileExists(tableFileName)) {
+            Path sstName = Filename.sstTableFileName(databaseDir, fileNumber);
+            if (!env.fileExists(sstName)) {
+                throw new IOException("file " + tableFileName + " does not exist");
             }
-            catch (FileNotFoundException ldbNotFound) {
-                try {
-                    // attempt to open older .sst extension
-                    tableFileName = Filename.sstTableFileName(fileNumber);
-                    tableFile = new File(databaseDir, tableFileName);
-                    fileChannel = new FileInputStream(tableFile).getChannel();
-                }
-                catch (FileNotFoundException sstNotFound) {
-                    throw ldbNotFound;
-                }
-            }
-
-            try {
-                switch (options.ioImplemenation()) {
-                    case MMAP:
-                        table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator, options);
-                        break;
-                    case FILE:
-                        table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator, options);
-                        break;
-                    default:
-                        throw new IllegalArgumentException("Unknown IO implementation:" + options.ioImplemenation());
-                }
-            }
-            catch (IOException e) {
-                Closeables.closeQuietly(fileChannel);
-                throw e;
-            }
+            tableFileName = sstName;
         }
-
-        public Table getTable()
-        {
-            return table;
-        }
+        return new Table(tableFileName, env.openRandomReadFile(tableFileName), userComparator, options);
     }
 }
