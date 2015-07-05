@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
@@ -25,7 +24,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
-import com.google.common.io.Files;
 
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env.SequentialReadFile;
@@ -36,9 +34,9 @@ import org.iq80.leveldb.util.MergingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -77,7 +75,7 @@ public class VersionSet
     private long prevLogNumber;
 
     private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
-    private final File databaseDir;
+    private final Path databaseDir;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
     private final Options options;
@@ -85,7 +83,10 @@ public class VersionSet
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, Options options)
+    public VersionSet(Path databaseDir,
+            TableCache tableCache,
+            InternalKeyComparator internalKeyComparator,
+            Options options)
             throws IOException
     {
         this.databaseDir = databaseDir;
@@ -100,9 +101,7 @@ public class VersionSet
     private void initializeIfNeeded()
             throws IOException
     {
-        File currentFile = new File(databaseDir, Filename.currentFileName());
-
-        if (!currentFile.exists()) {
+        if (!options.env().fileExists(Filename.currentFileName(databaseDir))) {
             VersionEdit edit = new VersionEdit();
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
@@ -110,14 +109,14 @@ public class VersionSet
             edit.setLastSequenceNumber(lastSequence.get());
 
             long fileNum;
-            try (LogWriter log = Logs.createLogWriter(Filename.descriptorFileName(manifestFileNumber),
+            try (LogWriter log = Logs.createLogWriter(Filename.descriptorFileName(databaseDir, manifestFileNumber),
                     manifestFileNumber, options); GrowingBuffer record = edit.encode(options.memoryManager())) {
                 fileNum = log.getFileNumber();
                 writeSnapshot(log);
                 log.addRecord(record.get(), true);
             }
 
-            Filename.setCurrentFile(databaseDir, fileNum);
+            Filename.setCurrentFile(options.env(), databaseDir, fileNum);
         }
     }
 
@@ -283,7 +282,7 @@ public class VersionSet
         finalizeVersion(version);
 
         boolean createdNewManifest = false;
-        String manifestFileName = Filename.descriptorFileName(manifestFileNumber);
+        Path manifestFileName = Filename.descriptorFileName(databaseDir, manifestFileNumber);
         try {
             // Initialize new descriptor log file if necessary by creating
             // a temporary file that contains a snapshot of the current version.
@@ -302,7 +301,7 @@ public class VersionSet
             // If we just created a new descriptor file, install it by writing a
             // new CURRENT file that points to it.
             if (createdNewManifest) {
-                Filename.setCurrentFile(databaseDir, descriptorLog.getFileNumber());
+                Filename.setCurrentFile(options.env(), databaseDir, descriptorLog.getFileNumber());
             }
         }
         catch (IOException e) {
@@ -344,17 +343,18 @@ public class VersionSet
     {
 
         // Read "CURRENT" file, which contains a pointer to the current manifest file
-        File currentFile = new File(databaseDir, Filename.currentFileName());
-        Preconditions.checkState(currentFile.exists(), "CURRENT file does not exist");
+        Path currentFile = Filename.currentFileName(databaseDir);
+        Preconditions.checkState(options.env().fileExists(currentFile), "CURRENT file does not exist");
 
-        String currentName = Files.toString(currentFile, Charsets.UTF_8);
+        String currentName = Filename.readStringFromFile(options.env(), currentFile);
         if (currentName.isEmpty() || currentName.charAt(currentName.length() - 1) != '\n') {
             throw new IllegalStateException("CURRENT file does not end with newline");
         }
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(currentName);
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
+                Filename.descriptorFileName(databaseDir, currentName));
                 LogReader reader = new LogReader(fileInput, throwExceptionMonitor(), true, 0,
                         options.memoryManager())) {
             // read log edit log

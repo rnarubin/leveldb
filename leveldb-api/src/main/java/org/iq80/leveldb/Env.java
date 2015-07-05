@@ -109,8 +109,35 @@ public interface Env
     /**
      * Returns an iterator over the children of the given directory path
      */
-    DirectoryStream<? extends Path> getChildren(Path path)
+    DirectoryStream<Path> getChildren(Path path)
             throws IOException;
+
+    /**
+     * Lock the specified file. Used to prevent concurrent access to the same db
+     * by multiple processes. The caller should call unlockFile(lock) to release
+     * the lock. If the process exits, the lock will be automatically released.
+     * 
+     * If somebody else already holds the lock, finishes immediately, i.e. this
+     * call does not wait for existing locks to go away.
+     * 
+     * May create the named file if it does not already exist.
+     * 
+     * @return a LockFile object if the file was successfully locked. Otherwise,
+     *         return <tt>null</tt> if the file is already held
+     */
+    LockFile lockFile(Path path)
+            throws IOException;
+
+    public interface LockFile
+            extends Closeable
+    {
+        /**
+         * Close the file, releasing its associated lock in the process
+         */
+        @Override
+        public void close()
+                throws IOException;
+    }
 
     /**
      * A file to which multiple writers may attempt to append simultaneously.

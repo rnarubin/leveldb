@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 
 public final class Filename
@@ -75,6 +76,16 @@ public final class Filename
     {
         Preconditions.checkArgument(number >= 0, "number is negative");
         return String.format("MANIFEST-%06d", number);
+    }
+
+    public static Path descriptorFileName(Path dbpath, long number)
+    {
+        return descriptorFileName(dbpath, descriptorStringName(number));
+    }
+
+    public static Path descriptorFileName(Path dbpath, String fileName)
+    {
+        return dbpath.resolve(fileName);
     }
 
     /**
@@ -183,13 +194,31 @@ public final class Filename
         }
     }
 
-    private static void writeStringToFileSync(Env env, String str, Path path)
+    public static void writeStringToFileSync(Env env, String str, Path path)
             throws IOException
     {
         try (SequentialWriteFile file = env.openSequentialWriteFile(path)) {
             file.write(ByteBuffer.wrap(str.getBytes(Charsets.UTF_8)));
             file.sync();
         }
+    }
+
+    public static String readStringFromFile(Env env, Path path)
+            throws IOException
+    {
+        StringBuilder builder = new StringBuilder();
+        // rare enough that it's really not an issue not using the
+        // MemoryManager; furthermore, accessing the known underlying array
+        // facilitates String conversion
+        ByteBuffer buffer = ByteBuffer.allocate(4096);
+        try (SequentialReadFile reader = env.openSequentialReadFile(path)) {
+            while (reader.read(buffer) > 0) {
+                buffer.flip();
+                builder.append(new String(buffer.array(), buffer.position(), buffer.remaining(), Charsets.UTF_8));
+                buffer.clear();
+            }
+        }
+        return builder.toString();
     }
 
     private static Path makeFileName(Path dbpath, long number, String suffix)

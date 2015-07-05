@@ -42,14 +42,13 @@ import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.SizeOf;
 
-public class FileChannelEnv
+public class MMapEnv
+		  extends FileChannelEnv
         implements Env
 {
-    private final MemoryManager memory;
-
-    public FileChannelEnv(MemoryManager memory)
+    public MMapEnv()
     {
-        this.memory = memory;
+	     super(null);//uses of the memory manager are all overriden
     }
 
     @Override
@@ -80,133 +79,43 @@ public class FileChannelEnv
         return new FileChannelReadFile(path, memory);
     }
 
-    @Override
-    public void deleteFile(Path path)
-            throws IOException
+	 private static final class SingleMMapReadFile
+	 	extends FileChannelFile
+		implements SequentialReadFile, RandomReadFile
     {
-        Files.delete(path);
-    }
+	 	private final MappedByteBuffer buffer;
+	 	public SingleMMapReadFile(FileChannel channel) throws IOException{
+			super(channel);
+			long fileSize = channel.size();
+			assert fileSize <= Integer.MAX_VALUE : "cannot map more than integer max in single buffer";
+			buffer = channel.map(MapMode.READ_ONLY, 0, (int)fileSize);
+		}
 
-    @Override
-    public boolean fileExists(Path path)
-            throws IOException
-    {
-        return Files.exists(path);
-    }
+		@Override
+		public int read(ByteBuffer dst) throws IOException{
+			
+		}
 
-    @Override
-    public void rename(Path src, Path target)
-            throws IOException
-    {
-        Files.move(src, target, StandardCopyOption.REPLACE_EXISTING);
-    }
+		@Override
+		public ByteBuffer read(long position, int length)
+		{
+			if(position > data.limit() || length <= 0){
+				return ByteBuffers.EMPTY_BUFFER;
+			}
+			return ByteBuffers.duplicate(buffer, (int)position, Math.min(position + length, buffer.limit()));
+		}
 
-    @Override
-    public void createDir(Path path)
-            throws IOException
-    {
-        Files.createDirectories(path);
-    }
-
-    @Override
-    public void deleteDir(Path path)
-            throws IOException
-    {
-        Files.delete(Files.walkFileTree(path, new SimpleFileVisitor<Path>()
-        {
-            @Override
-            public FileVisitResult visitFile(Path p, BasicFileAttributes attr)
-                    throws IOException
-            {
-                Files.delete(p);
-                return FileVisitResult.CONTINUE;
-            }
-        }));
-    }
-
-    @Override
-    public DirectoryStream<Path> getChildren(Path path)
-            throws IOException
-    {
-        return Files.newDirectoryStream(path);
-    }
-
-    @Override
-    public LockFile lockFile(Path path)
-            throws IOException
-    {
-        FileChannelLockFile lockFile = new FileChannelLockFile(path);
-        if (lockFile.isValid()) {
-            return lockFile;
-        }
-        else {
-            lockFile.close();
-            return null;
-        }
-    }
-
-    protected static abstract class FileChannelFile
-            implements Channel
-    {
-        protected final FileChannel channel;
-
-        protected FileChannelFile(FileChannel channel)
-        {
-            this.channel = channel;
-        }
-
-        @Override
-        public final boolean isOpen()
-        {
-            return channel.isOpen();
-        }
-
-        @Override
-        public void close()
-                throws IOException
-        {
-            channel.close();
-        }
-    }
-
-    private static class FileChannelLockFile
-            extends FileChannelFile
-            implements LockFile
-    {
-        private final FileLock fileLock;
-
-        public FileChannelLockFile(Path path)
-                throws IOException
-        {
-            super(FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
-            try {
-                fileLock = channel.tryLock();
-            }
-            catch (Exception e) {
-                Closeables.closeQuietly(channel);
-                throw e;
-            }
-        }
-
-        public boolean isValid()
-        {
-            return fileLock.isValid();
-        }
-
-        @Override
-        public void close()
-                throws IOException
-        {
-            try {
-                if (fileLock != null) {
-                    fileLock.release();
-                }
-            }
-            finally {
-                super.close();
-            }
-        }
-    }
+		@Override
+		public void close() throws IOException
+		{
+			try{
+				ByteBuffers.unmap(buffer);
+			}
+			finally{
+				super.close();
+			}
+		}
+	 }
 
     private static final class FileChannelReadFile
             extends FileChannelFile
@@ -239,10 +148,16 @@ public class FileChannelEnv
             return ret;
         }
 
+		  private static final Deallocation NOOP_DEALLOCATOR = new Deallocator(){
+		  	@Override
+			public final void free(ByteBuffer b){
+			}
+		  };
+
         @Override
         public Deallocator deallocator()
         {
-            return memory;
+            return NOOP_DEALLOCATOR;
         }
 
         @Override

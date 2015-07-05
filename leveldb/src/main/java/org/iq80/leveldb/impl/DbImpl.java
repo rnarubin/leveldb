@@ -26,6 +26,7 @@ import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.LockFile;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.Options;
@@ -97,7 +98,7 @@ public class DbImpl
     private final UserOptions userOptions;
     private final Path databaseDir;
     private final TableCache tableCache;
-    private final DbLock dbLock;
+    private final LockFile dbLock;
     private final VersionSet versions;
 
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
@@ -166,21 +167,24 @@ public class DbImpl
 
         // create the database dir if it does not already exist
         env.createDir(databaseDir);
-        Preconditions.checkArgument(databaseDir.exists(), "Database directory '%s' does not exist and could not be created", databaseDir);
-        Preconditions.checkArgument(databaseDir.isDirectory(), "Database directory '%s' is not a directory", databaseDir);
 
         mutex.lock();
         try {
             // lock the database dir
-            dbLock = new DbLock(new File(databaseDir, Filename.lockFileName()));
+            Path lockFile = Filename.lockFileName(databaseDir);
+            dbLock = env.lockFile(lockFile);
+            if (dbLock == null) {
+                throw new IOException("Unable to acquire lock on " + lockFile);
+            }
 
             // verify the "current" file
-            File currentFile = new File(databaseDir, Filename.currentFileName());
-            if (!currentFile.canRead()) {
-                Preconditions.checkArgument(options.createIfMissing(), "Database '%s' does not exist and the create if missing option is disabled", databaseDir);
+            if (env.fileExists(Filename.currentFileName(databaseDir))) {
+                Preconditions.checkArgument(!options.errorIfExists(),
+                        "Database '%s' exists and the error if exists option is enabled", databaseDir);
             }
             else {
-                Preconditions.checkArgument(!options.errorIfExists(), "Database '%s' exists and the error if exists option is enabled", databaseDir);
+                Preconditions.checkArgument(options.createIfMissing(),
+                        "Database '%s' does not exist and the create if missing option is disabled", databaseDir);
             }
 
             versions = new VersionSet(databaseDir, tableCache, internalKeyComparator, options);
@@ -197,17 +201,21 @@ public class DbImpl
             // produced by an older version of leveldb.
             long minLogNumber = versions.getLogNumber();
             long previousLogNumber = versions.getPrevLogNumber();
-            List<File> filenames = Filename.listFiles(databaseDir);
 
             List<Long> logs = Lists.newArrayList();
-            for (File filename : filenames) {
-                FileInfo fileInfo = Filename.parseFileName(filename);
+            try (DirectoryStream<Path> fileNames = env.getChildren(databaseDir)) {
+                for (Path filename : fileNames) {
+                    FileInfo fileInfo = Filename.parseFileName(filename);
 
-                if (fileInfo != null &&
-                        fileInfo.getFileType() == FileType.LOG &&
-                        ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
-                    logs.add(fileInfo.getFileNumber());
+                    if (fileInfo != null
+                            && fileInfo.getFileType() == FileType.LOG
+                            && ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
+                        logs.add(fileInfo.getFileNumber());
+                    }
                 }
+            }
+            catch (DirectoryIteratorException e) {
+                throw e.getCause();
             }
 
             // Recover in the order in which the logs were generated
@@ -222,7 +230,8 @@ public class DbImpl
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            LogWriter log = Logs.createLogWriter(Filename.logFileName(logFileNumber), logFileNumber, options);
+            LogWriter log = Logs.createLogWriter(Filename.logFileName(databaseDir, logFileNumber), logFileNumber,
+                    options);
             MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
                     options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
@@ -326,7 +335,12 @@ public class DbImpl
         }
 
         tableCache.close();
-        dbLock.release();
+        try {
+            dbLock.close();
+        }
+        catch (IOException e) {
+            LOGGER.error("{} error in closing", this, e);
+        }
     }
 
     @Override
@@ -558,7 +572,8 @@ public class DbImpl
         Preconditions.checkState(mutex.isHeldByCurrentThread());
 
         LogMonitor logMonitor = LogMonitors.logMonitor();
-        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(Filename.logFileName(fileNumber));
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
+                Filename.logFileName(databaseDir, fileNumber));
                 LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, options.memoryManager())) {
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
@@ -984,7 +999,7 @@ public class DbImpl
                 try {
                     this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
                             userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
-                            Filename.logFileName(logNumber), logNumber, options)), current);
+                            Filename.logFileName(databaseDir, logNumber), logNumber, options)), current);
                 }
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
@@ -1097,7 +1112,7 @@ public class DbImpl
             throws IOException
     {
         Env env = options.env();
-        String fileName = Filename.tableFileName(fileNumber);
+        Path fileName = Filename.tableFileName(databaseDir, fileNumber);
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
@@ -1267,7 +1282,8 @@ public class DbImpl
             compactionState.currentSmallest = null;
             compactionState.currentLargest = null;
 
-            compactionState.outfile = options.env().openSequentialWriteFile(Filename.tableFileName(fileNumber));
+            compactionState.outfile = options.env().openSequentialWriteFile(
+                    Filename.tableFileName(databaseDir, fileNumber));
             compactionState.builder = new TableBuilder(options, compactionState.outfile, internalKeyComparator);
         }
         finally {
@@ -1333,8 +1349,12 @@ public class DbImpl
 
             // Discard any files we may have created during this failed compaction
             for (FileMetaData output : compact.outputs) {
-                File file = new File(databaseDir, Filename.tableFileName(output.getNumber()));
-                file.delete();
+                try {
+                    options.env().deleteFile(Filename.tableFileName(databaseDir, output.getNumber()));
+                }
+                catch (IOException deleteFailed) {
+                    LOGGER.warn("{} failed to delete file {}", this, output, deleteFailed);
+                }
             }
             compact.outputs.clear();
         }

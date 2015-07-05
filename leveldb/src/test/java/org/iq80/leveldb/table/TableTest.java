@@ -17,27 +17,26 @@
  */
 package org.iq80.leveldb.table;
 
-import com.google.common.base.Preconditions;
-
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
+import org.iq80.leveldb.impl.FileChannelEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
-import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.Snappy;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -48,20 +47,30 @@ import static org.testng.Assert.assertTrue;
 
 public abstract class TableTest
 {
-    private File file;
-    private RandomAccessFile randomAccessFile;
-    private FileChannel fileChannel;
     private static final DBBufferComparator byteCompare = new BytewiseComparator();
+    private Path path;
+    private final Path dbpath;
 
-    protected abstract Table createTable(String name, FileChannel fileChannel, Options options)
-            throws IOException;
+    public TableTest()
+    {
+        try {
+            dbpath = Files.createTempDirectory("leveldb");
+        }
+        catch (IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    protected abstract Env getEnv();
 
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyFile()
             throws Exception
     {
-        createTable(file.getAbsolutePath(), fileChannel,
-                Options.make().bufferComparator(byteCompare).verifyChecksums(true).compression(Snappy.instance())).close();
+        new Table(path, getEnv().openRandomReadFile(path), new InternalKeyComparator(byteCompare), Options.make()
+                .bufferComparator(byteCompare)
+                .verifyChecksums(true)
+                .compression(Snappy.instance())).close();
     }
 
     @Test
@@ -138,15 +147,17 @@ public abstract class TableTest
                     .compression(Snappy.instance())
                     .bufferComparator(byteCompare);
 
-            try (TableBuilder builder = new TableBuilder(options, fileChannel, new InternalKeyComparator(
-                    options.bufferComparator()))) {
+            try (SequentialWriteFile writeFile = getEnv().openSequentialWriteFile(path);
+                    TableBuilder builder = new TableBuilder(options, writeFile, new InternalKeyComparator(
+                            options.bufferComparator()))) {
                 for (Entry<InternalKey, ByteBuffer> entry : entries) {
                     builder.add(entry.getKey(), entry.getValue());
                 }
                 builder.finish();
             }
 
-            try (Table table = createTable(file.getAbsolutePath(), fileChannel, options);
+            try (Table table = new Table(path, getEnv().openRandomReadFile(path),
+                    new InternalKeyComparator(byteCompare), options);
                     TableIterator tableIter = table.retain().iterator()) {
                 ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
 
@@ -196,47 +207,60 @@ public abstract class TableTest
             throws Exception
     {
         reopenFile();
-        Preconditions.checkState(0 == fileChannel.position(), "Expected fileChannel.position %s to be 0", fileChannel.position());
     }
 
     private void reopenFile()
             throws IOException
     {
-        file = File.createTempFile("table", ".db");
-        file.delete();
-        randomAccessFile = new RandomAccessFile(file, "rw");
-        fileChannel = randomAccessFile.getChannel();
+        if (path != null && getEnv().fileExists(path)) {
+            getEnv().deleteFile(path);
+        }
+        path = Files.createTempFile(dbpath, "table", ".ldb");
     }
 
     @AfterMethod
     public void tearDown()
             throws Exception
     {
-        Closeables.closeQuietly(fileChannel);
-        Closeables.closeQuietly(randomAccessFile);
-        file.delete();
+        if (path != null && getEnv().fileExists(path)) {
+            getEnv().deleteFile(path);
+        }
     }
 
     public static class FileChannelTableTest
             extends TableTest
     {
-        @Override
-        protected Table createTable(String name, FileChannel fileChannel, Options options)
+        private StrictMemoryManager strictMemory;
+        private Env env;
+
+        @BeforeMethod
+        public void setupEnv()
+        {
+            env = new FileChannelEnv(strictMemory = new StrictMemoryManager());
+        }
+
+        @AfterMethod
+        public void tearDownEnv()
                 throws IOException
         {
-            return new FileChannelTable(name, fileChannel, new InternalKeyComparator(options.bufferComparator()),
-                    options);
+            strictMemory.close();
+        }
+
+        @Override
+        protected Env getEnv()
+        {
+            return env;
         }
     }
 
-    public static class MMapTableTest
-            extends TableTest
-    {
-        @Override
-        protected Table createTable(String name, FileChannel fileChannel, Options options)
-                throws IOException
-        {
-            return new MMapTable(name, fileChannel, new InternalKeyComparator(options.bufferComparator()), options);
-        }
-    }
+    // public static class MMapTableTest
+    // extends TableTest
+    // {
+    // @Override
+    // protected Env getEnv()
+    // {
+    // // TODO mmap env
+    // throw new UnsupportedOperationException("mmap env nyi");
+    // }
+    // }
 }

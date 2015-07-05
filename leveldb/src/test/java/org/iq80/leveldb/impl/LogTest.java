@@ -21,21 +21,23 @@ import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multiset;
 
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.testng.Assert;
+import org.testng.annotations.AfterClass;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -51,10 +53,9 @@ import static org.testng.FileAssert.fail;
 public abstract class LogTest
 {
 
-    protected LogTest(Options options)
-    {
-        this.options = options;
-    }
+    protected abstract Options getOptions();
+
+    protected abstract Env getEnv();
 
     private static final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
     {
@@ -72,7 +73,7 @@ public abstract class LogTest
     };
 
     private LogWriter writer;
-    private Options options;
+    private Path filePath;
 
     @Test
     public void testEmptyBlock()
@@ -211,9 +212,9 @@ public abstract class LogTest
             writer.close();
         }
 
-        try (FileInputStream fileInput = new FileInputStream(writer.getFile());
+        try (SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
                 StrictMemoryManager strictMemory = new StrictMemoryManager();
-                LogReader reader = new LogReader(fileInput.getChannel(), NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
+                LogReader reader = new LogReader(fileInput, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
 
             for (ByteBuffer expected : records) {
                 ByteBuffer actual = reader.readRecord();
@@ -251,8 +252,10 @@ public abstract class LogTest
         }
 
         try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-                FileInputStream fileInput = new FileInputStream(writer.getFile());
-                LogReader reader = new LogReader(fileInput.getChannel(), NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
+                SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
+                // FileInputStream fileInput = new
+                // FileInputStream(writer.getFile());
+                LogReader reader = new LogReader(fileInput, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
 
             for (ByteBuffer actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
                 Assert.assertTrue(recordBag.remove(actual), "Found slice in log that was not added");
@@ -266,15 +269,16 @@ public abstract class LogTest
     public void setUp()
             throws Exception
     {
-        writer = Logs.createLogWriter(File.createTempFile("table", ".log"), 42, options);
+        filePath = Files.createTempFile("leveldb", ".log");
+        writer = Logs.createLogWriter(filePath, 42, getOptions());
     }
 
     @AfterMethod
     public void tearDown()
             throws Exception
     {
-        if (writer != null) {
-            writer.delete();
+        if (filePath != null && getEnv().fileExists(filePath)) {
+            getEnv().deleteFile(filePath);
         }
     }
 
@@ -282,20 +286,20 @@ public abstract class LogTest
     public void testLogRecordBounds()
             throws Exception
     {
-        File file = File.createTempFile("test", ".log");
+        Path file = Files.createTempFile("test", ".log");
         try {
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             ByteBuffer record = ByteBuffer.allocate(recordSize);
 
-            LogWriter writer = Logs.createLogWriter(file, 10, options);
+            LogWriter writer = Logs.createLogWriter(file, 10, getOptions());
             writer.addRecord(record, true);
             writer.close();
 
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
 
             try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-                    FileInputStream fileInput = new FileInputStream(file);
-                    LogReader logReader = new LogReader(fileInput.getChannel(), logMonitor, true, 0, strictMemory)) {
+                    SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
+                    LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, strictMemory)) {
 
                 int count = 0;
                 for (ByteBuffer slice = logReader.readRecord(); slice != null; slice = logReader.readRecord()) {
@@ -307,7 +311,7 @@ public abstract class LogTest
             }
         }
         finally {
-            file.delete();
+            getEnv().deleteFile(file);
         }
     }
 
@@ -347,18 +351,31 @@ public abstract class LogTest
     public static class FileLogTest
             extends LogTest
     {
-        public FileLogTest()
+        private final StrictMemoryManager strictMemory = new StrictMemoryManager();
+        private final Env env = new FileChannelEnv(strictMemory);
+        private final Options options = Options.make().env(env).memoryManager(strictMemory);
+
+        protected Options getOptions()
         {
-            super(Options.make().ioImplementation(IOImpl.FILE));
+            return options;
+        }
+
+        protected Env getEnv()
+        {
+            return env;
+        }
+
+        @AfterClass
+        public void closeMemory()
+                throws IOException
+        {
+            strictMemory.close();
         }
     }
 
-    public static class MMapLogTest
-            extends LogTest
-    {
-        public MMapLogTest()
-        {
-            super(Options.make().ioImplementation(IOImpl.MMAP));
-        }
-    }
+    // TODO mmap env
+    // public static class MMapLogTest
+    // extends LogTest
+    // {
+    // }
 }
