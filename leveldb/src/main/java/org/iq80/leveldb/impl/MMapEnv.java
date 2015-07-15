@@ -43,12 +43,12 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.SizeOf;
 
 public class MMapEnv
-		  extends FileChannelEnv
+        extends FileChannelEnv
         implements Env
 {
     public MMapEnv()
     {
-	     super(null);//uses of the memory manager are all overriden
+        super(null);// uses of the memory manager are all overriden
     }
 
     @Override
@@ -79,43 +79,49 @@ public class MMapEnv
         return new FileChannelReadFile(path, memory);
     }
 
-	 private static final class SingleMMapReadFile
-	 	extends FileChannelFile
-		implements SequentialReadFile, RandomReadFile
+    private static final class SingleMMapReadFile
+            extends FileChannelFile
+            implements SequentialReadFile, RandomReadFile
     {
-	 	private final MappedByteBuffer buffer;
-	 	public SingleMMapReadFile(FileChannel channel) throws IOException{
-			super(channel);
-			long fileSize = channel.size();
-			assert fileSize <= Integer.MAX_VALUE : "cannot map more than integer max in single buffer";
-			buffer = channel.map(MapMode.READ_ONLY, 0, (int)fileSize);
-		}
+        private final MappedByteBuffer buffer;
 
-		@Override
-		public int read(ByteBuffer dst) throws IOException{
-			
-		}
+        public SingleMMapReadFile(FileChannel channel)
+                throws IOException
+        {
+            super(channel);
+            long fileSize = channel.size();
+            assert fileSize <= Integer.MAX_VALUE : "cannot map more than integer max in single buffer";
+            buffer = channel.map(MapMode.READ_ONLY, 0, (int) fileSize);
+        }
 
-		@Override
-		public ByteBuffer read(long position, int length)
-		{
-			if(position > data.limit() || length <= 0){
-				return ByteBuffers.EMPTY_BUFFER;
-			}
-			return ByteBuffers.duplicate(buffer, (int)position, Math.min(position + length, buffer.limit()));
-		}
+        @Override
+        public int read(ByteBuffer dst)
+                throws IOException
+        {
 
-		@Override
-		public void close() throws IOException
-		{
-			try{
-				ByteBuffers.unmap(buffer);
-			}
-			finally{
-				super.close();
-			}
-		}
-	 }
+        }
+
+        @Override
+        public ByteBuffer read(long position, int length)
+        {
+            if (position > data.limit() || length <= 0) {
+                return ByteBuffers.EMPTY_BUFFER;
+            }
+            return ByteBuffers.duplicate(buffer, (int) position, Math.min(position + length, buffer.limit()));
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            try {
+                ByteBuffers.unmap(buffer);
+            }
+            finally {
+                super.close();
+            }
+        }
+    }
 
     private static final class FileChannelReadFile
             extends FileChannelFile
@@ -148,11 +154,13 @@ public class MMapEnv
             return ret;
         }
 
-		  private static final Deallocation NOOP_DEALLOCATOR = new Deallocator(){
-		  	@Override
-			public final void free(ByteBuffer b){
-			}
-		  };
+        private static final Deallocation NOOP_DEALLOCATOR = new Deallocator()
+        {
+            @Override
+            public final void free(ByteBuffer b)
+            {
+            }
+        };
 
         @Override
         public Deallocator deallocator()
@@ -212,6 +220,7 @@ public class MMapEnv
             implements MultiWriteFile
     {
         private final AtomicLong filePosition;
+
         public FileChannelMultiWriteFile(Path path)
                 throws IOException
         {

@@ -253,6 +253,16 @@ public class DbImpl
         }
     }
 
+    public static final Integer CPU_DATA_MODEL = Integer.getInteger("sun.arch.data.model");
+
+    // We only use MMAP on 64 bit systems since it's really easy to run out of
+    // virtual address space on a 32 bit system when all the data is getting
+    // mapped
+    // into memory. If you really want to use MMAP anyways, use
+    // -Dleveldb.mmap=true
+    // or set useMMap(boolean) to true
+    public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""
+            + (CPU_DATA_MODEL != null && CPU_DATA_MODEL > 32)));
     // deprecated wrt user-facing api
     @SuppressWarnings("deprecation")
     private static Options sanitizeOptions(Options userOptions)
@@ -271,6 +281,14 @@ public class DbImpl
                 // should be sanitized by options insertion as well
                 Preconditions.checkArgument(ret.compression().persistentId() != 0, "User compression cannot use id 0");
             }
+        }
+        if (ret.env() == null) {
+            if (USE_MMAP_DEFAULT) {
+                // TODO mmap
+            }
+            // else{
+            ret.env(new FileChannelEnv(ret.memoryManager()));
+            // }
         }
         return ret;
     }

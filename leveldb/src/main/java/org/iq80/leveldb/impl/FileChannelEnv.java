@@ -105,7 +105,13 @@ public class FileChannelEnv
     public void createDir(Path path)
             throws IOException
     {
-        Files.createDirectories(path);
+        if (!Files.exists(path)) {
+            Files.createDirectories(path);
+        }
+        else if (!Files.isDirectory(path)) {
+            throw new IllegalArgumentException("Database directory " + path + " is not a directory");
+        }
+        // else exists and is directory, do nothing
     }
 
     @Override
@@ -267,7 +273,8 @@ public class FileChannelEnv
         public FileChannelSequentialWriteFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND));
+            super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND,
+                            StandardOpenOption.CREATE));
         }
 
         @Override
@@ -300,7 +307,7 @@ public class FileChannelEnv
         public FileChannelMultiWriteFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.WRITE));
+            super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
             this.filePosition = new AtomicLong(0);
         }
 

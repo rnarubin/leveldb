@@ -183,7 +183,7 @@ public final class Filename
         String manifest = descriptorStringName(descriptorNumber);
         Path temp = tempFileName(dbpath, descriptorNumber);
 
-        writeStringToFileSync(env, manifest, temp);
+        writeStringToFileSync(env, manifest + "\n", temp);
 
         try {
             env.rename(temp, currentFileName(dbpath));

@@ -298,7 +298,7 @@ public abstract class LogTest
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
 
             try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-                    SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
+                    SequentialReadFile fileInput = getEnv().openSequentialReadFile(file);
                     LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, strictMemory)) {
 
                 int count = 0;

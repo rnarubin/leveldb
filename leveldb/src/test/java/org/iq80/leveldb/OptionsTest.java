@@ -21,7 +21,6 @@ package org.iq80.leveldb;
 import java.lang.reflect.Field;
 import java.util.Properties;
 
-import org.iq80.leveldb.Options.IOImpl;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -39,7 +38,6 @@ public abstract class OptionsTest
         props.setProperty("leveldb.Options.errorIfExists", "true");
         props.setProperty("leveldb.Options.writeBufferSize", "123");
         props.setProperty("leveldb.Options.maxOpenFiles", "456");
-        props.setProperty("leveldb.Options.ioImplementation", "FILE");
         props.setProperty("leveldb.Options.memoryManager", MemoryManagers.class.getName() + ".heap");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "true");
         props.setProperty("leveldb.WriteOptions.sync", "true");
@@ -53,7 +51,6 @@ public abstract class OptionsTest
         Assert.assertEquals(o.errorIfExists(), true);
         Assert.assertEquals(o.writeBufferSize(), 123);
         Assert.assertEquals(o.maxOpenFiles(), 456);
-        Assert.assertEquals(o.ioImplemenation(), IOImpl.FILE);
         Assert.assertEquals(o.memoryManager(), MemoryManagers.heap()); // depends on singleton property of heap instance
         Assert.assertEquals(r.verifyChecksums(), true);
         Assert.assertEquals(w.sync(), true);
@@ -62,7 +59,6 @@ public abstract class OptionsTest
         props.setProperty("leveldb.Options.errorIfExists", "false");
         props.setProperty("leveldb.Options.writeBufferSize", "" + (4 << 20));
         props.setProperty("leveldb.Options.maxOpenFiles", "1000");
-        props.setProperty("leveldb.Options.ioImplementation", Options.USE_MMAP_DEFAULT ? "MMAP" : "FILE");
         props.setProperty("leveldb.Options.memoryManager", "null");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "false");
         props.setProperty("leveldb.ReadOptions.verifyChecksums", "false");
@@ -78,7 +74,6 @@ public abstract class OptionsTest
         Assert.assertEquals(o.errorIfExists(), false);
         Assert.assertEquals(o.writeBufferSize(), 4 << 20);
         Assert.assertEquals(o.maxOpenFiles(), 1000);
-        Assert.assertEquals(o.ioImplemenation(), Options.USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE);
         Assert.assertEquals(o.memoryManager(), null);
         Assert.assertEquals(r.verifyChecksums(), false);
         Assert.assertEquals(w.sync(), false);

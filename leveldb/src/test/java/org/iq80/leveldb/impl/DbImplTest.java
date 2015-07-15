@@ -846,15 +846,8 @@ public class DbImplTest
         }
     }
 
-    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
-    public void testCantCreateDirectoryReturnMessage()
-            throws Exception
-    {
-        new DbStringWrapper(Options.make(), new File(DOES_NOT_EXIST_FILENAME));
-    }
-
     @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
-    public void testDBDirectoryIsFileRetrunMessage()
+    public void testDBDirectoryIsFileReturnMessage()
             throws Exception
     {
         File databaseFile = new File(databaseDir + "/imafile");
