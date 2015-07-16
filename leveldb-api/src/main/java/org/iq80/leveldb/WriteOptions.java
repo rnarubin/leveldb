@@ -63,7 +63,7 @@ public class WriteOptions
 
     /**
      * If true, the write will be flushed from the operating system buffer cache
-     * (by calling {@link org.iq80.leveldb.Env.MultiWriteFile.WriteRegion#sync
+     * (by calling {@link org.iq80.leveldb.Env.ConcurrentWriteFile.WriteRegion#sync
      * sync}) before the write is considered complete. If this flag is true,
      * writes will be slower.
      * 

@@ -37,10 +37,10 @@ import java.nio.file.Path;
 public interface Env
 {
     /**
-     * Creates and opens a new {@link MultiWriteFile} with the given path. If a
+     * Creates and opens a new {@link ConcurrentWriteFile} with the given path. If a
      * file already exists with this path, the existing file is first deleted.
      */
-    MultiWriteFile openMultiWriteFile(Path path)
+    ConcurrentWriteFile openMultiWriteFile(Path path)
             throws IOException;
 
     /**
@@ -140,12 +140,12 @@ public interface Env
     }
 
     /**
-     * A file to which multiple writers may attempt to append simultaneously.
-     * Safe concurrency is facilitated by the space request mechanism: each
-     * writer will provide a function which, given the current end position of
-     * the file, will return the amount of space this writer will use. This
-     * amount of space should be exclusively reserved for the writer beginning
-     * at the given end position
+     * A file to which multiple writers may attempt to append concurrently. Safe
+     * concurrency is facilitated by the space request mechanism: each writer
+     * will provide a function which, given the current end position of the
+     * file, will return the amount of space this writer will use. This amount
+     * of space should be exclusively reserved for the writer beginning at the
+     * given position
      * <p>
      * An example implementation may maintain an internal buffer, utilizing an
      * atomically updated offset within the buffer as the logical end of file.
@@ -160,7 +160,7 @@ public interface Env
      * {@link WriteRegion} is recommended as writers may submit small data
      * fragments at a time
      */
-    public interface MultiWriteFile
+    public interface ConcurrentWriteFile
             extends Closeable
     {
         /**
@@ -177,7 +177,7 @@ public interface Env
                 throws IOException;
 
         /**
-         * A region of the {@link MultiWriteFile} which has been exclusively
+         * A region of the {@link ConcurrentWriteFile} which has been exclusively
          * reserved by a single writer
          */
         public interface WriteRegion

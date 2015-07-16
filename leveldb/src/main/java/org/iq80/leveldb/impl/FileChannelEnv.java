@@ -53,10 +53,10 @@ public class FileChannelEnv
     }
 
     @Override
-    public MultiWriteFile openMultiWriteFile(Path path)
+    public ConcurrentWriteFile openMultiWriteFile(Path path)
             throws IOException
     {
-        return new FileChannelMultiWriteFile(path);
+        return new FileChannelConcurrentWriteFile(path);
     }
 
     @Override
@@ -299,12 +299,12 @@ public class FileChannelEnv
         }
     }
 
-    private static final class FileChannelMultiWriteFile
+    private static final class FileChannelConcurrentWriteFile
             extends FileChannelFile
-            implements MultiWriteFile
+            implements ConcurrentWriteFile
     {
         private final AtomicLong filePosition;
-        public FileChannelMultiWriteFile(Path path)
+        public FileChannelConcurrentWriteFile(Path path)
                 throws IOException
         {
             super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE));

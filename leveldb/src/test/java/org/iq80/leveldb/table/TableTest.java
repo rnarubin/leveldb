@@ -25,6 +25,7 @@ import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.FileChannelEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.MMapEnv;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
@@ -253,14 +254,13 @@ public abstract class TableTest
         }
     }
 
-    // public static class MMapTableTest
-    // extends TableTest
-    // {
-    // @Override
-    // protected Env getEnv()
-    // {
-    // // TODO mmap env
-    // throw new UnsupportedOperationException("mmap env nyi");
-    // }
-    // }
+    public static class MMapTableTest
+            extends TableTest
+    {
+        @Override
+        protected Env getEnv()
+        {
+            return MMapEnv.INSTANCE;
+        }
+    }
 }

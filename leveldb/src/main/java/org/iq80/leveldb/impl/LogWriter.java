@@ -17,8 +17,8 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.Env.MultiWriteFile;
-import org.iq80.leveldb.Env.MultiWriteFile.WriteRegion;
+import org.iq80.leveldb.Env.ConcurrentWriteFile;
+import org.iq80.leveldb.Env.ConcurrentWriteFile.WriteRegion;
 import org.iq80.leveldb.LongToIntFunction;
 
 import com.google.common.base.Preconditions;
@@ -34,11 +34,11 @@ import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 public final class LogWriter
         implements Closeable
 {
-    private final MultiWriteFile file;
+    private final ConcurrentWriteFile file;
     private final long fileNumber;
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    LogWriter(MultiWriteFile file, long fileNumber)
+    LogWriter(ConcurrentWriteFile file, long fileNumber)
     {
         Preconditions.checkNotNull(file, "file is null");
         Preconditions.checkArgument(fileNumber >= 0, "fileNumber is negative");

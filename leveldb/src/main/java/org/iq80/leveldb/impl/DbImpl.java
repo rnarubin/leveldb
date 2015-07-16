@@ -138,7 +138,7 @@ public class DbImpl
     {
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
-        this.userOptions = new UserOptions(userOptions);
+        this.userOptions = new UserOptions(Options.copy(userOptions));
         this.options = sanitizeOptions(userOptions);
         Env env = this.options.env();
 
@@ -263,6 +263,7 @@ public class DbImpl
     // or set useMMap(boolean) to true
     public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""
             + (CPU_DATA_MODEL != null && CPU_DATA_MODEL > 32)));
+
     // deprecated wrt user-facing api
     @SuppressWarnings("deprecation")
     private static Options sanitizeOptions(Options userOptions)
@@ -283,12 +284,10 @@ public class DbImpl
             }
         }
         if (ret.env() == null) {
-            if (USE_MMAP_DEFAULT) {
-                // TODO mmap
-            }
-            // else{
+            // TODO mmap sanitize
+            // ret.env(USE_MMAP_DEFAULT ? MMapEnv.INSTANCE : new
+            // FileChannelEnv(ret.memoryManager()));
             ret.env(new FileChannelEnv(ret.memoryManager()));
-            // }
         }
         return ret;
     }

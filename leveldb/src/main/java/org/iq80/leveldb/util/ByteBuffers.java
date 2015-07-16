@@ -1,19 +1,15 @@
 package org.iq80.leveldb.util;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 
 import sun.nio.ch.DirectBuffer;
-import sun.nio.ch.FileChannelImpl;
 import sun.misc.Unsafe;
 
 import org.iq80.leveldb.Deallocator;
@@ -616,35 +612,6 @@ public final class ByteBuffers
     {
         if (directBufferSupport && buffer.isDirect()) {
             ((DirectBuffer) buffer).cleaner().clean();
-        }
-        // else
-        // leave it to Java GC
-    }
-
-    private static final Method unmap;
-    static {
-        Method x;
-        try {
-            x = FileChannelImpl.class.getDeclaredMethod("unmap", MappedByteBuffer.class);
-            x.setAccessible(true);
-        }
-        catch (Throwable t) {
-            LOGGER.debug("failed to access MappedByteBuffer support", t);
-            x = null;
-        }
-        unmap = x;
-    }
-
-    public static void unmap(MappedByteBuffer buffer)
-            throws IOException
-    {
-        if (unmap != null) {
-            try {
-                unmap.invoke(null, buffer);
-            }
-            catch (Exception e) {
-                throw new IOException("Failed to unmap MappedByteBuffer", e);
-            }
         }
         // else
         // leave it to Java GC
