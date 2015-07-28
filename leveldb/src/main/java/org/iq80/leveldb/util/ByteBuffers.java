@@ -763,7 +763,7 @@ public final class ByteBuffers
 
     public static String toString(ByteBuffer src)
     {
-        return new String(toArray(src), StandardCharsets.UTF_8);
+        return new String(toArray(ByteBuffers.duplicate(src)), StandardCharsets.UTF_8);
     }
 
     /**

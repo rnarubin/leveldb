@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.table.TableIterator;
 import org.iq80.leveldb.util.LevelIterator;
 
@@ -41,6 +42,7 @@ import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
 
 // todo this class should be immutable
+// TODO extend reference counted
 public class Version
 {
     private final AtomicInteger retained = new AtomicInteger(1);
@@ -148,17 +150,17 @@ public class Version
         return builder.build();
     }
 
-    public LookupResult get(LookupKey key)
+    public LookupResult get(LookupKey key, MemoryManager memory)
             throws IOException
     {
         // We can search level-by-level since entries never hop across
         // levels.  Therefore we are guaranteed that if we find data
         // in an smaller level, later levels are irrelevant.
         ReadStats readStats = new ReadStats();
-        LookupResult lookupResult = level0.get(key, readStats);
+        LookupResult lookupResult = level0.get(key, readStats, memory);
         if (lookupResult == null) {
             for (Level level : levels) {
-                lookupResult = level.get(key, readStats);
+                lookupResult = level.get(key, readStats, memory);
                 if (lookupResult != null) {
                     break;
                 }

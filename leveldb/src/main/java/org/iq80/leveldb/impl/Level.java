@@ -21,6 +21,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.LevelIterator;
 
@@ -80,7 +82,7 @@ public class Level
         return new LevelIterator(tableCache, files, internalKeyComparator);
     }
 
-    public LookupResult get(LookupKey key, ReadStats readStats)
+    public LookupResult get(LookupKey key, ReadStats readStats, MemoryManager memory)
             throws IOException
     {
         if (files.isEmpty()) {
@@ -141,12 +143,12 @@ public class Level
                             .toString());
 
                     // if this is a value key (not a delete) and the keys match, return the value
-                    if (key.getUserKey().equals(internalKey.getUserKey())) {
+                    if (ByteBuffers.compare(key.getUserKey(), internalKey.getUserKey()) == 0) {
                         if (internalKey.getValueType() == ValueType.DELETION) {
                             return LookupResult.deleted(key);
                         }
                         else if (internalKey.getValueType() == VALUE) {
-                            return LookupResult.ok(key, entry.getValue());
+                            return LookupResult.ok(key, ByteBuffers.copy(entry.getValue(), memory), true);
                         }
                     }
                 }

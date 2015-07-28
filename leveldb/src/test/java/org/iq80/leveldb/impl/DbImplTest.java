@@ -1195,20 +1195,24 @@ public class DbImplTest
             ByteBuffer b = ByteBuffer.allocate(capacity + 16).order(ByteOrder.LITTLE_ENDIAN);
             b.putLong(0, -1L).putLong(b.capacity() - 8, -1L);
             b.limit(b.capacity() - 8).position(8);
-            return b;
+            // return b;
+            return trackBuffer(b);
             // return ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN);
             // return trackBuffer(ByteBuffer.allocate(capacity).order(ByteOrder.LITTLE_ENDIAN));
         }
 
         public ByteBuffer wrap(byte[] arr)
         {
-            return ByteBuffer.wrap(arr).order(ByteOrder.LITTLE_ENDIAN);
-            // return trackBuffer(ByteBuffer.wrap(arr));
+            // return ByteBuffer.wrap(arr).order(ByteOrder.LITTLE_ENDIAN);
+            return trackBuffer(ByteBuffer.wrap(arr).order(ByteOrder.LITTLE_ENDIAN));
         }
 
         private ByteBuffer trackBuffer(ByteBuffer buf)
         {
-            final MetaData metaData = new MetaData(new AtomicBoolean(false), new Throwable(), new Object());
+            final MetaData metaData = new MetaData(new AtomicBoolean(false),
+            // null,
+                    new Throwable(),
+                    new Object());
             bufMap.put(buf, metaData);
             refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
             {
@@ -1228,20 +1232,20 @@ public class DbImplTest
         @Override
         public void free(ByteBuffer buffer)
         {
-            //MetaData metaData = bufMap.get(buffer);
-            //if (metaData == null) {
-            //    throw new IllegalStateException("free called on buffer from foreign source");
-            //}
-            //if (metaData.freed.compareAndSet(false, true)) {
-            //    metaData.freeStackHolder = new Throwable();
-            //    metaData.info[0] = metaData.freeStackHolder.getStackTrace();
-            //}
-            //else {
-            //    throw new IllegalStateException("double free", metaData.allocStackHolder);
-            //}
-            //
-            //// force data corruption on use-after-free
-            //Arrays.fill(buffer.array(), (byte) 0xff);
+            MetaData metaData = bufMap.get(buffer);
+            if (metaData == null) {
+                throw new IllegalStateException("free called on buffer from foreign source");
+            }
+            if (metaData.freed.compareAndSet(false, true)) {
+                metaData.freeStackHolder = new Throwable();
+                metaData.info[0] = metaData.freeStackHolder.getStackTrace();
+            }
+            else {
+                throw new IllegalStateException("double free", metaData.allocStackHolder);
+            }
+
+            // force data corruption on use-after-free
+            Arrays.fill(buffer.array(), (byte) 0xff);
         }
 
         @Override

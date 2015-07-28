@@ -56,7 +56,7 @@ public interface Compression
     int maxUncompressedLength(ByteBuffer compressed);
 
     /**
-     * @param compressed
+     * @param uncompressed
      *            buffer of uncompressed data
      * @return maximum size of a buffer yielded from compressing the given
      *         buffer, in bytes. the buffer's fields should be unchanged

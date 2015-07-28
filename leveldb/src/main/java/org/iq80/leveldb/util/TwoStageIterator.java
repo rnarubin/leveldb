@@ -64,10 +64,6 @@ public abstract class TwoStageIterator<I extends ReverseSeekingIterator<Internal
             closed = true;
             Closeables.closeIO(last, current, index);
         }
-        else {
-            // TODO check if this ever happens
-            throw new IllegalStateException("double close on iterator");
-        }
     }
 
     @Override

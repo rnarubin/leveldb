@@ -111,7 +111,7 @@ public final class MemTable
                 return LookupResult.deleted(key);
             }
             else {
-                return LookupResult.ok(key, entry.getValue());
+                return LookupResult.ok(key, entry.getValue(), false);
             }
         }
         return null;

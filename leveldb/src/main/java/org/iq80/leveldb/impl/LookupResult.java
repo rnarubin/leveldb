@@ -25,26 +25,28 @@ import org.iq80.leveldb.util.ByteBuffers;
 
 public class LookupResult
 {
-    public static LookupResult ok(LookupKey key, ByteBuffer value)
+    public static LookupResult ok(LookupKey key, ByteBuffer value, boolean needsFreeing)
     {
-        return new LookupResult(key, value, false);
+        return new LookupResult(key, value, false, needsFreeing);
     }
 
     public static LookupResult deleted(LookupKey key)
     {
-        return new LookupResult(key, null, true);
+        return new LookupResult(key, null, true, false);
     }
 
     private final LookupKey key;
     private final ByteBuffer value;
     private final boolean deleted;
+    private final boolean needsFreeing;
 
-    private LookupResult(LookupKey key, ByteBuffer value, boolean deleted)
+    private LookupResult(LookupKey key, ByteBuffer value, boolean deleted, boolean needsFreeing)
     {
         Preconditions.checkNotNull(key, "key is null");
+        this.needsFreeing = needsFreeing;
         this.key = key;
         if (value != null) {
-            this.value = ByteBuffers.duplicate(value);
+            this.value = needsFreeing ? value : ByteBuffers.duplicate(value);
         }
         else {
             this.value = null;
@@ -65,5 +67,10 @@ public class LookupResult
     public boolean isDeleted()
     {
         return deleted;
+    }
+
+    public boolean needsFreeing()
+    {
+        return needsFreeing;
     }
 }

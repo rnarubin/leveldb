@@ -23,6 +23,8 @@ import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Lists;
 
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.MergingIterator;
 
@@ -74,7 +76,7 @@ public class Level0
         return files;
     }
 
-    public LookupResult get(LookupKey key, ReadStats readStats)
+    public LookupResult get(LookupKey key, ReadStats readStats, MemoryManager memory)
             throws IOException
     {
         if (files.isEmpty()) {
@@ -111,7 +113,7 @@ public class Level0
                             return LookupResult.deleted(key);
                         }
                         else if (internalKey.getValueType() == VALUE) {
-                            return LookupResult.ok(key, entry.getValue());
+                            return LookupResult.ok(key, ByteBuffers.copy(entry.getValue(), memory), true);
                         }
                     }
                 }

@@ -221,7 +221,7 @@ public class VersionSet
     public LookupResult get(LookupKey key)
             throws IOException
     {
-        return current.get(key);
+        return current.get(key, options.memoryManager());
     }
 
     // TODO remove maybe

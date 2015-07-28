@@ -20,7 +20,6 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.FileUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -73,8 +72,7 @@ public class Iq80DBFactory
     public void destroy(File path, Options options)
             throws IOException
     {
-        // TODO: This should really only delete leveldb-created files.
-        FileUtils.deleteRecursively(path);
+        options.env().deleteDir(path.toPath());
     }
 
     @Override

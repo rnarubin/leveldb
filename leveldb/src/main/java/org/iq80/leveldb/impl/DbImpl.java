@@ -333,21 +333,25 @@ public class DbImpl
         MemTables tables = memTables;
         tables.mutable.acquireAll();
         try {
-            tables.mutable.log.close();
-            // TODO table release
+            Closeables.closeIO(tables.mutable.log, tables.mutable.memTable);
         }
         catch (IOException e) {
             LOGGER.error("{} error in closing", this, e);
+        }
+        finally {
+            tables.mutable.releaseAll();
         }
 
         if (tables.immutableExists()) {
             tables.immutable.acquireAll();
             try {
-                tables.immutable.log.close();
-                // TODO table release
+                Closeables.closeIO(tables.immutable.log, tables.immutable.memTable);
             }
             catch (IOException e) {
                 LOGGER.error("{} error in closing", this, e);
+            }
+            finally {
+                tables.immutable.releaseAll();
             }
         }
 
@@ -430,6 +434,7 @@ public class DbImpl
         makeRoomForWrite(options.writeBufferSize()).release();
 
         // todo bg_error code
+        // TODO manual flush not thread safe wrt close?
         MemTables tables;
         while ((tables = memTables).immutableExists()) {
             tables.waitForImmutableCompaction();
@@ -660,42 +665,80 @@ public class DbImpl
 
     @Override
     public byte[] get(byte[] key, ReadOptions readOptions)
+            throws DBException{
+        LookupResult res = getInternal(ByteBuffer.wrap(key), readOptions);
+        ByteBuffer b;
+        if (res == null || (b = res.getValue()) == null) {
+            return null;
+        }
+        byte[] ret = ByteBuffers.toArray(ByteBuffers.duplicate(b));
+        if (res.needsFreeing()) {
+            options.memoryManager().free(b);
+        }
+        return ret;
+    }
+    
+    public ByteBuffer get(ByteBuffer key) throws DBException{
+        return get(key, DEFAULT_READ_OPTIONS);
+    }
+
+    public ByteBuffer get(ByteBuffer key, ReadOptions readOptions)
+    {
+        return getInternal(key, readOptions).getValue();
+    }
+
+    public LookupResult getInternal(ByteBuffer key, ReadOptions readOptions)
             throws DBException
     {
         checkBackgroundException();
+        LookupResult lookupResult;
         LookupKey lookupKey;
-        mutex.lock();
-        try {
-            SnapshotImpl snapshot = getSnapshot(readOptions);
-            lookupKey = new LookupKey(ByteBuffer.wrap(key), snapshot.getLastSequence());
+        SnapshotImpl snapshot = getSnapshot(readOptions);
+        lookupKey = new LookupKey(key, snapshot.getLastSequence());
+        do {
             MemTables tables = memTables;
 
-            // First look in the memtable, then in the immutable memtable (if any).
-            LookupResult lookupResult = tables.mutable.memTable.get(lookupKey);
-            if (lookupResult != null) {
-                ByteBuffer value = lookupResult.getValue();
-                if (value == null) {
-                    return null;
+            // First look in the memtable, then in the immutable memtable (if
+            // any).
+            {
+                // no need to acquire memlog semaphore; closing memlog doesn't
+                // matter to a get because we only care that the skiplist is
+                // reachable
+                MemTable memtable = tables.mutable.memTable.retain();
+                if (memtable == null) {
+                    // raced with memtable release, reacquire tables
+                    continue;
                 }
-                return ByteBuffers.toArray(value);
+                try {
+                    lookupResult = memtable.get(lookupKey);
+                    if (lookupResult != null) {
+                        return lookupResult;
+                    }
+                }
+                finally {
+                    memtable.release();
+                }
             }
             if (tables.immutableExists()) {
-                lookupResult = tables.immutable.memTable.get(lookupKey);
-                if (lookupResult != null) {
-                    ByteBuffer value = lookupResult.getValue();
-                    if (value == null) {
-                        return null;
+                MemTable immutable = tables.immutable.memTable.retain();
+                if (immutable != null) {
+                    try {
+                        lookupResult = immutable.get(lookupKey);
+                        if (lookupResult != null) {
+                            return lookupResult;
+                        }
                     }
-                    return ByteBuffers.toArray(value);
+                    finally {
+                        immutable.release();
+                    }
+
                 }
             }
+            break;
         }
-        finally {
-            mutex.unlock();
-        }
+        while (true);
 
         // Not in memTables; try live files in level order
-        LookupResult lookupResult;
         try {
             lookupResult = versions.get(lookupKey);
         }
@@ -704,6 +747,7 @@ public class DbImpl
         }
 
         // schedule compaction if necessary
+        // TODO check mutex
         mutex.lock();
         try {
             if (versions.needsCompaction()) {
@@ -714,13 +758,7 @@ public class DbImpl
             mutex.unlock();
         }
 
-        if (lookupResult != null) {
-            ByteBuffer value = lookupResult.getValue();
-            if (value != null) {
-                return ByteBuffers.toArray(value);
-            }
-        }
-        return null;
+        return lookupResult;
     }
 
     private static final WriteOptions DEFAULT_WRITE_OPTIONS = WriteOptions.make();
@@ -812,7 +850,7 @@ public class DbImpl
 
             MemTableAndLog memlog = makeRoomForWrite(updates.getApproximateSize());
 
-            try {
+            try (MemTable memTable = memlog.memTable) {
                 // Get sequence numbers for this change set
                 final long sequenceDelta = updates.size();
                 final long sequenceBegin = versions.getAndAddLastSequence(sequenceDelta) + 1;
@@ -831,7 +869,7 @@ public class DbImpl
                 }
 
                 // Update memtable
-                updates.forEach(new InsertIntoHandler(memlog.memTable, sequenceBegin));
+                updates.forEach(new InsertIntoHandler(memTable, sequenceBegin));
             }
             finally {
                 memlog.release();
@@ -886,6 +924,7 @@ public class DbImpl
     MergingIterator internalIterator()
             throws IOException
     {
+        // TODO check mutex
         mutex.lock();
         try {
             // merge together the memTable, immutableMemTable, and tables in version set
@@ -904,11 +943,15 @@ public class DbImpl
             }
             while (true);
 
-            if (immutable != null) {
-                iterators.add(immutable.iterator());
+            try {
+                if (immutable != null) {
+                    iterators.add(immutable.iterator());
+                }
+                iterators.add(mutable.iterator());
             }
-            iterators.add(mutable.iterator());
-            Closeables.closeIO(mutable, immutable);
+            finally {
+                Closeables.closeIO(mutable, immutable);
+            }
 
             Version current = versions.getCurrent();
             iterators.addAll(current.getLevel0Files());
@@ -939,6 +982,7 @@ public class DbImpl
             snapshot = (SnapshotImpl) options.snapshot();
         }
         else {
+            //FIXME we do have to retain, wrap this in a conditional closeable maybe?
             snapshot = new SnapshotImpl(versions.getCurrent(), versions.getLastSequence());
             snapshot.close(); // To avoid holding the snapshot active..
         }
@@ -989,6 +1033,18 @@ public class DbImpl
         MemTableAndLog current;
         do {
             current = this.memTables.mutable.acquire();
+
+            if (shuttingDown.get()) {
+                // raced with a close
+                this.memTables.mutable.release();
+                throw new DatabaseShutdownException();
+            }
+
+            if (current.memTable.retain() == null) {
+                // raced with a table swap
+                continue;
+            }
+
             long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
             if (previousUsage <= memtableMax && previousUsage + writeUsageSize > memtableMax) {
                 //this condition can only be true for one writer
@@ -1004,6 +1060,7 @@ public class DbImpl
                         checkBackgroundException();
                     }
                     catch (Throwable e) {
+                        current.memTable.release();
                         current.release();
                         throw e;
                     }
@@ -1022,6 +1079,7 @@ public class DbImpl
                     //we've failed to create a new memtable and update mutable/immutable
                     //other writers trying to acquire it (those spinning in this loop, or new writers) should be fail
                     setBackgroundException(e);
+                    current.memTable.release();
                     current.release();
                     throw new DBException(e);
                 }
@@ -1039,6 +1097,7 @@ public class DbImpl
                 //incidentally, this means that the memtable's memory usage was incremented superfluously
                 //it won't receive any further writes, however, and the usage changes are only relevant to this function
 
+                current.memTable.release();
                 current.release();
                 checkBackgroundException();
             }
