@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,7 +57,6 @@ public final class Table
             return new EncodedInternalKey(b);
         }
     };
-    private final Path name;
     private final RandomReadFile file;
     private final Comparator<InternalKey> comparator;
     private final Block<InternalKey> indexBlock;
@@ -67,11 +65,10 @@ public final class Table
     private final Compression compression;
     private final boolean verifyChecksums;
 
-    public Table(Path name, RandomReadFile file, Comparator<InternalKey> comparator, Options options)
+    public Table(RandomReadFile file, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
-        Preconditions.checkNotNull(name, "name is null");
-        Preconditions.checkNotNull(file, "fileChannel is null");
+        Preconditions.checkNotNull(file, "file is null");
         long size = file.size();
         Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH, "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
         Preconditions.checkNotNull(comparator, "comparator is null");
@@ -80,7 +77,6 @@ public final class Table
         this.memory = options.memoryManager();
         this.compression = options.compression();
 
-        this.name = name;
         this.file = file;
         this.comparator = comparator;
 
@@ -173,6 +169,7 @@ public final class Table
 
     private ByteBuffer uncompressIfNecessary(ByteBuffer compressedData, byte compressionId)
     {
+        // TODO(postrelease) multiple live compressions
         if (compressionId == 0) {
             // not compressed
             return compressedData;
@@ -219,7 +216,7 @@ public final class Table
     {
         StringBuilder sb = new StringBuilder();
         sb.append("Table");
-        sb.append("{name='").append(name).append('\'');
+        sb.append("{file=").append(file);
         sb.append(", comparator=").append(comparator);
         sb.append(", verifyChecksums=").append(verifyChecksums);
         sb.append('}');

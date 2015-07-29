@@ -25,8 +25,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channel;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Path;
 
 /**
  * An Env is an interface used by the leveldb implementation to access operating
@@ -37,80 +35,92 @@ import java.nio.file.Path;
 public interface Env
 {
     /**
-     * Creates and opens a new {@link ConcurrentWriteFile} with the given path. If a
-     * file already exists with this path, the existing file is first deleted.
-     */
-    ConcurrentWriteFile openMultiWriteFile(Path path)
-            throws IOException;
-
-    /**
-     * Creates and opens a new {@link SequentialWriteFile} with the given path.
-     * If a file already exists with this path, the existing file is first
+     * Creates and opens a new {@link ConcurrentWriteFile} for the given file
+     * info. If a file already exists with this info, the existing file is first
      * deleted.
      */
-    SequentialWriteFile openSequentialWriteFile(Path path)
+    ConcurrentWriteFile openMultiWriteFile(FileInfo info)
             throws IOException;
 
     /**
-     * Opens an existing {@link SequentialReadFile} with the given path.
-     * 
-     * @throws FileNotFoundException
-     *             if a file with this path does not exist
+     * Creates and opens a new {@link SequentialWriteFile} with the given file
+     * info. If a file already exists with this info, the existing file is first
+     * deleted.
      */
-    SequentialReadFile openSequentialReadFile(Path path)
+    SequentialWriteFile openSequentialWriteFile(FileInfo info)
             throws IOException;
 
     /**
-     * Opens an existing {@link RandomReadFile} with the given path.
+     * Opens an existing {@link SequentialReadFile} with the given file info.
      * 
      * @throws FileNotFoundException
-     *             if a file with this path does not exist
+     *             if a file with this info does not exist
      */
-    RandomReadFile openRandomReadFile(Path path)
+    SequentialReadFile openSequentialReadFile(FileInfo info)
+            throws IOException;
+
+    /**
+     * Opens an existing {@link RandomReadFile} with the given file info.
+     * 
+     * @throws FileNotFoundException
+     *             if a file with this info does not exist
+     */
+    RandomReadFile openRandomReadFile(FileInfo info)
             throws IOException;
 
     /**
      * Deletes the file with the given path
      * 
      * @throws FileNotFoundException
-     *             if a file with this path does not exist
+     *             if a file with this info does not exist
      */
-    void deleteFile(Path path)
+    void deleteFile(FileInfo info)
             throws IOException;
 
     /**
-     * @return true iff a file with the given path exists; false iff the file
-     *         does not exist. Otherwise, i.e. the file existence cannot be
+     * @return true iff a file with the given file info exists; false iff the
+     *         file does not exist. Otherwise, i.e. the file existence cannot be
      *         determined, throw an IOException describing the issue
      */
-    boolean fileExists(Path path)
+    boolean fileExists(FileInfo info)
             throws IOException;
 
     /**
-     * Renames the file at <tt>src</tt> to <tt>target</tt>, replacing the target
-     * file if it exists
+     * Replaces the file described by <tt>target</tt> with the file described by
+     * <tt>src</tt>. <tt>src</tt> should be relocated whether the target already
+     * exists or not
      */
-    void rename(Path src, Path target)
+    void replace(FileInfo src, FileInfo target)
             throws IOException;
 
     /**
-     * Creates the specified directory if it does not already exist. Does
-     * nothing if it does exist
+     * Creates a directory to contain all files owned by this database if one
+     * does not already exist. Does nothing if it does exist
+     * 
+     * @return a handle to the created
      */
-    void createDir(Path path)
+    DBHandle createDBDir()
             throws IOException;
 
     /**
-     * Deletes the specified directory
+     * Deletes the specified database directory and all files contained in it
      */
-    void deleteDir(Path path)
+    void deleteDir(DBHandle handle)
             throws IOException;
     
     /**
-     * Returns an iterator over the children of the given directory path
+     * Returns an iterable over the files owned by the given DB
      */
-    DirectoryStream<Path> getChildren(Path path)
+    Iterable<FileInfo> getOwnedFiles(DBHandle handle)
             throws IOException;
+
+    /**
+     * A handle used to identify a directory containing files for a particular
+     * database
+     */
+    public interface DBHandle
+    {
+    }
 
     /**
      * Lock the specified file. Used to prevent concurrent access to the same db
@@ -125,7 +135,7 @@ public interface Env
      * @return a LockFile object if the file was successfully locked. Otherwise,
      *         return <tt>null</tt> if the file is already held
      */
-    LockFile lockFile(Path path)
+    LockFile lockFile(FileInfo info)
             throws IOException;
 
     public interface LockFile

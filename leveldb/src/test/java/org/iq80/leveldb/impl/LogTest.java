@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multiset;
 
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
@@ -30,6 +31,7 @@ import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
@@ -37,7 +39,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -73,7 +74,7 @@ public abstract class LogTest
     };
 
     private LogWriter writer;
-    private Path filePath;
+    private FileInfo filePath;
 
     @Test
     public void testEmptyBlock()
@@ -269,7 +270,7 @@ public abstract class LogTest
     public void setUp()
             throws Exception
     {
-        filePath = Files.createTempFile("leveldb", ".log");
+        filePath = FileInfo.log(42);
         writer = Logs.createLogWriter(filePath, 42, getOptions());
     }
 
@@ -286,7 +287,7 @@ public abstract class LogTest
     public void testLogRecordBounds()
             throws Exception
     {
-        Path file = Files.createTempFile("test", ".log");
+        FileInfo file = FileInfo.log(-1);
         try {
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             ByteBuffer record = ByteBuffer.allocate(recordSize);
@@ -351,9 +352,9 @@ public abstract class LogTest
     public static class FileLogTest
             extends LogTest
     {
-        private final StrictMemoryManager strictMemory = new StrictMemoryManager();
-        private final Env env = new FileChannelEnv(strictMemory);
-        private final Options options = Options.make().env(env).memoryManager(strictMemory);
+        private StrictMemoryManager strictMemory;
+        private Env env;
+        private Options options;
 
         protected Options getOptions()
         {
@@ -363,6 +364,15 @@ public abstract class LogTest
         protected Env getEnv()
         {
             return env;
+        }
+
+        @BeforeClass
+        public void open()
+                throws IOException
+        {
+            env = new FileChannelEnv(strictMemory, Files.createTempDirectory("leveldb"));
+            options = Options.make().env(env).memoryManager(strictMemory);
+            strictMemory = new StrictMemoryManager();
         }
 
         @AfterClass

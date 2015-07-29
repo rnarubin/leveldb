@@ -17,21 +17,19 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 
-import org.iq80.leveldb.Env;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.TableIterator;
 
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
-import java.nio.file.Path;
 import java.util.concurrent.ExecutionException;
 
 public final class TableCache
@@ -40,14 +38,12 @@ public final class TableCache
 
     // private final Finalizer<Table> finalizer = new Finalizer<>(1);
 
-    public TableCache(final Path databaseDir,
+    public TableCache(
             int tableCacheSize,
             final InternalKeyComparator userComparator,
             final Options options,
             final UncaughtExceptionHandler backgroundExceptionHandler)
     {
-        Preconditions.checkNotNull(databaseDir, "databaseName is null");
-
         cache = CacheBuilder.newBuilder()
                 .maximumSize(tableCacheSize)
                 .removalListener(new RemovalListener<Long, Table>()
@@ -71,7 +67,7 @@ public final class TableCache
                     public Table load(Long fileNumber)
                             throws IOException
                     {
-                        return openTableFile(databaseDir, fileNumber, userComparator, options);
+                        return openTableFile(fileNumber, userComparator, options);
                     }
                 });
     }
@@ -123,22 +119,12 @@ public final class TableCache
         cache.invalidate(number);
     }
 
-    private static Table openTableFile(Path databaseDir,
+    private static Table openTableFile(
             long fileNumber,
             InternalKeyComparator userComparator,
             Options options)
             throws IOException
     {
-        Path tableFileName = Filename.tableFileName(databaseDir, fileNumber);
-        Env env = options.env();
-
-        if (!env.fileExists(tableFileName)) {
-            Path sstName = Filename.sstTableFileName(databaseDir, fileNumber);
-            if (!env.fileExists(sstName)) {
-                throw new IOException("file " + tableFileName + " does not exist");
-            }
-            tableFileName = sstName;
-        }
-        return new Table(tableFileName, env.openRandomReadFile(tableFileName), userComparator, options);
+        return new Table(options.env().openRandomReadFile(FileInfo.table(fileNumber)), userComparator, options);
     }
 }

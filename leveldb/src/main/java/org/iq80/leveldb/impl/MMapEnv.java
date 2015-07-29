@@ -31,25 +31,23 @@ import java.nio.file.StandardOpenOption;
 import sun.nio.ch.FileChannelImpl;
 
 import org.iq80.leveldb.Deallocator;
-import org.iq80.leveldb.Env;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("restriction")
 public class MMapEnv
         extends FileChannelEnv
-        implements Env
 {
-    public static final Env INSTANCE = new MMapEnv();
     private static final Logger LOGGER = LoggerFactory.getLogger(MMapEnv.class);
 
     // could consider smaller values to evaluate performance characteristics
     private static final long MMAP_SIZE_LIMIT = Integer.MAX_VALUE;
 
-    public MMapEnv()
+    public MMapEnv(Path databaseDir)
     {
-        super(null);// uses of the memory manager are all overriden
+        super(MemoryManagers.heap(), databaseDir);
     }
 
     // @Override
@@ -65,23 +63,25 @@ public class MMapEnv
     // return new MMapSequentialWriteFile(path);
     // }
 
-    @Override
-    public SequentialReadFile openSequentialReadFile(Path path)
-            throws IOException
-    {
-        FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
-        return channel.size() > MMAP_SIZE_LIMIT ? new MultiMMapSequentialReadFile(channel) : new SingleMMapReadFile(
-                channel);
-    }
-
-    @Override
-    public RandomReadFile openRandomReadFile(Path path)
-            throws IOException
-    {
-        FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
-        return channel.size() > MMAP_SIZE_LIMIT ? new MultiMMapRandomReadFile(channel)
-                : new SingleMMapReadFile(channel);
-    }
+    // @Override
+    // public SequentialReadFile openSequentialReadFile(Path path)
+    // throws IOException
+    // {
+    // FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
+    // return channel.size() > MMAP_SIZE_LIMIT ? new
+    // MultiMMapSequentialReadFile(channel) : new SingleMMapReadFile(
+    // channel);
+    // }
+    //
+    // @Override
+    // public RandomReadFile openRandomReadFile(Path path)
+    // throws IOException
+    // {
+    // FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
+    // return channel.size() > MMAP_SIZE_LIMIT ? new
+    // MultiMMapRandomReadFile(channel)
+    // : new SingleMMapReadFile(channel);
+    // }
 
     private static final Method unmap;
     static {

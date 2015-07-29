@@ -25,30 +25,29 @@ import java.nio.ByteOrder;
 import java.nio.channels.Channel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.iq80.leveldb.Deallocator;
-import org.iq80.leveldb.Env;
 import org.iq80.leveldb.LongToIntFunction;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.SizeOf;
 
 public class FileChannelEnv
-        implements Env
+        extends FileSystemEnv
 {
     private final MemoryManager memory;
 
-    public FileChannelEnv(MemoryManager memory)
+    public FileChannelEnv(MemoryManager memory, Path databaseDir)
     {
+        this(memory, databaseDir, false);
+    }
+
+    public FileChannelEnv(MemoryManager memory, Path databaseDir, boolean legacySST)
+    {
+        super(databaseDir, legacySST);
         this.memory = memory;
     }
 
@@ -78,63 +77,6 @@ public class FileChannelEnv
             throws IOException
     {
         return new FileChannelReadFile(path, memory);
-    }
-
-    @Override
-    public void deleteFile(Path path)
-            throws IOException
-    {
-        Files.delete(path);
-    }
-
-    @Override
-    public boolean fileExists(Path path)
-            throws IOException
-    {
-        return Files.exists(path);
-    }
-
-    @Override
-    public void rename(Path src, Path target)
-            throws IOException
-    {
-        Files.move(src, target, StandardCopyOption.REPLACE_EXISTING);
-    }
-
-    @Override
-    public void createDir(Path path)
-            throws IOException
-    {
-        if (!Files.exists(path)) {
-            Files.createDirectories(path);
-        }
-        else if (!Files.isDirectory(path)) {
-            throw new IllegalArgumentException("Database directory " + path + " is not a directory");
-        }
-        // else exists and is directory, do nothing
-    }
-
-    @Override
-    public void deleteDir(Path path)
-            throws IOException
-    {
-        Files.delete(Files.walkFileTree(path, new SimpleFileVisitor<Path>()
-        {
-            @Override
-            public FileVisitResult visitFile(Path p, BasicFileAttributes attr)
-                    throws IOException
-            {
-                Files.delete(p);
-                return FileVisitResult.CONTINUE;
-            }
-        }));
-    }
-
-    @Override
-    public DirectoryStream<Path> getChildren(Path path)
-            throws IOException
-    {
-        return Files.newDirectoryStream(path);
     }
 
     @Override

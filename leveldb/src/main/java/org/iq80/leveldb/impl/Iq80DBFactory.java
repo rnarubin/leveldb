@@ -19,6 +19,7 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Options;
 
 import java.io.BufferedReader;
@@ -72,7 +73,9 @@ public class Iq80DBFactory
     public void destroy(File path, Options options)
             throws IOException
     {
-        options.env().deleteDir(path.toPath());
+        // TODO rework the DBFactory interface, it's not file agnostic
+        Env fsEnv = new FileChannelEnv(null, path.toPath());
+        fsEnv.deleteDir(fsEnv.createDBDir());
     }
 
     @Override

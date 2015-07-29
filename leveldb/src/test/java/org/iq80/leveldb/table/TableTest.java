@@ -20,6 +20,7 @@ package org.iq80.leveldb.table;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.FileChannelEnv;
@@ -49,8 +50,8 @@ import static org.testng.Assert.assertTrue;
 public abstract class TableTest
 {
     private static final DBBufferComparator byteCompare = new BytewiseComparator();
-    private Path path;
-    private final Path dbpath;
+    private FileInfo fileInfo;
+    protected final Path dbpath;
 
     public TableTest()
     {
@@ -68,7 +69,9 @@ public abstract class TableTest
     public void testEmptyFile()
             throws Exception
     {
-        new Table(path, getEnv().openRandomReadFile(path), new InternalKeyComparator(byteCompare), Options.make()
+        getEnv().openSequentialWriteFile(fileInfo).close();
+        new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare), Options.make()
+                .env(getEnv())
                 .bufferComparator(byteCompare)
                 .verifyChecksums(true)
                 .compression(Snappy.instance())).close();
@@ -148,7 +151,7 @@ public abstract class TableTest
                     .compression(Snappy.instance())
                     .bufferComparator(byteCompare);
 
-            try (SequentialWriteFile writeFile = getEnv().openSequentialWriteFile(path);
+            try (SequentialWriteFile writeFile = getEnv().openSequentialWriteFile(fileInfo);
                     TableBuilder builder = new TableBuilder(options, writeFile, new InternalKeyComparator(
                             options.bufferComparator()))) {
                 for (Entry<InternalKey, ByteBuffer> entry : entries) {
@@ -157,9 +160,8 @@ public abstract class TableTest
                 builder.finish();
             }
 
-            try (Table table = new Table(path, getEnv().openRandomReadFile(path),
-                    new InternalKeyComparator(byteCompare), options);
-                    TableIterator tableIter = table.retain().iterator()) {
+            try (Table table = new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare),
+                    options); TableIterator tableIter = table.retain().iterator()) {
                 ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
 
                 seekingIterator.seekToFirst();
@@ -213,18 +215,18 @@ public abstract class TableTest
     private void reopenFile()
             throws IOException
     {
-        if (path != null && getEnv().fileExists(path)) {
-            getEnv().deleteFile(path);
+        if (fileInfo != null && getEnv().fileExists(fileInfo)) {
+            getEnv().deleteFile(fileInfo);
         }
-        path = Files.createTempFile(dbpath, "table", ".ldb");
+        fileInfo = FileInfo.table(42);
     }
 
     @AfterMethod
     public void tearDown()
             throws Exception
     {
-        if (path != null && getEnv().fileExists(path)) {
-            getEnv().deleteFile(path);
+        if (fileInfo != null && getEnv().fileExists(fileInfo)) {
+            getEnv().deleteFile(fileInfo);
         }
     }
 
@@ -237,7 +239,7 @@ public abstract class TableTest
         @BeforeMethod
         public void setupEnv()
         {
-            env = new FileChannelEnv(strictMemory = new StrictMemoryManager());
+            env = new FileChannelEnv(strictMemory = new StrictMemoryManager(), dbpath);
         }
 
         @AfterMethod
@@ -260,7 +262,7 @@ public abstract class TableTest
         @Override
         protected Env getEnv()
         {
-            return MMapEnv.INSTANCE;
+            return new MMapEnv(dbpath);
         }
     }
 }

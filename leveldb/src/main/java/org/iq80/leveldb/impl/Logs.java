@@ -17,13 +17,13 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 
 public final class Logs
 {
@@ -31,10 +31,10 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(Path path, long fileNumber, Options options)
+    public static LogWriter createLogWriter(FileInfo fileInfo, long fileNumber, Options options)
             throws IOException
     {
-        return new LogWriter(options.env().openMultiWriteFile(path), fileNumber);
+        return new LogWriter(options.env().openMultiWriteFile(fileInfo), fileNumber);
     }
 
     public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)

@@ -25,6 +25,7 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.util.FileUtils;
+import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -135,9 +136,10 @@ public class NativeInteropTest
     public void crud(DBFactory firstFactory, DBFactory secondFactory)
             throws IOException, DBException
     {
-        Options options = Options.make().createIfMissing(true);
-
         File path = getTestDirectory(getClass().getName() + "_" + NEXT_ID.incrementAndGet());
+        Options options = Options.make()
+                .createIfMissing(true)
+                .env(new FileChannelEnv(MemoryManagers.heap(), path.toPath(), true));
         DB db = firstFactory.open(path, options);
 
         WriteOptions wo = WriteOptions.make().sync(false);

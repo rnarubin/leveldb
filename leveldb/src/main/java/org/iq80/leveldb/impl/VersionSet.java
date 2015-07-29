@@ -26,6 +26,9 @@ import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.GrowingBuffer;
@@ -36,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -101,7 +105,7 @@ public class VersionSet
     private void initializeIfNeeded()
             throws IOException
     {
-        if (!options.env().fileExists(Filename.currentFileName(databaseDir))) {
+        if (!options.env().fileExists(FileInfo.current())) {
             VersionEdit edit = new VersionEdit();
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
@@ -109,14 +113,14 @@ public class VersionSet
             edit.setLastSequenceNumber(lastSequence.get());
 
             long fileNum;
-            try (LogWriter log = Logs.createLogWriter(Filename.descriptorFileName(databaseDir, manifestFileNumber),
-                    manifestFileNumber, options); GrowingBuffer record = edit.encode(options.memoryManager())) {
+            try (LogWriter log = Logs.createLogWriter(FileInfo.manifest(manifestFileNumber), manifestFileNumber,
+                    options); GrowingBuffer record = edit.encode(options.memoryManager())) {
                 fileNum = log.getFileNumber();
                 writeSnapshot(log);
                 log.addRecord(record.get(), true);
             }
 
-            Filename.setCurrentFile(options.env(), databaseDir, fileNum);
+            setCurrentFile(options.env(), fileNum);
         }
     }
 
@@ -282,13 +286,13 @@ public class VersionSet
         finalizeVersion(version);
 
         boolean createdNewManifest = false;
-        Path manifestFileName = Filename.descriptorFileName(databaseDir, manifestFileNumber);
+        FileInfo manifestFile = FileInfo.manifest(manifestFileNumber);
         try {
             // Initialize new descriptor log file if necessary by creating
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(manifestFileName, manifestFileNumber, options);
+                descriptorLog = Logs.createLogWriter(manifestFile, manifestFileNumber, options);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
@@ -301,14 +305,14 @@ public class VersionSet
             // If we just created a new descriptor file, install it by writing a
             // new CURRENT file that points to it.
             if (createdNewManifest) {
-                Filename.setCurrentFile(options.env(), databaseDir, descriptorLog.getFileNumber());
+                setCurrentFile(options.env(), descriptorLog.getFileNumber());
             }
         }
         catch (IOException e) {
             // New manifest file was not installed, so clean up state and delete the file
             if (createdNewManifest) {
                 descriptorLog.close();
-                options.env().deleteFile(manifestFileName);
+                options.env().deleteFile(manifestFile);
                 descriptorLog = null;
             }
             throw e;
@@ -343,10 +347,10 @@ public class VersionSet
     {
 
         // Read "CURRENT" file, which contains a pointer to the current manifest file
-        Path currentFile = Filename.currentFileName(databaseDir);
+        FileInfo currentFile = FileInfo.current();
         Preconditions.checkState(options.env().fileExists(currentFile), "CURRENT file does not exist");
 
-        String currentName = Filename.readStringFromFile(options.env(), currentFile);
+        String currentName = readStringFromFile(options.env(), currentFile);
         if (currentName.isEmpty() || currentName.charAt(currentName.length() - 1) != '\n') {
             throw new IllegalStateException("CURRENT file does not end with newline");
         }
@@ -354,7 +358,7 @@ public class VersionSet
 
         // open file channel
         try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
-                Filename.descriptorFileName(databaseDir, currentName));
+                FileInfo.manifest(descriptorFileNumber(currentName)));
                 LogReader reader = new LogReader(fileInput, throwExceptionMonitor(), true, 0,
                         options.memoryManager())) {
             // read log edit log
@@ -688,9 +692,72 @@ public class VersionSet
     }
 
     /**
-     * A helper class so we can efficiently apply a whole sequence
-     * of edits to a particular state without creating intermediate
-     * Versions that contain full copies of the intermediate state.
+     * Make the CURRENT file point to the descriptor file with the specified
+     * number.
+     *
+     * @return true if successful; false otherwise
+     */
+    public static void setCurrentFile(Env env, long descriptorNumber)
+            throws IOException
+    {
+        String manifest = descriptorStringName(descriptorNumber);
+        FileInfo temp = FileInfo.temp(descriptorNumber);
+
+        writeStringToFileSync(env, manifest + "\n", temp);
+
+        try {
+            env.replace(temp, FileInfo.current());
+        }
+        catch (IOException e) {
+            env.deleteFile(temp);
+            throw e;
+        }
+    }
+
+    private static final String MANIFEST_PREFIX = "MANIFEST-";
+
+    public static String descriptorStringName(long fileNumber)
+    {
+        Preconditions.checkArgument(fileNumber >= 0, "number is negative");
+        return String.format(MANIFEST_PREFIX + "%06d", fileNumber);
+    }
+
+    public static long descriptorFileNumber(String stringName)
+    {
+        return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
+    }
+
+    public static void writeStringToFileSync(Env env, String str, FileInfo fileInfo)
+            throws IOException
+    {
+        try (SequentialWriteFile file = env.openSequentialWriteFile(fileInfo)) {
+            file.write(ByteBuffer.wrap(str.getBytes(StandardCharsets.UTF_8)));
+            file.sync();
+        }
+    }
+
+    public static String readStringFromFile(Env env, FileInfo fileInfo)
+            throws IOException
+    {
+        StringBuilder builder = new StringBuilder();
+        // rare enough that it's really not an issue not using the
+        // MemoryManager; furthermore, accessing the known underlying array
+        // facilitates String conversion
+        ByteBuffer buffer = ByteBuffer.allocate(4096);
+        try (SequentialReadFile reader = env.openSequentialReadFile(fileInfo)) {
+            while (reader.read(buffer) > 0) {
+                buffer.flip();
+                builder.append(new String(buffer.array(), buffer.position(), buffer.remaining(), StandardCharsets.UTF_8));
+                buffer.clear();
+            }
+        }
+        return builder.toString();
+    }
+
+    /**
+     * A helper class so we can efficiently apply a whole sequence of edits to a
+     * particular state without creating intermediate Versions that contain full
+     * copies of the intermediate state.
      */
     private static class Builder
     {

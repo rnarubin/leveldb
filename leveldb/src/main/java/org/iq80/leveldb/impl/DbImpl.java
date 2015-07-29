@@ -26,17 +26,17 @@ import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.LockFile;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.impl.Filename.FileInfo;
-import org.iq80.leveldb.impl.Filename.FileType;
 import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
 import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.TableBuilder;
@@ -53,8 +53,6 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
-import java.nio.file.DirectoryIteratorException;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -97,6 +95,7 @@ public class DbImpl
     private final Options options;
     private final UserOptions userOptions;
     private final Path databaseDir;
+    private final DBHandle dbHandle;
     private final TableCache tableCache;
     private final LockFile dbLock;
     private final VersionSet versions;
@@ -139,7 +138,7 @@ public class DbImpl
         Preconditions.checkNotNull(userOptions, "options is null");
         Preconditions.checkNotNull(databaseDir, "databaseDir is null");
         this.userOptions = new UserOptions(Options.copy(userOptions));
-        this.options = sanitizeOptions(userOptions);
+        this.options = sanitizeOptions(userOptions, databaseDir);
         Env env = this.options.env();
 
         this.databaseDir = databaseDir;
@@ -160,25 +159,25 @@ public class DbImpl
 
         // Reserve ten files or so for other uses and give the rest to TableCache.
         int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(databaseDir, tableCacheSize, internalKeyComparator, options,
+        tableCache = new TableCache(tableCacheSize, internalKeyComparator, options,
                 backgroundExceptionHandler);
 
         // create the version set
 
         // create the database dir if it does not already exist
-        env.createDir(databaseDir);
+        dbHandle = env.createDBDir();
 
         mutex.lock();
         try {
             // lock the database dir
-            Path lockFile = Filename.lockFileName(databaseDir);
+            FileInfo lockFile = FileInfo.lock();
             dbLock = env.lockFile(lockFile);
             if (dbLock == null) {
                 throw new IOException("Unable to acquire lock on " + lockFile);
             }
 
             // verify the "current" file
-            if (env.fileExists(Filename.currentFileName(databaseDir))) {
+            if (env.fileExists(FileInfo.current())) {
                 Preconditions.checkArgument(!options.errorIfExists(),
                         "Database '%s' exists and the error if exists option is enabled", databaseDir);
             }
@@ -203,19 +202,12 @@ public class DbImpl
             long previousLogNumber = versions.getPrevLogNumber();
 
             List<Long> logs = Lists.newArrayList();
-            try (DirectoryStream<Path> fileNames = env.getChildren(databaseDir)) {
-                for (Path filename : fileNames) {
-                    FileInfo fileInfo = Filename.parseFileName(filename);
-
-                    if (fileInfo != null
-                            && fileInfo.getFileType() == FileType.LOG
-                            && ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
-                        logs.add(fileInfo.getFileNumber());
-                    }
+            for (FileInfo fileInfo : env.getOwnedFiles(dbHandle)) {
+                if (fileInfo != null
+                        && fileInfo.getFileType() == FileInfo.FileType.LOG
+                        && ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
+                    logs.add(fileInfo.getFileNumber());
                 }
-            }
-            catch (DirectoryIteratorException e) {
-                throw e.getCause();
             }
 
             // Recover in the order in which the logs were generated
@@ -230,8 +222,7 @@ public class DbImpl
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            LogWriter log = Logs.createLogWriter(Filename.logFileName(databaseDir, logFileNumber), logFileNumber,
-                    options);
+            LogWriter log = Logs.createLogWriter(FileInfo.log(logFileNumber), logFileNumber, options);
             MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
                     options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
@@ -266,7 +257,7 @@ public class DbImpl
 
     // deprecated wrt user-facing api
     @SuppressWarnings("deprecation")
-    private static Options sanitizeOptions(Options userOptions)
+    private static Options sanitizeOptions(Options userOptions, Path databaseDir)
     {
         Options ret = Options.copy(userOptions);
         if (ret.memoryManager() == null) {
@@ -287,7 +278,7 @@ public class DbImpl
             // TODO mmap sanitize
             // ret.env(USE_MMAP_DEFAULT ? MMapEnv.INSTANCE : new
             // FileChannelEnv(ret.memoryManager()));
-            ret.env(new FileChannelEnv(ret.memoryManager()));
+            ret.env(new FileChannelEnv(ret.memoryManager(), databaseDir));
         }
         return ret;
     }
@@ -305,6 +296,12 @@ public class DbImpl
         {
             return this.options.memoryManager() != null;
         }
+    }
+
+    public void destroy()
+            throws IOException
+    {
+        options.env().deleteDir(dbHandle);
     }
 
     @Override
@@ -371,6 +368,8 @@ public class DbImpl
         return null;
     }
 
+    // info log deprecated, but we won't delete it
+    @SuppressWarnings("deprecation")
     private void deleteObsoleteFiles()
             throws IOException
     {
@@ -380,52 +379,47 @@ public class DbImpl
             live.add(fileMetaData.getNumber());
         }
 
-        try (DirectoryStream<? extends Path> files = options.env().getChildren(databaseDir)) {
-            for (Path path : files) {
-                FileInfo fileInfo = Filename.parseFileName(path);
-                if (fileInfo == null) {
-                    continue;
-                }
-                long number = fileInfo.getFileNumber();
-                boolean keep = true;
-                switch (fileInfo.getFileType()) {
-                    case LOG:
-                        keep = ((number >= versions.getLogNumber()) || (number == versions.getPrevLogNumber()));
-                        break;
-                    case DESCRIPTOR:
-                        // Keep my manifest file, and any newer incarnations'
-                        // (in case there is a race that allows other
-                        // incarnations)
-                        keep = (number >= versions.getManifestFileNumber());
-                        break;
-                    case TABLE:
-                        keep = live.contains(number);
-                        break;
-                    case TEMP:
-                        // Any temp files that are currently being written to
-                        // must
-                        // be recorded in pending_outputs_, which is inserted
-                        // into "live"
-                        keep = live.contains(number);
-                        break;
-                    case CURRENT:
-                    case DB_LOCK:
-                    case INFO_LOG:
-                        keep = true;
-                        break;
-                }
-
-                if (!keep) {
-                    if (fileInfo.getFileType() == FileType.TABLE) {
-                        tableCache.evict(number);
-                    }
-                    LOGGER.debug("{} delete type={} #{}", this, fileInfo.getFileType(), number);
-                    options.env().deleteFile(path);
-                }
+        for (FileInfo fileInfo : options.env().getOwnedFiles(dbHandle)) {
+            // FileInfo fileInfo = Filename.parseFileName(path);
+            if (fileInfo == null) {
+                continue;
             }
-        }
-        catch (DirectoryIteratorException e) {
-            throw e.getCause();
+            long number = fileInfo.getFileNumber();
+            boolean keep = true;
+            switch (fileInfo.getFileType()) {
+                case LOG:
+                    keep = ((number >= versions.getLogNumber()) || (number == versions.getPrevLogNumber()));
+                    break;
+                case MANIFEST:
+                    // Keep my manifest file, and any newer incarnations'
+                    // (in case there is a race that allows other
+                    // incarnations)
+                    keep = (number >= versions.getManifestFileNumber());
+                    break;
+                case TABLE:
+                    keep = live.contains(number);
+                    break;
+                case TEMP:
+                    // Any temp files that are currently being written to
+                    // must
+                    // be recorded in pending_outputs_, which is inserted
+                    // into "live"
+                    keep = live.contains(number);
+                    break;
+                case INFO_LOG:
+                case CURRENT:
+                case DB_LOCK:
+                    keep = true;
+                    break;
+            }
+
+            if (!keep) {
+                if (fileInfo.getFileType() == FileInfo.FileType.TABLE) {
+                    tableCache.evict(number);
+                }
+                LOGGER.debug("{} delete type={} #{}", this, fileInfo.getFileType(), number);
+                options.env().deleteFile(fileInfo);
+            }
         }
     }
 
@@ -594,8 +588,7 @@ public class DbImpl
         Preconditions.checkState(mutex.isHeldByCurrentThread());
 
         LogMonitor logMonitor = LogMonitors.logMonitor();
-        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
-                Filename.logFileName(databaseDir, fileNumber));
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(FileInfo.log(fileNumber));
                 LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, options.memoryManager())) {
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
@@ -1073,7 +1066,7 @@ public class DbImpl
                 try {
                     this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
                             userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
-                            Filename.logFileName(databaseDir, logNumber), logNumber, options)), current);
+                            FileInfo.log(logNumber), logNumber, options)), current);
                 }
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
@@ -1188,12 +1181,12 @@ public class DbImpl
             throws IOException
     {
         Env env = options.env();
-        Path fileName = Filename.tableFileName(databaseDir, fileNumber);
+        FileInfo fileInfo = FileInfo.table(fileNumber);
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
             FileMetaData fileMetaData = null;
-            try (SequentialWriteFile file = env.openSequentialWriteFile(fileName)) {
+            try (SequentialWriteFile file = env.openSequentialWriteFile(fileInfo)) {
                 try (TableBuilder tableBuilder = new TableBuilder(options, file, internalKeyComparator)) {
                     for (Entry<InternalKey, ByteBuffer> entry : data) {
                         // update keys
@@ -1226,8 +1219,8 @@ public class DbImpl
             return fileMetaData;
         }
         catch (IOException e) {
-            if (env.fileExists(fileName)) {
-                env.deleteFile(fileName);
+            if (env.fileExists(fileInfo)) {
+                env.deleteFile(fileInfo);
             }
             throw e;
         }
@@ -1358,8 +1351,7 @@ public class DbImpl
             compactionState.currentSmallest = null;
             compactionState.currentLargest = null;
 
-            compactionState.outfile = options.env().openSequentialWriteFile(
-                    Filename.tableFileName(databaseDir, fileNumber));
+            compactionState.outfile = options.env().openSequentialWriteFile(FileInfo.table(fileNumber));
             compactionState.builder = new TableBuilder(options, compactionState.outfile, internalKeyComparator);
         }
         finally {
@@ -1426,7 +1418,7 @@ public class DbImpl
             // Discard any files we may have created during this failed compaction
             for (FileMetaData output : compact.outputs) {
                 try {
-                    options.env().deleteFile(Filename.tableFileName(databaseDir, output.getNumber()));
+                    options.env().deleteFile(FileInfo.table(output.getNumber()));
                 }
                 catch (IOException deleteFailed) {
                     LOGGER.warn("{} failed to delete file {}", this, output, deleteFailed);
