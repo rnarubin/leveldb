@@ -23,7 +23,7 @@ public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
 
-    private static final Options DEFAULT_OPTIONS = OptionsConfiguration.populateFromProperties("leveldb.options.",
+    private static final Options DEFAULT_OPTIONS = OptionsUtil.populateFromProperties("leveldb.options.",
             new Options(null));
 
     /**
@@ -37,7 +37,7 @@ public class Options
 
     private Options(final Options that)
     {
-        OptionsConfiguration.copyFields(Options.class, that, this);
+        OptionsUtil.copyFields(Options.class, that, this);
     }
 
     public static Options make()
@@ -55,6 +55,12 @@ public class Options
         catch (final CloneNotSupportedException e) {
             throw new Error(e);
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return OptionsUtil.toString(this);
     }
 
     private boolean createIfMissing = true;

@@ -267,11 +267,9 @@ public class DbBenchmark
                 valueSize,
                 (int) (valueSize * compressionRatio + 0.5));
         System.out.printf("Entries:    %d\n", num_);
-        System.out.printf("RawSize:    %.1f MB (estimated)\n",
-                ((keySize + valueSize) * num_) / 1048576.0);
+        System.out.printf("RawSize:    %.1f MB (estimated)\n", ((keySize + valueSize) / 1048576.0) * num_);
         System.out.printf("FileSize:   %.1f MB (estimated)\n",
-                (((keySize + valueSize * compressionRatio) * num_)
-                        / 1048576.0));
+                (((keySize + valueSize * compressionRatio) / 1048576.0) * num_));
         printOptions();
         printWarnings();
         System.out.printf("------------------------------------------------\n");
@@ -279,7 +277,7 @@ public class DbBenchmark
 
     void printOptions()
     {
-        System.out.println(defaultOptions());
+        System.out.println(defaultOptions().toString().replace(", ", "\n"));
     }
 
     void printWarnings()

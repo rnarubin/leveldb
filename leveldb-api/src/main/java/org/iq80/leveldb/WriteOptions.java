@@ -20,7 +20,7 @@ package org.iq80.leveldb;
 public class WriteOptions
         implements Cloneable
 {
-    private static final WriteOptions DEFAULT_WRITE_OPTIONS = OptionsConfiguration.populateFromProperties(
+    private static final WriteOptions DEFAULT_WRITE_OPTIONS = OptionsUtil.populateFromProperties(
             "leveldb.writeOptions.", new WriteOptions(null));
 
     /**
@@ -33,7 +33,7 @@ public class WriteOptions
 
     private WriteOptions(WriteOptions that)
     {
-        OptionsConfiguration.copyFields(WriteOptions.class, that, this);
+        OptionsUtil.copyFields(WriteOptions.class, that, this);
     }
 
     public static WriteOptions make()

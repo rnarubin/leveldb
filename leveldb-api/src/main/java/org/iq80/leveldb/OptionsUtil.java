@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 
-class OptionsConfiguration
+class OptionsUtil
 {
     @SuppressWarnings("unchecked")
     static <T> T populateFromProperties(String prefix, T object)
@@ -168,4 +168,27 @@ class OptionsConfiguration
 
     }
 
+    static String toString(Options opt)
+    {
+        StringBuilder sb = new StringBuilder("Options [");
+        for (final Field f : opt.getClass().getDeclaredFields()) {
+            final int mods = f.getModifiers();
+            if (Modifier.isFinal(mods) || Modifier.isStatic(mods)) {
+                continue;
+            }
+            f.setAccessible(true);
+            sb.append(f.getName());
+            sb.append('=');
+            try {
+                sb.append(f.get(opt));
+            }
+            catch (IllegalArgumentException | IllegalAccessException e) {
+                throw new Error(e);
+            }
+            sb.append(", ");
+        }
+        sb.delete(sb.length() - 2, sb.length());
+        sb.append(']');
+        return sb.toString();
+    }
 }

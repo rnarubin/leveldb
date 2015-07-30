@@ -20,7 +20,7 @@ package org.iq80.leveldb;
 public class ReadOptions
         implements Cloneable
 {
-    private static final ReadOptions DEFAULT_READ_OPTIONS = OptionsConfiguration.populateFromProperties(
+    private static final ReadOptions DEFAULT_READ_OPTIONS = OptionsUtil.populateFromProperties(
             "leveldb.readOptions.", new ReadOptions(null));
 
     /**
@@ -33,7 +33,7 @@ public class ReadOptions
 
     private ReadOptions(ReadOptions that)
     {
-        OptionsConfiguration.copyFields(ReadOptions.class, that, this);
+        OptionsUtil.copyFields(ReadOptions.class, that, this);
     }
 
     public static ReadOptions make()

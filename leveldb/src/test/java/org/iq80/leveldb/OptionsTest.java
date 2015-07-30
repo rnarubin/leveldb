@@ -85,7 +85,7 @@ public abstract class OptionsTest
         try {
             Field defaultOptions = clazz.getDeclaredField(defaultName);
             defaultOptions.setAccessible(true);
-            OptionsConfiguration.populateFromProperties(properties, prefix, clazz, (T) defaultOptions.get(null));
+            OptionsUtil.populateFromProperties(properties, prefix, clazz, (T) defaultOptions.get(null));
         }
         catch (NoSuchFieldException | SecurityException | IllegalArgumentException | IllegalAccessException e) {
             throw new Error(e);
