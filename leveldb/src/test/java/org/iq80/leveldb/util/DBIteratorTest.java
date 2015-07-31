@@ -49,6 +49,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
@@ -78,6 +79,7 @@ public class DBIteratorTest
     private DB db;
     private File tempDir;
     private String testName;
+    private StrictMemoryManager strictMemory;
 
     static {
         Random rand = new Random(0);
@@ -105,7 +107,8 @@ public class DBIteratorTest
     {
         testName = method.getName();
         tempDir = FileUtils.createTempDir("java-leveldb-testing-temp");
-        db = Iq80DBFactory.factory.open(tempDir, options);
+        strictMemory = new StrictMemoryManager();
+        db = Iq80DBFactory.factory.open(tempDir, options.memoryManager(strictMemory));
     }
 
     @AfterMethod
@@ -113,7 +116,12 @@ public class DBIteratorTest
             throws Exception
     {
         try {
-            db.close();
+            try {
+                strictMemory.close();
+            }
+            finally {
+                db.close();
+            }
         }
         finally {
             FileUtils.deleteRecursively(tempDir);
@@ -183,7 +191,7 @@ public class DBIteratorTest
             final double seekCheck)
             throws ExecutionException, InterruptedException
     {
-        doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, new ReadOptions(), null);
+        doSeeks(db, expectedForward, expectedBackward, seekRate, seekCheck, ReadOptions.make(), null);
     }
 
     /**
@@ -411,7 +419,7 @@ public class DBIteratorTest
 
             List<Entry<String, String>> forward = ordered(firstHalf), backward = reverseOrdered(firstHalf);
 
-            // ReadOptions snapshotRead = new ReadOptions().snapshot(snapshot);
+            // ReadOptions snapshotRead = ReadOptions.make().snapshot(snapshot);
             // snapshot should retain the entries of the first insertion batch
             // StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
 
@@ -478,7 +486,7 @@ public class DBIteratorTest
             expected.add(Maps.immutableEntry("" + s.charAt(0), "" + s.charAt(1)));
         }
         List<Entry<String, String>> reverseExpected = reverseOrdered(expected);
-        try (StringDbIterator actual = new StringDbIterator(db.iterator(new ReadOptions().snapshot(snapshot)))) {
+        try (StringDbIterator actual = new StringDbIterator(db.iterator(ReadOptions.make().snapshot(snapshot)))) {
 
             actual.seekToFirst();
             assertForwardSame(actual, expected);
@@ -492,6 +500,40 @@ public class DBIteratorTest
     }
 
     @Test
+    public void testFailureWithoutSeek() throws IOException
+    {
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().next();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().prev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().hasNext();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().hasPrev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().peekNext();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+
+        try{
+            Iq80DBFactory.factory.open(tempDir, options).iterator().peekPrev();
+            Assert.fail();
+        }catch(IllegalStateException expected){}
+    }
+
+    @Test
     public void testMixedIteration()
             throws IOException
     {
@@ -501,6 +543,7 @@ public class DBIteratorTest
         ReversePeekingIterator<Entry<String, String>> expected =
                 ReverseIterators.reversePeekingIterator(ordered);
         try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+            actual.seekToFirst();
             mixedIteration(entries.size(), actual, expected);
         }
     }
@@ -514,6 +557,7 @@ public class DBIteratorTest
         List<Entry<String, String>> preserved = deletePortion(db, ordered, 0.75);
 
         try (StringDbIterator iter = new StringDbIterator(db.iterator())) {
+            iter.seekToFirst();
             mixedIteration(preserved.size(), iter, ReverseIterators.reversePeekingIterator(preserved));
         }
     }
@@ -674,7 +718,7 @@ public class DBIteratorTest
         return db.write(batch, writeOptions);
     }
 
-    private final static WriteOptions writeOptions = new WriteOptions().snapshot(true);
+    private final static WriteOptions writeOptions = WriteOptions.make().snapshot(true);
 
     private static void put(DB db, String key, String val)
     {
@@ -778,7 +822,6 @@ public class DBIteratorTest
             return iterator.hasPrev();
         }
 
-        @Override
         public void seekToLast()
         {
             iterator.seekToLast();

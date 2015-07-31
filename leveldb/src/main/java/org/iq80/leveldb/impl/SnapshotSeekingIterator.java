@@ -21,43 +21,39 @@ package org.iq80.leveldb.impl;
 import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
-import org.iq80.leveldb.util.DbIterator;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.MergingIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
 import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.*;
 
 public final class SnapshotSeekingIterator
-        extends AbstractReverseSeekingIterator<Slice, Slice>
+        extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
         implements Closeable
 {
-    private final DbIterator iterator;
+    private final MergingIterator iterator;
     private final SnapshotImpl snapshot;
-    private final Comparator<Slice> userComparator;
+    private final Comparator<ByteBuffer> userComparator;
     // indicates the direction in which the iterator was last advanced
     private Direction direction;
-    private Entry<InternalKey, Slice> savedEntry;
+    private Entry<InternalKey, ByteBuffer> savedEntry;
 
     protected enum Direction
     {
         FORWARD, REVERSE
     }
 
-    public SnapshotSeekingIterator(
-            DbIterator iterator,
-            SnapshotImpl snapshot,
-            Comparator<Slice> userComparator)
+    public SnapshotSeekingIterator(MergingIterator iterator, SnapshotImpl snapshot, Comparator<ByteBuffer> userComparator)
     {
         this.iterator = iterator;
         this.snapshot = snapshot;
         this.userComparator = userComparator;
         this.snapshot.getVersion().retain();
         this.savedEntry = null;
-        seekToFirst();
     }
 
     @Override
@@ -76,13 +72,6 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected void seekToLastInternal()
-    {
-        seekToEndInternal();
-        getPrevElement();
-    }
-
-    @Override
     public void seekToEndInternal()
     {
         iterator.seekToEnd();
@@ -91,15 +80,15 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected void seekInternal(Slice targetKey)
+    protected void seekInternal(ByteBuffer targetKey)
     {
-        iterator.seek(new InternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
+        iterator.seek(new TransientInternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
         findNextUserEntry(false, null);
         direction = REVERSE; // the next user entry has been found, but not yet advanced
     }
 
     @Override
-    protected Entry<Slice, Slice> getNextElement()
+    protected Entry<ByteBuffer, ByteBuffer> getNextElement()
     {
         if (direction == REVERSE) {
             if (!iterator.hasNext()) {
@@ -111,12 +100,15 @@ public final class SnapshotSeekingIterator
             // the last valid entry was returned by getPrevElement
             // so iterator's next must be the valid entry
         }
-        else {
+        else if (direction == FORWARD) {
             findNextUserEntry(true, savedEntry);
 
             if (!iterator.hasNext()) {
                 return null;
             }
+        }
+        else {
+            throw new IllegalStateException("must seek before iterating");
         }
 
         savedEntry = iterator.next();
@@ -125,7 +117,7 @@ public final class SnapshotSeekingIterator
     }
 
     @Override
-    protected Entry<Slice, Slice> getPrevElement()
+    protected Entry<ByteBuffer, ByteBuffer> getPrevElement()
     {
         if (direction == FORWARD) {
             if (!iterator.hasPrev()) {
@@ -137,40 +129,43 @@ public final class SnapshotSeekingIterator
             // so iterator's prev must be the valid entry
             savedEntry = iterator.prev();
         }
-        else {
+        else if (direction == REVERSE) {
             findPrevUserEntry();
 
             if (savedEntry == null) {
                 return null;
             }
         }
+        else {
+            throw new IllegalStateException("must seek before iterating");
+        }
 
         return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
     }
 
     @Override
-    protected Entry<Slice, Slice> peekInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekInternal()
     {
         if (hasNextInternal()) {
-            Entry<InternalKey, Slice> peek = iterator.peek();
+            Entry<InternalKey, ByteBuffer> peek = iterator.peek();
             return Maps.immutableEntry(peek.getKey().getUserKey(), peek.getValue());
         }
         return null;
     }
 
     @Override
-    protected Entry<Slice, Slice> peekPrevInternal()
+    protected Entry<ByteBuffer, ByteBuffer> peekPrevInternal()
     {
         if (hasPrevInternal()) {
-            Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+            Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
             return Maps.immutableEntry(peekPrev.getKey().getUserKey(), peekPrev.getValue());
         }
         return null;
     }
 
-    private void findNextUserEntry(boolean skipping, Entry<InternalKey, Slice> skipEntry)
+    private void findNextUserEntry(boolean skipping, Entry<InternalKey, ByteBuffer> skipEntry)
     {
-        Slice skipKey;
+        ByteBuffer skipKey;
         if (skipEntry == null) {
             skipping = false;
             skipKey = null;
@@ -204,7 +199,7 @@ public final class SnapshotSeekingIterator
     {
         ValueType valueType = ValueType.DELETION;
         while (iterator.hasPrev()) {
-            Entry<InternalKey, Slice> peekPrev = iterator.peekPrev();
+            Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
             InternalKey internalKey = peekPrev.getKey();
             if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
                 if (valueType != ValueType.DELETION
@@ -254,6 +249,9 @@ public final class SnapshotSeekingIterator
             // next() is valid, which is the same as a state of coming from a reverse advance
             direction = REVERSE;
         }
+        else if (direction == null) {
+            throw new IllegalStateException("must seek before iterating");
+        }
         return iterator.hasNext();
     }
 
@@ -271,6 +269,9 @@ public final class SnapshotSeekingIterator
                 iterator.next();
                 direction = FORWARD;
             }
+        }
+        else if (direction == null) {
+            throw new IllegalStateException("must seek before iterating");
         }
         return iterator.hasPrev();
     }

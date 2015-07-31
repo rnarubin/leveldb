@@ -17,103 +17,14 @@
  */
 package org.iq80.leveldb;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Properties;
+import java.util.Objects;
 
 public class Options
         implements Cloneable // shallow field-for-field Object.clone
 {
-    private static final String OPTIONS_PREFIX = "leveldb.options.";
-    private static final Options DEFAULT_OPTIONS = new Options(null);
-    static {
-        readProperties(System.getProperties());
-    }
 
-    static void readProperties(Properties properties)
-    {
-        // possibly update DEFAULT_OPTIONS with provided properties
-
-        final Map<String, List<Method>> methodsByName = new HashMap<>();
-        for (final Method m : Options.class.getMethods()) {
-
-            // only consider instance methods which require parameters
-            if (!m.getDeclaringClass().equals(Options.class) || m.getParameterTypes().length == 0
-                    || Modifier.isStatic(m.getModifiers())) {
-                continue;
-            }
-
-            final String propertyName = OPTIONS_PREFIX + m.getName();
-
-            // future-proof for possible overloading
-            List<Method> ms = methodsByName.get(propertyName);
-            if (ms == null) {
-                methodsByName.put(propertyName, ms = new ArrayList<>());
-            }
-            ms.add(m);
-        }
-
-        @SuppressWarnings("serial")
-        final Map<Class<?>, Class<?>> primitiveToWrapper = new HashMap<Class<?>, Class<?>>()
-        {
-            {
-                put(int.class, Integer.class);
-                put(boolean.class, Boolean.class);
-                put(long.class, Long.class);
-                put(float.class, Float.class);
-                put(double.class, Double.class);
-                put(char.class, Character.class);
-                put(byte.class, Byte.class);
-                put(short.class, Short.class);
-                put(void.class, Void.class);
-            }
-        };
-
-        properties: for (final Entry<String, List<Method>> propAndMethod : methodsByName.entrySet()) {
-            final String arg = properties.getProperty(propAndMethod.getKey());
-            if (arg == null) {
-                continue properties;
-            }
-
-            final String[] splitArg = arg.split(",", -1);
-            methods: for (final Method m : propAndMethod.getValue()) {
-                final Class<?>[] paramTypes = m.getParameterTypes();
-                if (paramTypes.length != splitArg.length) {
-                    continue methods;
-                }
-
-                final Object[] args = new Object[paramTypes.length];
-                for (int i = 0; i < args.length; i++) {
-                    try {
-                        Class<?> c = paramTypes[i];
-                        args[i] = (c.isPrimitive() ? primitiveToWrapper.get(c) : c)
-                                .getMethod("valueOf", String.class)
-                                .invoke(null, splitArg[i]);
-                    }
-                    catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
-                            | NoSuchMethodException | SecurityException e) {
-                        // failed to parse given argument(s)
-                        break methods;
-                    }
-                }
-
-                try {
-                    m.invoke(DEFAULT_OPTIONS, args);
-                }
-                catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-                    // failed to set option
-                    break methods;
-                }
-            }
-        }
-    }
+    private static final Options DEFAULT_OPTIONS = OptionsUtil.populateFromProperties("leveldb.options.",
+            new Options(null));
 
     /**
      * @deprecated use {@link Options#make()}
@@ -126,35 +37,12 @@ public class Options
 
     private Options(final Options that)
     {
-        if (that == null)
-            return;
-
-        // avoid copy-paste errors and improve ease of maintenance with reflection
-        // it's slower, but that's why it's private/deprecated and users should call Options.make()
-        for (final Field f : Options.class.getDeclaredFields()) {
-            final int mods = f.getModifiers();
-            if (Modifier.isFinal(mods) || Modifier.isStatic(mods)) {
-                continue;
-            }
-
-            f.setAccessible(true);
-            try {
-                f.set(this, f.get(that));
-            }
-            catch (IllegalArgumentException | IllegalAccessException e) {
-                throw new Error(e);
-            }
-        }
+        OptionsUtil.copyFields(Options.class, that, this);
     }
 
     public static Options make()
     {
-        try {
-            return (Options) DEFAULT_OPTIONS.clone();
-        }
-        catch (final CloneNotSupportedException notExpected) {
-            return new Options(DEFAULT_OPTIONS);
-        }
+        return copy(DEFAULT_OPTIONS);
     }
 
     public static Options copy(final Options other)
@@ -164,19 +52,16 @@ public class Options
         try {
             return (Options) other.clone();
         }
-        catch (final CloneNotSupportedException notExpected) {
-            return new Options(other);
+        catch (final CloneNotSupportedException e) {
+            throw new Error(e);
         }
     }
 
-    public static final Integer CPU_DATA_MODEL = Integer.getInteger("sun.arch.data.model");
-
-    // We only use MMAP on 64 bit systems since it's really easy to run out of
-    // virtual address space on a 32 bit system when all the data is getting mapped
-    // into memory. If you really want to use MMAP anyways, use -Dleveldb.mmap=true
-    // or set useMMap(boolean) to true
-    public static final boolean USE_MMAP_DEFAULT = Boolean.parseBoolean(System.getProperty("leveldb.mmap", ""
-            + (CPU_DATA_MODEL != null && CPU_DATA_MODEL > 32)));
+    @Override
+    public String toString()
+    {
+        return OptionsUtil.toString(this);
+    }
 
     private boolean createIfMissing = true;
     private boolean errorIfExists = false;
@@ -184,14 +69,19 @@ public class Options
     private int maxOpenFiles = 1000;
     private int blockRestartInterval = 16;
     private int blockSize = 4 * 1024;
-    private CompressionType compressionType = CompressionType.SNAPPY;
     private boolean verifyChecksums = true;
     private boolean paranoidChecks = false;
-    private DBComparator comparator;
+    private DBBufferComparator comparator = null;
     private Logger logger = null;
     private long cacheSize = 0;
     private boolean throttleLevel0 = true;
-    private IOImpl io = USE_MMAP_DEFAULT ? IOImpl.MMAP : IOImpl.FILE;
+    private Env env;
+    private MemoryManager memory = null;
+
+    // it's hard to keep the api/impl distinction clean with non-null defaults.
+    // this is a compromise i've made for legacy support
+    @SuppressWarnings("deprecation")
+    private Compression compression = CompressionType.SNAPPY;
 
     static void checkArgNotNull(Object value, String name)
     {
@@ -200,11 +90,54 @@ public class Options
         }
     }
 
+    public DBBufferComparator bufferComparator()
+    {
+        return comparator;
+    }
+
+    /**
+     * Comparator used to define the order of keys in the table. Defaults to a
+     * comparator that uses lexicographic byte-wise ordering
+     * <p>
+     * NOTE: The client must ensure that the comparator supplied here has the
+     * same name and orders keys *exactly* the same as the comparator provided
+     * to previous open calls on the same DB.
+     */
+    public Options bufferComparator(DBBufferComparator comparator)
+    {
+        this.comparator = comparator;
+        return this;
+    }
+
+    /**
+     * @deprecated use {@link Options#bufferComparator()}
+     */
+    public DBComparator comparator()
+    {
+        if (comparator == null)
+            return null;
+        if (comparator instanceof LegacyComparatorWrapper)
+            return ((LegacyComparatorWrapper) comparator).comparator;
+        else
+            throw new IllegalStateException("requested legacy comparator when none was specified");
+    }
+
+    /**
+     * @deprecated use {@link Options#bufferComparator(DBBufferComparator)}
+     */
+    public Options comparator(DBComparator comparator)
+    {
+        return bufferComparator(new LegacyComparatorWrapper(comparator));
+    }
+
     public boolean createIfMissing()
     {
         return createIfMissing;
     }
 
+    /**
+     * If true, the database will be created if it is missing.
+     */
     public Options createIfMissing(boolean createIfMissing)
     {
         this.createIfMissing = createIfMissing;
@@ -216,98 +149,45 @@ public class Options
         return errorIfExists;
     }
 
+    /**
+     * If true, an error is raised if the database already exists.
+     */
     public Options errorIfExists(boolean errorIfExists)
     {
         this.errorIfExists = errorIfExists;
         return this;
     }
 
-    public int writeBufferSize()
+    public boolean paranoidChecks()
     {
-        return writeBufferSize;
+        return paranoidChecks;
     }
 
-    public Options writeBufferSize(int writeBufferSize)
+    /**
+     * If true, the implementation will do aggressive checking of the data it is
+     * processing and will stop early if it detects any errors. This may have
+     * unforeseen ramifications: for example, a corruption of one DB entry may
+     * cause a large number of entries to become unreadable or for the entire DB
+     * to become unopenable.
+     */
+    public Options paranoidChecks(boolean paranoidChecks)
     {
-        this.writeBufferSize = writeBufferSize;
+        this.paranoidChecks = paranoidChecks;
         return this;
     }
 
-    public int maxOpenFiles()
+    public Env env()
     {
-        return maxOpenFiles;
+        return env;
     }
 
-    public Options maxOpenFiles(int maxOpenFiles)
+    /**
+     * Use the specified object to interact with the environment, e.g. to
+     * read/write files
+     */
+    public Options env(Env env)
     {
-        this.maxOpenFiles = maxOpenFiles;
-        return this;
-    }
-
-    public int blockRestartInterval()
-    {
-        return blockRestartInterval;
-    }
-
-    public Options blockRestartInterval(int blockRestartInterval)
-    {
-        this.blockRestartInterval = blockRestartInterval;
-        return this;
-    }
-
-    public int blockSize()
-    {
-        return blockSize;
-    }
-
-    public Options blockSize(int blockSize)
-    {
-        this.blockSize = blockSize;
-        return this;
-    }
-
-    public CompressionType compressionType()
-    {
-        return compressionType;
-    }
-
-    public Options compressionType(CompressionType compressionType)
-    {
-        checkArgNotNull(compressionType, "compressionType");
-        this.compressionType = compressionType;
-        return this;
-    }
-
-    public boolean verifyChecksums()
-    {
-        return verifyChecksums;
-    }
-
-    public Options verifyChecksums(boolean verifyChecksums)
-    {
-        this.verifyChecksums = verifyChecksums;
-        return this;
-    }
-
-    public long cacheSize()
-    {
-        return cacheSize;
-    }
-
-    public Options cacheSize(long cacheSize)
-    {
-        this.cacheSize = cacheSize;
-        return this;
-    }
-
-    public DBComparator comparator()
-    {
-        return comparator;
-    }
-
-    public Options comparator(DBComparator comparator)
-    {
-        this.comparator = comparator;
+        this.env = env;
         return this;
     }
 
@@ -330,32 +210,140 @@ public class Options
         return this;
     }
 
-    public boolean paranoidChecks()
+    public int writeBufferSize()
     {
-        return paranoidChecks;
+        return writeBufferSize;
     }
 
-    public Options paranoidChecks(boolean paranoidChecks)
+    /**
+     * Amount of data, in bytes, to build up in memory (backed by an unsorted
+     * log on disk) before converting to a sorted on-disk file.
+     * <p>
+     * Larger values increase performance, especially during bulk loads. Up to
+     * two write buffers may be held in memory at the same time, so you may wish
+     * to adjust this parameter to control memory usage. Also, a larger write
+     * buffer will result in a longer recovery time the next time the database
+     * is opened.
+     */
+    public Options writeBufferSize(int writeBufferSize)
     {
-        this.paranoidChecks = paranoidChecks;
+        this.writeBufferSize = writeBufferSize;
         return this;
     }
 
-    public enum IOImpl
+    public int maxOpenFiles()
     {
-        // could include SMR in the future
-        MMAP, FILE
+        return maxOpenFiles;
     }
 
-    public Options ioImplementation(IOImpl impl)
+    /**
+     * Number of open files that are cached by the DB.
+     */
+    public Options maxOpenFiles(int maxOpenFiles)
     {
-        this.io = impl;
+        this.maxOpenFiles = maxOpenFiles;
         return this;
     }
 
-    public IOImpl ioImplemenation()
+    // TODO: Block cache
+    public long cacheSize()
     {
-        return io;
+        return cacheSize;
+    }
+
+    public Options cacheSize(long cacheSize)
+    {
+        this.cacheSize = cacheSize;
+        return this;
+    }
+
+    public int blockSize()
+    {
+        return blockSize;
+    }
+
+    /**
+     * Approximate size of user data packed per block. Note that the block size
+     * specified here corresponds to uncompressed data. The actual size of the
+     * unit read from disk may be smaller if compression is enabled.
+     */
+    // TODO: This parameter can be changed dynamically.
+    public Options blockSize(int blockSize)
+    {
+        this.blockSize = blockSize;
+        return this;
+    }
+
+    public int blockRestartInterval()
+    {
+        return blockRestartInterval;
+    }
+
+    /**
+     * Number of keys between restart points for delta encoding of keys. This
+     * parameter can be changed dynamically. Most clients should leave this
+     * parameter alone.
+     */
+    public Options blockRestartInterval(int blockRestartInterval)
+    {
+        this.blockRestartInterval = blockRestartInterval;
+        return this;
+    }
+    
+    public Compression compression(){
+        return compression;
+    }
+    
+    /**
+     * Compress blocks using the specified compression algorithm.
+     * 
+     * @param compression
+     *            may be null to indicate no compression
+     */
+    // TODO: This parameter can be changed dynamically.
+    public Options compression(Compression compression)
+    {
+        if (compression != null && compression.persistentId() == 0) {
+            throw new IllegalArgumentException("User specified compression may not use persistent id of 0");
+        }
+        this.compression = compression;
+        return this;
+    }
+
+    /**
+     * @deprecated use {@link Options#compression}
+     */
+    public CompressionType compressionType()
+    {
+        if (Objects.equals(compression, CompressionType.NONE))
+            return CompressionType.NONE;
+        if (Objects.equals(compression, CompressionType.SNAPPY))
+            return CompressionType.SNAPPY;
+        throw new IllegalStateException("requested legacy compression type when none was specified");
+    }
+
+    /**
+     * @deprecated use {@link Options#compression(Compression)}
+     */
+    public Options compressionType(CompressionType compressionType)
+    {
+        checkArgNotNull(compressionType, "compressionType");
+        return compression(compressionType);
+    }
+
+    public boolean verifyChecksums()
+    {
+        return verifyChecksums;
+    }
+
+    /**
+     * If true, all data read from underlying storage will be verified against
+     * corresponding checksums.
+     */
+    public Options verifyChecksums(boolean verifyChecksums)
+    {
+        this.verifyChecksums = verifyChecksums;
+        return this;
     }
 
     public boolean throttleLevel0()
@@ -363,9 +351,30 @@ public class Options
         return throttleLevel0;
     }
 
+    /**
+     * If true, puts and deletes submitted to the DB will be throttled, and
+     * eventually blocked, if the size of level 0 exceeds an internal threshold
+     * (i.e. writes are being submitted faster than compaction can consolidate
+     * level 0 files)
+     * <p>
+     * Defaults to true; set to false if willing to degrade read and iteration
+     * performance in order to improve high-throughput write performance
+     */
     public Options throttleLevel0(boolean throttleLevel0)
     {
         this.throttleLevel0 = throttleLevel0;
+        return this;
+    }
+
+    public MemoryManager memoryManager()
+    {
+        return memory;
+    }
+
+    // TODO doc and boolean internal/external
+    public Options memoryManager(MemoryManager memory)
+    {
+        this.memory = memory;
         return this;
     }
 }

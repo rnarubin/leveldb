@@ -19,29 +19,28 @@ package org.iq80.leveldb.impl;
 
 public enum ValueType
 {
-    DELETION(0x00),
-    VALUE(0x01);
+    DELETION((byte) 0x00), VALUE((byte) 0x01);
 
-    public static ValueType getValueTypeByPersistentId(int persistentId)
+    public static ValueType getValueTypeByPersistentId(byte persistentId)
     {
         switch (persistentId) {
-            case 0:
+            case 0x00:
                 return DELETION;
-            case 1:
+            case 0x01:
                 return VALUE;
             default:
                 throw new IllegalArgumentException("Unknown persistentId " + persistentId);
         }
     }
 
-    private final int persistentId;
+    private final byte persistentId;
 
-    ValueType(int persistentId)
+    ValueType(byte persistentId)
     {
         this.persistentId = persistentId;
     }
 
-    public int getPersistentId()
+    public byte getPersistentId()
     {
         return persistentId;
     }

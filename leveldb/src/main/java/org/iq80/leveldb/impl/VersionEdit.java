@@ -22,11 +22,12 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
-import org.iq80.leveldb.util.DynamicSliceOutput;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
+
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 
+import java.nio.ByteBuffer;
 import java.util.Map;
 
 public class VersionEdit
@@ -44,13 +45,12 @@ public class VersionEdit
     {
     }
 
-    public VersionEdit(Slice slice)
+    public VersionEdit(ByteBuffer buffer)
     {
-        SliceInput sliceInput = slice.input();
-        while (sliceInput.isReadable()) {
-            int i = VariableLengthQuantity.readVariableLengthInt(sliceInput);
+        while (buffer.hasRemaining()) {
+            int i = VariableLengthQuantity.readVariableLengthInt(buffer);
             VersionEditTag tag = VersionEditTag.getValueTypeByPersistentId(i);
-            tag.readValue(sliceInput, this);
+            tag.readValue(buffer, this);
         }
     }
 
@@ -157,13 +157,13 @@ public class VersionEdit
         deletedFiles.put(level, fileNumber);
     }
 
-    public Slice encode()
+    public GrowingBuffer encode(MemoryManager memory)
     {
-        DynamicSliceOutput dynamicSliceOutput = new DynamicSliceOutput(4096);
+        GrowingBuffer buffer = new GrowingBuffer(4096, memory);
         for (VersionEditTag versionEditTag : VersionEditTag.values()) {
-            versionEditTag.writeValue(dynamicSliceOutput, this);
+            versionEditTag.writeValue(buffer, this);
         }
-        return dynamicSliceOutput.slice();
+        return buffer;
     }
 
     @Override

@@ -17,6 +17,9 @@
  */
 package org.iq80.leveldb.util;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertEquals;
@@ -39,10 +42,11 @@ public class VariableLengthQuantityTest
 
     private static void testVariableLengthInt(int value)
     {
-        SliceOutput output = Slices.allocate(5).output();
+        ByteBuffer output = ByteBuffer.allocate(5).order(ByteOrder.LITTLE_ENDIAN);
         VariableLengthQuantity.writeVariableLengthInt(value, output);
-        assertEquals(output.size(), VariableLengthQuantity.variableLengthSize(value));
-        int actual = VariableLengthQuantity.readVariableLengthInt(output.slice().input());
+        assertEquals(output.position(), VariableLengthQuantity.variableLengthSize(value));
+        output.flip();
+        int actual = VariableLengthQuantity.readVariableLengthInt(output);
         assertEquals(actual, value);
     }
 
@@ -70,10 +74,11 @@ public class VariableLengthQuantityTest
 
     private static void testVariableLengthLong(long value)
     {
-        SliceOutput output = Slices.allocate(12).output();
+        ByteBuffer output = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN);
         VariableLengthQuantity.writeVariableLengthLong(value, output);
-        assertEquals(output.size(), VariableLengthQuantity.variableLengthSize(value));
-        long actual = VariableLengthQuantity.readVariableLengthLong(output.slice().input());
+        assertEquals(output.position(), VariableLengthQuantity.variableLengthSize(value));
+        output.flip();
+        long actual = VariableLengthQuantity.readVariableLengthLong(output);
         assertEquals(actual, value);
     }
 }

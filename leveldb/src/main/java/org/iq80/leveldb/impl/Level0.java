@@ -18,18 +18,23 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.Lists;
 
-import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.InternalTableIterator;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.InternalIterator;
+import org.iq80.leveldb.util.MergingIterator;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 
-import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.collect.Lists.newArrayList;
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.ValueType.VALUE;
@@ -71,7 +76,8 @@ public class Level0
         return files;
     }
 
-    public LookupResult get(LookupKey key, ReadStats readStats)
+    public LookupResult get(LookupKey key, ReadStats readStats, MemoryManager memory)
+            throws IOException
     {
         if (files.isEmpty()) {
             return null;
@@ -90,16 +96,16 @@ public class Level0
         readStats.clear();
         for (FileMetaData fileMetaData : fileMetaDataList) {
             // open the iterator
-            try (InternalTableIterator iterator = tableCache.newIterator(fileMetaData)) {
+            try (InternalIterator iterator = tableCache.newIterator(fileMetaData)) {
                 // seek to the key
                 iterator.seek(key.getInternalKey());
 
                 if (iterator.hasNext()) {
                     // parse the key in the block
-                    Entry<InternalKey, Slice> entry = iterator.next();
+                    Entry<InternalKey, ByteBuffer> entry = iterator.next();
                     InternalKey internalKey = entry.getKey();
                     Preconditions.checkState(internalKey != null, "Corrupt key for %s", key.getUserKey()
-                            .toString(UTF_8));
+                            .toString());
 
                     // if this is a value key (not a delete) and the keys match, return the value
                     if (key.getUserKey().equals(internalKey.getUserKey())) {
@@ -107,7 +113,7 @@ public class Level0
                             return LookupResult.deleted(key);
                         }
                         else if (internalKey.getValueType() == VALUE) {
-                            return LookupResult.ok(key, entry.getValue());
+                            return LookupResult.ok(key, ByteBuffers.copy(entry.getValue(), memory), true);
                         }
                     }
                 }
@@ -123,12 +129,12 @@ public class Level0
         return null;
     }
 
-    public boolean someFileOverlapsRange(Slice smallestUserKey, Slice largestUserKey)
+    public boolean someFileOverlapsRange(ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
-        InternalKey smallestInternalKey = new InternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE);
+        InternalKey smallestInternalKey = new TransientInternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, VALUE);
         int index = findFile(smallestInternalKey);
 
-        UserComparator userComparator = internalKeyComparator.getUserComparator();
+        DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
         return ((index < files.size()) &&
                 userComparator.compare(largestUserKey, files.get(index).getSmallest().getUserKey()) >= 0);
     }
@@ -165,6 +171,17 @@ public class Level0
     {
         // todo remove mutation
         files.add(fileMetaData);
+    }
+
+    public static InternalIterator createLevel0Iterator(TableCache tableCache,
+            List<FileMetaData> files,
+            InternalKeyComparator internalKeyComparator)
+    {
+        Builder<InternalIterator> builder = ImmutableList.builder();
+        for (FileMetaData file : files) {
+            builder.add(tableCache.newIterator(file));
+        }
+        return new MergingIterator(builder.build(), internalKeyComparator);
     }
 
     @Override

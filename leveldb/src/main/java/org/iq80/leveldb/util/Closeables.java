@@ -17,24 +17,100 @@
  */
 package org.iq80.leveldb.util;
 
-import java.io.Closeable;
 import java.io.IOException;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class Closeables
 {
+    private static final Logger LOGGER = LoggerFactory.getLogger(Closeables.class);
     private Closeables()
     {
     }
 
-    public static void closeQuietly(Closeable closeable)
+    public static void closeQuietly(AutoCloseable closeable)
     {
-        if (closeable == null) {
-            return;
-        }
         try {
+            close(closeable);
+        }
+        catch (Exception ignored) {
+            LOGGER.warn("exception in closing {} ", closeable, ignored);
+        }
+    }
+
+    public static void close(AutoCloseable closeable)
+            throws Exception
+    {
+        if (closeable != null) {
             closeable.close();
         }
-        catch (IOException ignored) {
+    }
+
+    public static void closeIO(AutoCloseable closeable)
+            throws IOException
+    {
+        try {
+            close(closeable);
+        }
+        catch (Exception e) {
+            throw new IOException(e);
+        }
+    }
+
+    public static void closeIO(AutoCloseable c1, AutoCloseable c2)
+            throws IOException
+    {
+        try {
+            closeIO(c1);
+        }
+        finally {
+            closeIO(c2);
+        }
+    }
+
+    public static void closeIO(AutoCloseable... closeables)
+            throws IOException
+    {
+        closeIO(closeables.length - 1, closeables);
+    }
+
+    private static void closeIO(int index, AutoCloseable[] closeables)
+            throws IOException
+    {
+        int i = index;
+        try {
+            for (; i >= 0; i--) {
+                closeIO(closeables[i]);
+            }
+        }
+        finally {
+            if (i > 0) {
+                closeIO(i - 1, closeables);
+            }
+        }
+    }
+
+    public static void closeIO(List<AutoCloseable> closeables)
+            throws IOException
+    {
+        closeIO(closeables.size() - 1, closeables);
+    }
+
+    private static void closeIO(int index, List<AutoCloseable> closeables)
+            throws IOException
+    {
+        int i = index;
+        try {
+            for (; i >= 0; i--) {
+                closeIO(closeables.get(i));
+            }
+        }
+        finally {
+            if (i > 0) {
+                closeIO(i - 1, closeables);
+            }
         }
     }
 }

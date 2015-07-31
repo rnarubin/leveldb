@@ -22,9 +22,16 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.ReferenceCounted;
 
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -32,15 +39,35 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class MemTable
-        implements SeekingIterable<InternalKey, Slice>
+public final class MemTable
+        extends ReferenceCounted<MemTable>
+        implements SeekingIterable<InternalKey, ByteBuffer>
 {
-    private final ConcurrentSkipListMap<InternalKey, Slice> table;
+    private final ConcurrentSkipListMap<InternalKey, ByteBuffer> table;
     private final AtomicLong approximateMemoryUsage = new AtomicLong();
+    private final Comparator<Entry<InternalKey, ByteBuffer>> iteratorComparator;
+    private final List<AutoCloseable> cleanup;
 
-    public MemTable(InternalKeyComparator internalKeyComparator)
+    public MemTable(final InternalKeyComparator internalKeyComparator, boolean bufferCleaner, MemoryManager memory)
     {
-        table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
+        this.table = new ConcurrentSkipListMap<InternalKey, ByteBuffer>(internalKeyComparator);
+        this.iteratorComparator = new Comparator<Entry<InternalKey, ByteBuffer>>()
+        {
+            public int compare(Entry<InternalKey, ByteBuffer> o1, Entry<InternalKey, ByteBuffer> o2)
+            {
+                return internalKeyComparator.compare(o1.getKey(), o2.getKey());
+            }
+        };
+
+        this.cleanup = new ArrayList<>();
+        if (bufferCleaner) {
+            registerCleanup(new MemTableCleaner(this, memory));
+        }
+    }
+
+    public void registerCleanup(Closeable cleaner)
+    {
+        this.cleanup.add(cleaner);
     }
 
     public void clear()
@@ -63,13 +90,8 @@ public class MemTable
         return approximateMemoryUsage.getAndAdd(delta);
     }
 
-    public void add(long sequenceNumber, ValueType valueType, Slice key, Slice value)
+    public void add(InternalKey internalKey, ByteBuffer value)
     {
-        Preconditions.checkNotNull(valueType, "valueType is null");
-        Preconditions.checkNotNull(key, "key is null");
-        Preconditions.checkNotNull(valueType, "valueType is null");
-
-        InternalKey internalKey = new InternalKey(key, sequenceNumber, valueType);
         table.put(internalKey, value);
     }
 
@@ -78,7 +100,7 @@ public class MemTable
         Preconditions.checkNotNull(key, "key is null");
 
         InternalKey internalKey = key.getInternalKey();
-        Entry<InternalKey, Slice> entry = table.ceilingEntry(internalKey);
+        Entry<InternalKey, ByteBuffer> entry = table.ceilingEntry(internalKey);
         if (entry == null) {
             return null;
         }
@@ -89,10 +111,15 @@ public class MemTable
                 return LookupResult.deleted(key);
             }
             else {
-                return LookupResult.ok(key, entry.getValue());
+                return LookupResult.ok(key, entry.getValue(), false);
             }
         }
         return null;
+    }
+
+    public Iterable<Entry<InternalKey, ByteBuffer>> simpleIterable()
+    {
+        return table.entrySet();
     }
 
     @Override
@@ -101,18 +128,33 @@ public class MemTable
         return new MemTableIterator();
     }
 
-    public class MemTableIterator
-            implements
-            InternalIterator,
-            ReverseSeekingIterator<InternalKey, Slice>
+    @Override
+    protected MemTable getThis()
     {
+        return this;
+    }
 
-        private ReversePeekingIterator<Entry<InternalKey, Slice>> iterator;
-        private final List<Entry<InternalKey, Slice>> entryList;
+    @Override
+    protected void dispose()
+    {
+        try {
+            Closeables.closeIO(cleanup);
+        }
+        catch (IOException e) {
+            throw new DBException(e);
+        }
+    }
+
+    public final class MemTableIterator
+            implements InternalIterator
+    {
+        private ReversePeekingIterator<Entry<InternalKey, ByteBuffer>> iterator;
+        private final List<Entry<InternalKey, ByteBuffer>> entryList;
 
         public MemTableIterator()
         {
-            entryList = Lists.newArrayList(table.entrySet());
+            retain();
+            entryList = Lists.newArrayList(simpleIterable());
             seekToFirst();
         }
 
@@ -131,13 +173,8 @@ public class MemTable
         @Override
         public void seek(InternalKey targetKey)
         {
-            int index = Collections.binarySearch(entryList, Maps.immutableEntry(targetKey, (Slice) null), new Comparator<Entry<InternalKey, Slice>>()
-            {
-                public int compare(Entry<InternalKey, Slice> o1, Entry<InternalKey, Slice> o2)
-                {
-                    return table.comparator().compare(o1.getKey(), o2.getKey());
-                }
-            });
+            int index = Collections.binarySearch(entryList, Maps.immutableEntry(targetKey, (ByteBuffer) null),
+                    iteratorComparator);
             if (index < 0) {
             /*
              * from Collections.binarySearch:
@@ -152,13 +189,13 @@ public class MemTable
         }
 
         @Override
-        public Entry<InternalKey, Slice> peek()
+        public Entry<InternalKey, ByteBuffer> peek()
         {
             return iterator.peek();
         }
 
         @Override
-        public Entry<InternalKey, Slice> next()
+        public Entry<InternalKey, ByteBuffer> next()
         {
             return iterator.next();
         }
@@ -167,16 +204,6 @@ public class MemTable
         public void remove()
         {
             throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void seekToLast()
-        {
-            if (entryList.size() == 0) {
-                seekToFirst();
-                return;
-            }
-            makeIteratorAtIndex(this.entryList.size() - 1);
         }
 
         @Override
@@ -191,13 +218,13 @@ public class MemTable
         }
 
         @Override
-        public Entry<InternalKey, Slice> peekPrev()
+        public Entry<InternalKey, ByteBuffer> peekPrev()
         {
             return iterator.peekPrev();
         }
 
         @Override
-        public Entry<InternalKey, Slice> prev()
+        public Entry<InternalKey, ByteBuffer> prev()
         {
             return iterator.prev();
         }
@@ -211,7 +238,30 @@ public class MemTable
         @Override
         public void close()
         {
-            // noop
+            release();
+        }
+    }
+
+    private static class MemTableCleaner
+            implements Closeable
+    {
+        private final MemTable memTable;
+        private final MemoryManager memory;
+
+        public MemTableCleaner(MemTable memTable, MemoryManager memory)
+        {
+            this.memTable = memTable;
+            this.memory = memory;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            for (Entry<InternalKey, ByteBuffer> entry : memTable.simpleIterable()) {
+                entry.getKey().free(memory);
+                memory.free(entry.getValue());
+            }
         }
     }
 }

@@ -15,21 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
+import java.nio.ByteBuffer;
 
-import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.util.Comparator;
-
-public class FileChannelTableTest
-        extends TableTest
+interface Decoder<T>
 {
-    @Override
-    protected Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
-            throws IOException
-    {
-        return new FileChannelTable(name, fileChannel, comparator, verifyChecksums);
-    }
+    T decode(ByteBuffer b);
 }

@@ -19,10 +19,10 @@ package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
 
-import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.Slice;
-
+import java.nio.ByteBuffer;
 import java.util.List;
+
+import org.iq80.leveldb.DBBufferComparator;
 
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
@@ -148,10 +148,10 @@ public class Compaction
     // Returns true if the information we have available guarantees that
     // the compaction is producing data in "level+1" for which no data exists
     // in levels greater than "level+1".
-    public boolean isBaseLevelForKey(Slice userKey)
+    public boolean isBaseLevelForKey(ByteBuffer userKey)
     {
         // Maybe use binary search to find right entry instead of linear search?
-        UserComparator userComparator = inputVersion.getInternalKeyComparator().getUserComparator();
+        DBBufferComparator userComparator = inputVersion.getInternalKeyComparator().getUserComparator();
         for (int level = this.level + 2; level < NUM_LEVELS; level++) {
             List<FileMetaData> files = inputVersion.getFiles(level);
             while (levelPointers[level] < files.size()) {

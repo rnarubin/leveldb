@@ -17,30 +17,47 @@
  */
 package org.iq80.leveldb;
 
+import java.nio.ByteBuffer;
+
+/**
+ * @deprecated use e.g. {@link Snappy#instance} or {@code null} in conjunction with {@link Options#compression(Compression)}
+ */
 public enum CompressionType
+        implements Compression
 {
-    NONE(0x00),
-    SNAPPY(0x01);
+    NONE, SNAPPY;
 
-    public static CompressionType getCompressionTypeByPersistentId(int persistentId)
+    /*
+     * this class remains mostly as a stub to bridge the api/impl packages for Options' non-null default compression
+     */
+
+    @Override
+    public byte persistentId()
     {
-        for (CompressionType compressionType : CompressionType.values()) {
-            if (compressionType.persistentId == persistentId) {
-                return compressionType;
-            }
-        }
-        throw new IllegalArgumentException("Unknown persistentId " + persistentId);
+        throw new UnsupportedOperationException();
     }
 
-    private final int persistentId;
-
-    CompressionType(int persistentId)
+    @Override
+    public int compress(ByteBuffer src, ByteBuffer dst)
     {
-        this.persistentId = persistentId;
+        throw new UnsupportedOperationException();
     }
 
-    public int persistentId()
+    @Override
+    public int uncompress(ByteBuffer src, ByteBuffer dst)
     {
-        return persistentId;
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int maxUncompressedLength(ByteBuffer compressed)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int maxCompressedLength(ByteBuffer uncompressed)
+    {
+        throw new UnsupportedOperationException();
     }
 }

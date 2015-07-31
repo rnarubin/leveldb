@@ -17,10 +17,8 @@
  */
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import java.nio.ByteBuffer;
+
 import org.iq80.leveldb.util.VariableLengthQuantity;
 
 public class BlockHandle
@@ -92,7 +90,7 @@ public class BlockHandle
         return sb.toString();
     }
 
-    public static BlockHandle readBlockHandle(SliceInput sliceInput)
+    public static BlockHandle readBlockHandle(ByteBuffer sliceInput)
     {
         long offset = VariableLengthQuantity.readVariableLengthLong(sliceInput);
         long size = VariableLengthQuantity.readVariableLengthLong(sliceInput);
@@ -104,17 +102,10 @@ public class BlockHandle
         return new BlockHandle(offset, (int) size);
     }
 
-    public static Slice writeBlockHandle(BlockHandle blockHandle)
+    public static ByteBuffer writeBlockHandleTo(BlockHandle blockHandle, ByteBuffer buffer)
     {
-        Slice slice = Slices.allocate(MAX_ENCODED_LENGTH);
-        SliceOutput sliceOutput = slice.output();
-        writeBlockHandleTo(blockHandle, sliceOutput);
-        return slice.slice();
-    }
-
-    public static void writeBlockHandleTo(BlockHandle blockHandle, SliceOutput sliceOutput)
-    {
-        VariableLengthQuantity.writeVariableLengthLong(blockHandle.offset, sliceOutput);
-        VariableLengthQuantity.writeVariableLengthLong(blockHandle.dataSize, sliceOutput);
+        VariableLengthQuantity.writeVariableLengthLong(blockHandle.offset, buffer);
+        VariableLengthQuantity.writeVariableLengthLong(blockHandle.dataSize, buffer);
+        return buffer;
     }
 }

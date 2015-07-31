@@ -18,232 +18,240 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Charsets;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
+
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.VariableLengthQuantity;
 
+import java.nio.ByteBuffer;
 import java.util.Map.Entry;
-
-import static org.iq80.leveldb.util.Slices.readLengthPrefixedBytes;
-import static org.iq80.leveldb.util.Slices.writeLengthPrefixedBytes;
 
 public enum VersionEditTag
 {
     // 8 is no longer used. It was used for large value refs.
 
     COMPARATOR(1)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    byte[] bytes = new byte[VariableLengthQuantity.readVariableLengthInt(sliceInput)];
-                    sliceInput.readBytes(bytes);
-                    versionEdit.setComparatorName(new String(bytes, Charsets.UTF_8));
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    String comparatorName = versionEdit.getComparatorName();
-                    if (comparatorName != null) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-                        byte[] bytes = comparatorName.getBytes(Charsets.UTF_8);
-                        VariableLengthQuantity.writeVariableLengthInt(bytes.length, sliceOutput);
-                        sliceOutput.writeBytes(bytes);
-                    }
-                }
-            },
-    LOG_NUMBER(2)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    versionEdit.setLogNumber(VariableLengthQuantity.readVariableLengthLong(sliceInput));
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    Long logNumber = versionEdit.getLogNumber();
-                    if (logNumber != null) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-                        VariableLengthQuantity.writeVariableLengthLong(logNumber, sliceOutput);
-                    }
-                }
-            },
-
-    PREVIOUS_LOG_NUMBER(9)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    long previousLogNumber = VariableLengthQuantity.readVariableLengthLong(sliceInput);
-                    versionEdit.setPreviousLogNumber(previousLogNumber);
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    Long previousLogNumber = versionEdit.getPreviousLogNumber();
-                    if (previousLogNumber != null) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-                        VariableLengthQuantity.writeVariableLengthLong(previousLogNumber, sliceOutput);
-                    }
-                }
-            },
-
-    NEXT_FILE_NUMBER(3)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    versionEdit.setNextFileNumber(VariableLengthQuantity.readVariableLengthLong(sliceInput));
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    Long nextFileNumber = versionEdit.getNextFileNumber();
-                    if (nextFileNumber != null) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-                        VariableLengthQuantity.writeVariableLengthLong(nextFileNumber, sliceOutput);
-                    }
-                }
-            },
-
-    LAST_SEQUENCE(4)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    versionEdit.setLastSequenceNumber(VariableLengthQuantity.readVariableLengthLong(sliceInput));
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    Long lastSequenceNumber = versionEdit.getLastSequenceNumber();
-                    if (lastSequenceNumber != null) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-                        VariableLengthQuantity.writeVariableLengthLong(lastSequenceNumber, sliceOutput);
-                    }
-                }
-            },
-
-    COMPACT_POINTER(5)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    // level
-                    int level = VariableLengthQuantity.readVariableLengthInt(sliceInput);
-
-                    // internal key
-                    InternalKey internalKey = new InternalKey(readLengthPrefixedBytes(sliceInput));
-
-                    versionEdit.setCompactPointer(level, internalKey);
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    for (Entry<Integer, InternalKey> entry : versionEdit.getCompactPointers().entrySet()) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-
-                        // level
-                        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), sliceOutput);
-
-                        // internal key
-                        writeLengthPrefixedBytes(sliceOutput, entry.getValue().encode());
-                    }
-                }
-            },
-
-    DELETED_FILE(6)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    // level
-                    int level = VariableLengthQuantity.readVariableLengthInt(sliceInput);
-
-                    // file number
-                    long fileNumber = VariableLengthQuantity.readVariableLengthLong(sliceInput);
-
-                    versionEdit.deleteFile(level, fileNumber);
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    for (Entry<Integer, Long> entry : versionEdit.getDeletedFiles().entries()) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-
-                        // level
-                        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), sliceOutput);
-
-                        // file number
-                        VariableLengthQuantity.writeVariableLengthLong(entry.getValue(), sliceOutput);
-                    }
-                }
-            },
-
-    NEW_FILE(7)
-            {
-                @Override
-                public void readValue(SliceInput sliceInput, VersionEdit versionEdit)
-                {
-                    // level
-                    int level = VariableLengthQuantity.readVariableLengthInt(sliceInput);
-
-                    // file number
-                    long fileNumber = VariableLengthQuantity.readVariableLengthLong(sliceInput);
-
-                    // file size
-                    long fileSize = VariableLengthQuantity.readVariableLengthLong(sliceInput);
-
-                    // smallest key
-                    InternalKey smallestKey = new InternalKey(readLengthPrefixedBytes(sliceInput));
-
-                    // largest key
-                    InternalKey largestKey = new InternalKey(readLengthPrefixedBytes(sliceInput));
-
-                    versionEdit.addFile(level, fileNumber, fileSize, smallestKey, largestKey);
-                }
-
-                @Override
-                public void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit)
-                {
-                    for (Entry<Integer, FileMetaData> entry : versionEdit.getNewFiles().entries()) {
-                        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), sliceOutput);
-
-                        // level
-                        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), sliceOutput);
-
-                        // file number
-                        FileMetaData fileMetaData = entry.getValue();
-                        VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getNumber(), sliceOutput);
-
-                        // file size
-                        VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getFileSize(), sliceOutput);
-
-                        // smallest key
-                        writeLengthPrefixedBytes(sliceOutput, fileMetaData.getSmallest().encode());
-
-                        // smallest key
-                        writeLengthPrefixedBytes(sliceOutput, fileMetaData.getLargest().encode());
-                    }
-                }
-            };
-
-    public static VersionEditTag getValueTypeByPersistentId(int persistentId)
     {
-        for (VersionEditTag compressionType : VersionEditTag.values()) {
-            if (compressionType.persistentId == persistentId) {
-                return compressionType;
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            byte[] bytes = new byte[VariableLengthQuantity.readVariableLengthInt(buffer)];
+            buffer.get(bytes);
+            versionEdit.setComparatorName(new String(bytes, Charsets.UTF_8));
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            String comparatorName = versionEdit.getComparatorName();
+            if (comparatorName != null) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+                byte[] bytes = comparatorName.getBytes(Charsets.UTF_8);
+                VariableLengthQuantity.writeVariableLengthInt(bytes.length, buffer);
+                buffer.put(bytes);
             }
         }
-        throw new IllegalArgumentException(String.format("Unknown %s persistentId %d", VersionEditTag.class.getSimpleName(), persistentId));
+    },
+    LOG_NUMBER(2)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            versionEdit.setLogNumber(VariableLengthQuantity.readVariableLengthLong(buffer));
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            Long logNumber = versionEdit.getLogNumber();
+            if (logNumber != null) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+                VariableLengthQuantity.writeVariableLengthLong(logNumber, buffer);
+            }
+        }
+    },
+
+    PREVIOUS_LOG_NUMBER(9)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            long previousLogNumber = VariableLengthQuantity.readVariableLengthLong(buffer);
+            versionEdit.setPreviousLogNumber(previousLogNumber);
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            Long previousLogNumber = versionEdit.getPreviousLogNumber();
+            if (previousLogNumber != null) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+                VariableLengthQuantity.writeVariableLengthLong(previousLogNumber, buffer);
+            }
+        }
+    },
+
+    NEXT_FILE_NUMBER(3)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            versionEdit.setNextFileNumber(VariableLengthQuantity.readVariableLengthLong(buffer));
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            Long nextFileNumber = versionEdit.getNextFileNumber();
+            if (nextFileNumber != null) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+                VariableLengthQuantity.writeVariableLengthLong(nextFileNumber, buffer);
+            }
+        }
+    },
+
+    LAST_SEQUENCE(4)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            versionEdit.setLastSequenceNumber(VariableLengthQuantity.readVariableLengthLong(buffer));
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            Long lastSequenceNumber = versionEdit.getLastSequenceNumber();
+            if (lastSequenceNumber != null) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+                VariableLengthQuantity.writeVariableLengthLong(lastSequenceNumber, buffer);
+            }
+        }
+    },
+
+    COMPACT_POINTER(5)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            // level
+            int level = VariableLengthQuantity.readVariableLengthInt(buffer);
+
+            // internal key
+            // store on heap to leverage GC and make our lives easier
+            InternalKey internalKey = new EncodedInternalKey(
+                    ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(buffer)));
+
+            versionEdit.setCompactPointer(level, internalKey);
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            for (Entry<Integer, InternalKey> entry : versionEdit.getCompactPointers().entrySet()) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+
+                // level
+                VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+
+                // internal key
+                buffer.writeLengthPrefixedKey(entry.getValue());
+            }
+        }
+    },
+
+    DELETED_FILE(6)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            // level
+            int level = VariableLengthQuantity.readVariableLengthInt(buffer);
+
+            // file number
+            long fileNumber = VariableLengthQuantity.readVariableLengthLong(buffer);
+
+            versionEdit.deleteFile(level, fileNumber);
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            for (Entry<Integer, Long> entry : versionEdit.getDeletedFiles().entries()) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+
+                // level
+                VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+
+                // file number
+                VariableLengthQuantity.writeVariableLengthLong(entry.getValue(), buffer);
+            }
+        }
+    },
+
+    NEW_FILE(7)
+    {
+        @Override
+        public void readValue(ByteBuffer buffer, VersionEdit versionEdit)
+        {
+            // level
+            int level = VariableLengthQuantity.readVariableLengthInt(buffer);
+
+            // file number
+            long fileNumber = VariableLengthQuantity.readVariableLengthLong(buffer);
+
+            // file size
+            long fileSize = VariableLengthQuantity.readVariableLengthLong(buffer);
+
+            // smallest key
+            // store on heap to leverage GC and make our lives easier. these keys make up only a small portion of all data
+            InternalKey smallestKey = new EncodedInternalKey(ByteBuffers.readLengthPrefixedBytes(buffer)).heapCopy();
+
+            // largest key
+            InternalKey largestKey = new EncodedInternalKey(ByteBuffers.readLengthPrefixedBytes(buffer)).heapCopy();
+
+            versionEdit.addFile(level, fileNumber, fileSize, smallestKey, largestKey);
+        }
+
+        @Override
+        public void writeValue(GrowingBuffer buffer, VersionEdit versionEdit)
+        {
+            for (Entry<Integer, FileMetaData> entry : versionEdit.getNewFiles().entries()) {
+                VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+
+                // level
+                VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+
+                // file number
+                FileMetaData fileMetaData = entry.getValue();
+                VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getNumber(), buffer);
+
+                // file size
+                VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getFileSize(), buffer);
+
+                // smallest key
+                buffer.writeLengthPrefixedKey(fileMetaData.getSmallest());
+
+                // largest key
+                buffer.writeLengthPrefixedKey(fileMetaData.getLargest());
+            }
+        }
+    };
+
+    private static final VersionEditTag[] indexedTag = new VersionEditTag[10];
+    static {
+        for (VersionEditTag tag : VersionEditTag.values()) {
+            indexedTag[tag.persistentId] = tag;
+        }
+    }
+    public static VersionEditTag getValueTypeByPersistentId(int persistentId)
+    {
+        VersionEditTag tag;
+        if (persistentId < 0 || persistentId >= indexedTag.length || (tag = indexedTag[persistentId]) == null) {
+            throw new IllegalArgumentException(String.format("Unknown %s persistentId %d",
+                    VersionEditTag.class.getSimpleName(), persistentId));
+        }
+        return tag;
     }
 
     private final int persistentId;
@@ -258,7 +266,7 @@ public enum VersionEditTag
         return persistentId;
     }
 
-    public abstract void readValue(SliceInput sliceInput, VersionEdit versionEdit);
+    public abstract void readValue(ByteBuffer buffer, VersionEdit versionEdit);
 
-    public abstract void writeValue(SliceOutput sliceOutput, VersionEdit versionEdit);
+    public abstract void writeValue(GrowingBuffer buffer, VersionEdit versionEdit);
 }

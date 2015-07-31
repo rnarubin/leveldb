@@ -17,13 +17,11 @@
  */
 package org.iq80.leveldb.impl;
 
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.ObjectPool;
-import org.iq80.leveldb.util.ObjectPools;
-import org.iq80.leveldb.util.PureJavaCrc32C;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBuffers;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -33,39 +31,17 @@ public final class Logs
     {
     }
 
-    public static LogWriter createLogWriter(File file, long fileNumber, Options options)
+    public static LogWriter createLogWriter(FileInfo fileInfo, long fileNumber, Options options)
             throws IOException
     {
-        return createLogWriter(file, fileNumber, options, ObjectPools.directBufferPool(16, 4096));
+        return new LogWriter(options.env().openMultiWriteFile(fileInfo), fileNumber);
     }
 
-    public static LogWriter createLogWriter(File file,
-            long fileNumber,
-            Options options,
-            ObjectPool<ByteBuffer> scratchCache)
-            throws IOException
+    public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)
     {
-        switch (options.ioImplemenation()) {
-            case MMAP:
-                return new MMapLogWriter(file, fileNumber);
-            case FILE:
-                return new FileChannelLogWriter(file, fileNumber, scratchCache);
-            default:
-                throw new IllegalArgumentException("Unknown log file implementation:" + options.ioImplemenation());
-        }
-    }
-
-    public static int getChunkChecksum(int chunkTypeId, Slice slice)
-    {
-        return getChunkChecksum(chunkTypeId, slice.getRawArray(), slice.getRawOffset(), slice.length());
-    }
-
-    public static int getChunkChecksum(int chunkTypeId, byte[] buffer, int offset, int length)
-    {
-        // Compute the crc of the record type and the payload.
-        PureJavaCrc32C crc32C = new PureJavaCrc32C();
-        crc32C.update(chunkTypeId);
-        crc32C.update(buffer, offset, length);
-        return crc32C.getMaskedValue();
+        ByteBufferCrc32 crc32 = ByteBuffers.crc32();
+        crc32.update(chunkTypeId);
+        crc32.update(data, data.position(), data.remaining());
+        return ByteBuffers.maskChecksum(crc32.getIntValue());
     }
 }

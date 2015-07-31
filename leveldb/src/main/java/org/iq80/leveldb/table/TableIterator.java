@@ -17,19 +17,39 @@
  */
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.util.TwoStageIterator;
 
 import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.util.Comparator;
+import java.nio.ByteBuffer;
 
-public class MMapTableTest
-        extends TableTest
+public final class TableIterator
+        extends TwoStageIterator<BlockIterator<InternalKey>, BlockIterator<InternalKey>, ByteBuffer>
 {
+    private final Table table;
+
+    public TableIterator(Table table, BlockIterator<InternalKey> indexIterator)
+    {
+        super(indexIterator);
+        this.table = table;
+    }
+
     @Override
-    protected Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    public void close()
             throws IOException
     {
-        return new MMapTable(name, fileChannel, comparator, verifyChecksums);
+        try {
+            super.close();
+        }
+        finally {
+            table.close();
+        }
+    }
+
+    protected BlockIterator<InternalKey> getData(ByteBuffer blockHandle)
+    {
+        try (Block<InternalKey> dataBlock = table.openBlock(blockHandle)) {
+            return dataBlock.iterator(); // dataBlock retained by iterator
+        }
     }
 }

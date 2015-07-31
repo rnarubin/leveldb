@@ -17,76 +17,72 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.table.FileChannelTable;
-import org.iq80.leveldb.table.MMapTable;
 import org.iq80.leveldb.table.Table;
-import org.iq80.leveldb.table.UserComparator;
-import org.iq80.leveldb.util.Finalizer;
-import org.iq80.leveldb.util.InternalTableIterator;
-import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.table.TableIterator;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.ExecutionException;
 
-public class TableCache
+public final class TableCache
 {
-    private final LoadingCache<Long, TableAndFile> cache;
-    private final Finalizer<Table> finalizer = new Finalizer<>(1);
+    private final LoadingCache<Long, Table> cache;
 
-    public TableCache(final File databaseDir,
+    // private final Finalizer<Table> finalizer = new Finalizer<>(1);
+
+    public TableCache(
             int tableCacheSize,
-            final UserComparator userComparator,
-            final Options options)
+            final InternalKeyComparator userComparator,
+            final Options options,
+            final UncaughtExceptionHandler backgroundExceptionHandler)
     {
-        Preconditions.checkNotNull(databaseDir, "databaseName is null");
-
         cache = CacheBuilder.newBuilder()
                 .maximumSize(tableCacheSize)
-                .removalListener(new RemovalListener<Long, TableAndFile>()
+                .removalListener(new RemovalListener<Long, Table>()
                 {
                     @Override
-                    public void onRemoval(RemovalNotification<Long, TableAndFile> notification)
+                    public void onRemoval(RemovalNotification<Long, Table> notification)
                     {
-                        Table table = notification.getValue().getTable();
-                        finalizer.addCleanup(table, table.closer());
-                        table.release(); // corresponding to constructor implicit retain
+                        Table table = notification.getValue();
+                        // finalizer.addCleanup(table, table.closer());
+                        try {
+                            table.release(); // corresponding to constructor implicit retain
+                        }
+                        catch (Exception e) {
+                            backgroundExceptionHandler.uncaughtException(Thread.currentThread(), e);
+                        }
                     }
                 })
-                .build(new CacheLoader<Long, TableAndFile>()
+                .build(new CacheLoader<Long, Table>()
                 {
                     @Override
-                    public TableAndFile load(Long fileNumber)
+                    public Table load(Long fileNumber)
                             throws IOException
                     {
-                        return new TableAndFile(databaseDir, fileNumber, userComparator, options);
+                        return openTableFile(fileNumber, userComparator, options);
                     }
                 });
     }
 
-    public InternalTableIterator newIterator(FileMetaData file)
+    public TableIterator newIterator(FileMetaData file)
     {
         return newIterator(file.getNumber());
     }
 
-    public InternalTableIterator newIterator(long number)
+    public TableIterator newIterator(long number)
     {
-        return new InternalTableIterator(getTable(number).iterator());
+        return getTable(number).iterator();
     }
 
-    public long getApproximateOffsetOf(FileMetaData file, Slice key)
+    public long getApproximateOffsetOf(FileMetaData file, InternalKey key)
     {
         try (Table table = getTable(file.getNumber())) {
             return table.getApproximateOffsetOf(key);
@@ -99,7 +95,7 @@ public class TableCache
         try {
             // minuscule chance of race between cache eviction and table release.
             // re-read cache until we get a winner
-            while ((table = cache.get(number).getTable().retain()) == null)
+            while ((table = cache.get(number).retain()) == null)
                 ;
         }
         catch (ExecutionException e) {
@@ -115,7 +111,7 @@ public class TableCache
     public void close()
     {
         cache.invalidateAll();
-        finalizer.destroy();
+        // finalizer.destroy();
     }
 
     public void evict(long number)
@@ -123,55 +119,12 @@ public class TableCache
         cache.invalidate(number);
     }
 
-    private static final class TableAndFile
+    private static Table openTableFile(
+            long fileNumber,
+            InternalKeyComparator userComparator,
+            Options options)
+            throws IOException
     {
-        private final Table table;
-        private FileChannel fileChannel;
-
-        private TableAndFile(File databaseDir, long fileNumber, UserComparator userComparator, Options options)
-                throws IOException
-        {
-            String tableFileName = Filename.tableFileName(fileNumber);
-            File tableFile = new File(databaseDir, tableFileName);
-
-            try {
-                fileChannel = new FileInputStream(tableFile).getChannel();
-            }
-            catch (FileNotFoundException ldbNotFound) {
-                try {
-                    // attempt to open older .sst extension
-                    tableFileName = Filename.sstTableFileName(fileNumber);
-                    tableFile = new File(databaseDir, tableFileName);
-                    fileChannel = new FileInputStream(tableFile).getChannel();
-                }
-                catch (FileNotFoundException sstNotFound) {
-                    throw ldbNotFound;
-                }
-            }
-
-            try {
-                switch (options.ioImplemenation()) {
-                    case MMAP:
-                        table = new MMapTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
-                                options.verifyChecksums());
-                        break;
-                    case FILE:
-                        table = new FileChannelTable(tableFile.getAbsolutePath(), fileChannel, userComparator,
-                                options.verifyChecksums());
-                        break;
-                    default:
-                        throw new IllegalArgumentException("Unknown IO implementation:" + options.ioImplemenation());
-                }
-            }
-            catch (IOException e) {
-                Closeables.closeQuietly(fileChannel);
-                throw e;
-            }
-        }
-
-        public Table getTable()
-        {
-            return table;
-        }
+        return new Table(options.env().openRandomReadFile(FileInfo.table(fileNumber)), userComparator, options);
     }
 }

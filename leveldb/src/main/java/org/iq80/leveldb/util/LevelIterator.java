@@ -20,256 +20,149 @@ package org.iq80.leveldb.util;
 import org.iq80.leveldb.impl.FileMetaData;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TableCache;
+import org.iq80.leveldb.util.LevelIterator.FileIterator;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map.Entry;
 
-import org.iq80.leveldb.util.TableIterator.CurrentOrigin;
+import org.iq80.leveldb.table.TableIterator;
 
-import static org.iq80.leveldb.util.TableIterator.CurrentOrigin.*;
+import com.google.common.collect.Maps;
 
 public final class LevelIterator
-        extends AbstractReverseSeekingIterator<InternalKey, Slice>
-        implements InternalIterator
+        extends TwoStageIterator<FileIterator, TableIterator, FileMetaData>
 {
     private final TableCache tableCache;
-    private final List<FileMetaData> files;
-    private final InternalKeyComparator comparator;
-    private InternalTableIterator current;
-    private CurrentOrigin currentOrigin = NONE; // see TableIterator for explanation of this enum's functionality
-    private int index;
 
     public LevelIterator(
             TableCache tableCache,
             List<FileMetaData> files,
             InternalKeyComparator comparator)
     {
+        super(new FileIterator(files, comparator));
         this.tableCache = tableCache;
-        this.files = files;
-        this.comparator = comparator;
     }
 
-    @Override
-    protected void seekToFirstInternal()
+    protected TableIterator getData(FileMetaData file)
     {
-        // reset index to before first and clear the data iterator
-        index = 0;
-        closeCurrent();
-        current = null;
-        currentOrigin = NONE;
+        return tableCache.newIterator(file);
     }
 
-    @Override
-    protected void seekToLastInternal()
+    static final class FileIterator
+            implements ReverseSeekingIterator<InternalKey, FileMetaData>, Closeable
     {
-        index = files.size() - 1;
-        current = openFile(index);
-        currentOrigin = PREV;
-        current.seekToLastInternal();
-    }
+        private final List<FileMetaData> files;
+        private final InternalKeyComparator comparator;
+        private int index;
 
-    @Override
-    public void seekToEndInternal()
-    {
-        index = files.size() - 1;
-        current = openFile(index);
-        currentOrigin = PREV;
-        current.seekToEnd();
-    }
-
-    @Override
-    protected void seekInternal(InternalKey targetKey)
-    {
-        // seek the index to the block containing the key
-        if (files.size() == 0) {
-            return;
+        public FileIterator(List<FileMetaData> files, InternalKeyComparator comparator)
+        {
+            this.files = files;
+            this.comparator = comparator;
         }
 
-        // todo replace with Collections.binarySearch
-        int left = 0;
-        int right = files.size() - 1;
+        @Override
+        public void seekToFirst()
+        {
+            index = 0;
+        }
 
-        // binary search restart positions to find the restart position immediately before the targetKey
-        while (left < right) {
-            int mid = (left + right) / 2;
-
-            if (comparator.compare(files.get(mid).getLargest(), targetKey) < 0) {
-                // Key at "mid.largest" is < "target". Therefore all
-                // files at or before "mid" are uninteresting.
-                left = mid + 1;
+        @Override
+        public void seek(InternalKey targetKey)
+        {
+            // seek the index to the block containing the key
+            if (files.size() == 0) {
+                return;
             }
-            else {
-                // Key at "mid.largest" is >= "target". Therefore all files
-                // after "mid" are uninteresting.
-                right = mid;
-            }
-        }
-        index = right;
 
-        // if the index is now pointing to the last block in the file, check if the largest key in
-        // the block is less than the target key. If so, we need to seek beyond the end of this file
-        if (index == files.size() - 1
-                && comparator.compare(files.get(index).getLargest(), targetKey) < 0) {
-            index++;
-        }
+            // todo replace with Collections.binarySearch
+            int left = 0;
+            int right = files.size() - 1;
 
-        // if indexIterator does not have a next, it means the key does not exist in this iterator
-        if (index < files.size()) {
-            // seek the current iterator to the key
-            current = openNextFile();
-            current.seek(targetKey);
-        }
-        else {
-            closeCurrent();
-            current = null;
-            currentOrigin = NONE;
-        }
-    }
+            // binary search restart positions to find the restart position immediately before the targetKey
+            while (left < right) {
+                int mid = (left + right) / 2;
 
-    @Override
-    protected boolean hasNextInternal()
-    {
-        return currentHasNext();
-    }
-
-    @Override
-    protected boolean hasPrevInternal()
-    {
-        return currentHasPrev();
-    }
-
-    @Override
-    protected Entry<InternalKey, Slice> getNextElement()
-    {
-        // note: it must be here & not where 'current' is assigned,
-        // because otherwise we'll have called inputs.next() before throwing
-        // the first NPE, and the next time around we'll call inputs.next()
-        // again, incorrectly moving beyond the error.
-        return currentHasNext() ? current.next() : null;
-    }
-
-    @Override
-    protected Entry<InternalKey, Slice> getPrevElement()
-    {
-        return currentHasPrev() ? current.prev() : null;
-    }
-
-    @Override
-    protected Entry<InternalKey, Slice> peekInternal()
-    {
-        return currentHasNext() ? current.peek() : null;
-    }
-
-    @Override
-    protected Entry<InternalKey, Slice> peekPrevInternal()
-    {
-        return currentHasPrev() ? current.peekPrev() : null;
-    }
-
-    private boolean currentHasNext()
-    {
-        boolean currentHasNext = false;
-        while (true) {
-            if (current != null) {
-                currentHasNext = current.hasNext();
-            }
-            if (!currentHasNext) {
-                if (currentOrigin == PREV) {
-                    // current came from PREV, so the index currently points at the index of current's
-                    // file we want to check the next file, however
-                    index++;
-                }
-                if (index < files.size()) {
-                    current = openNextFile();
+                if (comparator.compare(files.get(mid).getLargest(), targetKey) < 0) {
+                    // Key at "mid.largest" is < "target". Therefore all
+                    // files at or before "mid" are uninteresting.
+                    left = mid + 1;
                 }
                 else {
-                    break;
+                    // Key at "mid.largest" is >= "target". Therefore all files
+                    // after "mid" are uninteresting.
+                    right = mid;
                 }
             }
-            else {
-                break;
+            index = right;
+
+            // if the index is now pointing to the last block in the file, check if the largest key in
+            // the block is less than the target key. If so, we need to seek beyond the end of this file
+            if (index == files.size() - 1 && comparator.compare(files.get(index).getLargest(), targetKey) < 0) {
+                index++;
             }
         }
-        if (!currentHasNext) {
-            closeCurrent();
-            current = null;
-            currentOrigin = NONE;
+
+        @Override
+        public Entry<InternalKey, FileMetaData> peek()
+        {
+            throw new UnsupportedOperationException();
         }
-        return currentHasNext;
-    }
 
-    private boolean currentHasPrev()
-    {
-        boolean currentHasPrev = false;
-        while (true) {
-            if (current != null) {
-                currentHasPrev = current.hasPrev();
-            }
-            if (!currentHasPrev) {
-                if (currentOrigin == NEXT) {
-                    index--;
-                }
-                if (index > 0) {
-                    current = openPrevFile();
-                    current.seekToEnd();
-                }
-                else {
-                    break;
-                }
-            }
-            else {
-                break;
-            }
+        @Override
+        public Entry<InternalKey, FileMetaData> next()
+        {
+            FileMetaData f = files.get(index++);
+            return Maps.immutableEntry(f.getLargest(), f);
         }
-        if (!currentHasPrev) {
-            closeCurrent();
-            current = null;
-            currentOrigin = NONE;
+
+        @Override
+        public void remove()
+        {
+            throw new UnsupportedOperationException();
         }
-        return currentHasPrev;
-    }
 
-    private InternalTableIterator openFile(int i)
-    {
-        closeCurrent();
-        return tableCache.newIterator(files.get(i));
-    }
-
-    private InternalTableIterator openNextFile()
-    {
-        currentOrigin = NEXT;
-        return openFile(index++);
-    }
-
-    private InternalTableIterator openPrevFile()
-    {
-        currentOrigin = PREV;
-        return openFile(--index);
-    }
-
-    @Override
-    public String toString()
-    {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("ConcatenatingIterator");
-        sb.append("{index=").append(index);
-        sb.append(", files=").append(files);
-        sb.append(", current=").append(current);
-        sb.append('}');
-        return sb.toString();
-    }
-
-    @Override
-    public void close()
-    {
-        closeCurrent();
-    }
-
-    private void closeCurrent()
-    {
-        if (current != null) {
-            current.close();
+        @Override
+        public boolean hasNext()
+        {
+            return index < files.size();
         }
+
+        @Override
+        public Entry<InternalKey, FileMetaData> peekPrev()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Entry<InternalKey, FileMetaData> prev()
+        {
+            FileMetaData f = files.get(--index);
+            return Maps.immutableEntry(f.getLargest(), f);
+        }
+
+        @Override
+        public boolean hasPrev()
+        {
+            return index > 0;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            // noop
+        }
+
+        @Override
+        public void seekToEnd()
+        {
+            index = files.size();
+        }
+
     }
 }

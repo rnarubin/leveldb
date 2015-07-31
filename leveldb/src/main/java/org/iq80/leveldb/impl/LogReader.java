@@ -17,14 +17,14 @@
  */
 package org.iq80.leveldb.impl;
 
-import org.iq80.leveldb.util.DynamicSliceOutput;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.SliceInput;
-import org.iq80.leveldb.util.SliceOutput;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.Env.SequentialReadFile;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.GrowingBuffer;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
+import java.nio.ByteBuffer;
 
 import static org.iq80.leveldb.impl.LogChunkType.BAD_CHUNK;
 import static org.iq80.leveldb.impl.LogChunkType.EOF;
@@ -36,8 +36,9 @@ import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 import static org.iq80.leveldb.impl.Logs.getChunkChecksum;
 
 public class LogReader
+        implements Closeable
 {
-    private final FileChannel fileChannel;
+    private final SequentialReadFile file;
 
     private final LogMonitor monitor;
 
@@ -66,29 +67,39 @@ public class LogReader
     /**
      * Scratch buffer in which the next record is assembled.
      */
-    private final DynamicSliceOutput recordScratch = new DynamicSliceOutput(BLOCK_SIZE);
+    private final GrowingBuffer recordScratch;
 
     /**
      * Scratch buffer for current block.  The currentBlock is sliced off the underlying buffer.
      */
-    private final SliceOutput blockScratch = Slices.allocate(BLOCK_SIZE).output();
+    private ByteBuffer blockScratch;
 
     /**
      * The current block records are being read from.
      */
-    private SliceInput currentBlock = Slices.EMPTY_SLICE.input();
+    private ByteBuffer currentBlock = ByteBuffers.EMPTY_BUFFER;
 
     /**
      * Current chunk which is sliced from the current block.
      */
-    private Slice currentChunk = Slices.EMPTY_SLICE;
+    private ByteBuffer currentChunk = ByteBuffers.EMPTY_BUFFER;
 
-    public LogReader(FileChannel fileChannel, LogMonitor monitor, boolean verifyChecksums, long initialOffset)
+    private final MemoryManager memory;
+
+    public LogReader(SequentialReadFile file,
+            LogMonitor monitor,
+            boolean verifyChecksums,
+            long initialOffset,
+            MemoryManager memory)
     {
-        this.fileChannel = fileChannel;
+        this.file = file;
         this.monitor = monitor;
         this.verifyChecksums = verifyChecksums;
         this.initialOffset = initialOffset;
+        this.memory = memory;
+        this.blockScratch = this.memory.allocate(BLOCK_SIZE);
+        this.blockScratch.mark();
+        this.recordScratch = new GrowingBuffer(BLOCK_SIZE, this.memory);
     }
 
     public long getLastRecordOffset()
@@ -118,7 +129,7 @@ public class LogReader
         // Skip to start of first block that can contain the initial record
         if (blockStartLocation > 0) {
             try {
-                fileChannel.position(blockStartLocation);
+                file.skip(blockStartLocation);
             }
             catch (IOException e) {
                 reportDrop(blockStartLocation, e);
@@ -129,9 +140,9 @@ public class LogReader
         return true;
     }
 
-    public Slice readRecord()
+    public ByteBuffer readRecord()
     {
-        recordScratch.reset();
+        recordScratch.clear();
 
         // advance to the first record, if we haven't already
         if (lastRecordOffset < initialOffset) {
@@ -145,81 +156,82 @@ public class LogReader
 
         boolean inFragmentedRecord = false;
         while (true) {
-            long physicalRecordOffset = endOfBufferOffset - currentChunk.length();
+            long physicalRecordOffset = endOfBufferOffset - currentChunk.remaining();
             LogChunkType chunkType = readNextChunk();
             switch (chunkType) {
                 case FULL:
                     if (inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Partial record without end");
+                        reportCorruption(recordScratch.filled(), "Partial record without end");
                         // simply return this full block
                     }
-                    recordScratch.reset();
+                    recordScratch.clear();
                     prospectiveRecordOffset = physicalRecordOffset;
                     lastRecordOffset = prospectiveRecordOffset;
-                    return currentChunk.copySlice();
+                    return ByteBuffers.copy(currentChunk, memory);
 
                 case FIRST:
                     if (inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Partial record without end");
+                        reportCorruption(recordScratch.filled(), "Partial record without end");
                         // clear the scratch and start over from this chunk
-                        recordScratch.reset();
+                        recordScratch.clear();
                     }
                     prospectiveRecordOffset = physicalRecordOffset;
-                    recordScratch.writeBytes(currentChunk);
+                    recordScratch.put(currentChunk);
                     inFragmentedRecord = true;
                     break;
 
                 case MIDDLE:
                     if (!inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Missing start of fragmented record");
+                        reportCorruption(recordScratch.filled(), "Missing start of fragmented record");
 
                         // clear the scratch and skip this chunk
-                        recordScratch.reset();
+                        recordScratch.clear();
                     }
                     else {
-                        recordScratch.writeBytes(currentChunk);
+                        recordScratch.put(currentChunk);
                     }
                     break;
 
                 case LAST:
                     if (!inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Missing start of fragmented record");
+                        reportCorruption(recordScratch.filled(), "Missing start of fragmented record");
 
                         // clear the scratch and skip this chunk
-                        recordScratch.reset();
+                        recordScratch.clear();
                     }
                     else {
-                        recordScratch.writeBytes(currentChunk);
+                        recordScratch.put(currentChunk);
                         lastRecordOffset = prospectiveRecordOffset;
-                        return recordScratch.slice().copySlice();
+                        // TODO check this copy
+                        return ByteBuffers.copy(recordScratch.get(), memory);
                     }
                     break;
 
                 case EOF:
                     if (inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Partial record without end");
+                        reportCorruption(recordScratch.filled(), "Partial record without end");
 
                         // clear the scratch and return
-                        recordScratch.reset();
+                        recordScratch.clear();
                     }
                     return null;
 
                 case BAD_CHUNK:
                     if (inFragmentedRecord) {
-                        reportCorruption(recordScratch.size(), "Error in middle of record");
+                        reportCorruption(recordScratch.filled(), "Error in middle of record");
                         inFragmentedRecord = false;
-                        recordScratch.reset();
+                        recordScratch.clear();
                     }
                     break;
 
                 default:
-                    int dropSize = currentChunk.length();
+                    int dropSize = currentChunk.remaining();
                     if (inFragmentedRecord) {
-                        dropSize += recordScratch.size();
+                        dropSize += recordScratch.filled();
                     }
                     reportCorruption(dropSize, String.format("Unexpected chunk type %s", chunkType));
                     inFragmentedRecord = false;
-                    recordScratch.reset();
+                    recordScratch.clear();
                     break;
             }
         }
@@ -231,10 +243,10 @@ public class LogReader
     private LogChunkType readNextChunk()
     {
         // clear the current chunk
-        currentChunk = Slices.EMPTY_SLICE;
+        currentChunk = ByteBuffers.EMPTY_BUFFER;
 
         // read the next block if necessary
-        if (currentBlock.available() < HEADER_SIZE) {
+        if (currentBlock.remaining() < HEADER_SIZE) {
             if (!readNextBlock()) {
                 if (eof) {
                     return EOF;
@@ -243,17 +255,18 @@ public class LogReader
         }
 
         // parse header
-        int expectedChecksum = currentBlock.readInt();
-        int length = currentBlock.readUnsignedByte();
-        length = length | currentBlock.readUnsignedByte() << 8;
-        byte chunkTypeId = currentBlock.readByte();
+        int expectedChecksum = currentBlock.getInt();
+        int length = ByteBuffers.readUnsignedByte(currentBlock);
+        length = length | ByteBuffers.readUnsignedByte(currentBlock) << 8;
+        byte chunkTypeId = currentBlock.get();
         LogChunkType chunkType = getLogChunkTypeByPersistentId(chunkTypeId);
 
         // verify length
-        if (length > currentBlock.available()) {
-            int dropSize = currentBlock.available() + HEADER_SIZE;
+        if (length > currentBlock.remaining()) {
+            int dropSize = currentBlock.remaining() + HEADER_SIZE;
             reportCorruption(dropSize, "Invalid chunk length");
-            currentBlock = Slices.EMPTY_SLICE.input();
+            memory.free(currentBlock);
+            currentBlock = ByteBuffers.EMPTY_BUFFER;
             return BAD_CHUNK;
         }
 
@@ -261,18 +274,19 @@ public class LogReader
         if (chunkType == ZERO_TYPE && length == 0) {
             // Skip zero length record without reporting any drops since
             // such records are produced by the writing code.
-            currentBlock = Slices.EMPTY_SLICE.input();
+            memory.free(currentBlock);
+            currentBlock = ByteBuffers.EMPTY_BUFFER;
             return BAD_CHUNK;
         }
 
         // Skip physical record that started before initialOffset
         if (endOfBufferOffset - HEADER_SIZE - length < initialOffset) {
-            currentBlock.skipBytes(length);
+            currentBlock.position(currentBlock.position() + length);
             return BAD_CHUNK;
         }
 
         // read the chunk
-        currentChunk = currentBlock.readBytes(length);
+        currentChunk = ByteBuffers.duplicateAndAdvance(currentBlock, length);
 
         if (verifyChecksums) {
             int actualChecksum = getChunkChecksum(chunkTypeId, currentChunk);
@@ -281,8 +295,9 @@ public class LogReader
                 // been corrupted and if we trust it, we could find some
                 // fragment of a real log record that just happens to look
                 // like a valid log record.
-                int dropSize = currentBlock.available() + HEADER_SIZE;
-                currentBlock = Slices.EMPTY_SLICE.input();
+                int dropSize = currentBlock.remaining() + HEADER_SIZE;
+                memory.free(currentBlock);
+                currentBlock = ByteBuffers.EMPTY_BUFFER;
                 reportCorruption(dropSize, "Invalid chunk checksum");
                 return BAD_CHUNK;
             }
@@ -308,9 +323,9 @@ public class LogReader
         blockScratch.reset();
 
         // read the next full block
-        while (blockScratch.writableBytes() > 0) {
+        while (blockScratch.hasRemaining()) {
             try {
-                int bytesRead = blockScratch.writeBytes(fileChannel, blockScratch.writableBytes());
+                int bytesRead = file.read(blockScratch);
                 if (bytesRead < 0) {
                     // no more bytes to read
                     eof = true;
@@ -319,15 +334,23 @@ public class LogReader
                 endOfBufferOffset += bytesRead;
             }
             catch (IOException e) {
-                currentBlock = Slices.EMPTY_SLICE.input();
+                memory.free(currentBlock);
+                currentBlock = ByteBuffers.EMPTY_BUFFER;
                 reportDrop(BLOCK_SIZE, e);
                 eof = true;
                 return false;
             }
 
         }
-        currentBlock = blockScratch.slice().input();
-        return currentBlock.isReadable();
+        blockScratch.limit(blockScratch.position()).reset();
+        // TODO check this copy
+        if (currentBlock != ByteBuffers.EMPTY_BUFFER) {
+            memory.free(currentBlock);
+        }
+        currentBlock = blockScratch;// ByteBuffers.copy(blockScratch, this.memory);
+        blockScratch = memory.allocate(BLOCK_SIZE);
+        blockScratch.mark();
+        return currentBlock.hasRemaining();
     }
 
     /**
@@ -350,5 +373,17 @@ public class LogReader
         if (monitor != null) {
             monitor.corruption(bytes, reason);
         }
+    }
+
+    @Override
+    public void close()
+            throws IOException
+    {
+        recordScratch.close();
+        memory.free(blockScratch);
+        if (currentBlock != ByteBuffers.EMPTY_BUFFER) {
+            memory.free(currentBlock);
+        }
+        file.close();
     }
 }

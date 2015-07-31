@@ -15,19 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
+package org.iq80.leveldb.util;
 
-import java.util.Comparator;
+import java.nio.ByteBuffer;
+import java.util.zip.Checksum;
 
-// todo this interface needs more thought
-public interface UserComparator
-        extends Comparator<Slice>
+public interface ByteBufferCrc32
+        extends Checksum
 {
-    String name();
+    public void update(ByteBuffer b, int off, int len);
 
-    Slice findShortestSeparator(Slice start, Slice limit);
-
-    Slice findShortSuccessor(Slice key);
+    public int getIntValue();
 }

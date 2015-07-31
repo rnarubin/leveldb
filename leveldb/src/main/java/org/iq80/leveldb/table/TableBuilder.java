@@ -18,21 +18,26 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
-import org.iq80.leveldb.CompressionType;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.PureJavaCrc32C;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
-import org.iq80.leveldb.util.Snappy;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 import static org.iq80.leveldb.impl.VersionSet.TARGET_FILE_SIZE;
 
 public class TableBuilder
+        implements Closeable
 {
     /**
      * TABLE_MAGIC_NUMBER was picked by running
@@ -41,15 +46,17 @@ public class TableBuilder
      */
     public static final long TABLE_MAGIC_NUMBER = 0xdb4775248b80fb57L;
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(TableBuilder.class);
+
     private final int blockRestartInterval;
     private final int blockSize;
-    private final CompressionType compressionType;
+    private final Compression compression;
 
-    private final FileChannel fileChannel;
+    private final SequentialWriteFile file;
     private final BlockBuilder dataBlockBuilder;
     private final BlockBuilder indexBlockBuilder;
-    private Slice lastKey;
-    private final UserComparator userComparator;
+    private InternalKey lastKey;
+    private final InternalKeyComparator internalKeyComparator;
 
     private long entryCount;
 
@@ -66,35 +73,32 @@ public class TableBuilder
     private boolean pendingIndexEntry;
     private BlockHandle pendingHandle;  // Handle to add to index block
 
-    private Slice compressedOutput;
-
     private long position;
 
-    public TableBuilder(Options options, FileChannel fileChannel, UserComparator userComparator)
+    private final MemoryManager memory;
+
+    public TableBuilder(Options options, SequentialWriteFile file, InternalKeyComparator internalKeyComparator)
     {
         Preconditions.checkNotNull(options, "options is null");
-        Preconditions.checkNotNull(fileChannel, "fileChannel is null");
-        try {
-            Preconditions.checkState(position == fileChannel.position(), "Expected position %s to equal fileChannel.position %s", position, fileChannel.position());
-        }
-        catch (IOException e) {
-            throw Throwables.propagate(e);
-        }
+        Preconditions.checkNotNull(file, "file is null");
 
-        this.fileChannel = fileChannel;
-        this.userComparator = userComparator;
+        this.memory = options.memoryManager();
+        this.file = file;
+        this.internalKeyComparator = internalKeyComparator;
 
         blockRestartInterval = options.blockRestartInterval();
         blockSize = options.blockSize();
-        compressionType = options.compressionType();
+        compression = options.compression();
 
-        dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE), blockRestartInterval, userComparator);
+        dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE), blockRestartInterval,
+                internalKeyComparator.getUserComparator(), this.memory);
 
         // with expected 50% compression
         int expectedNumberOfBlocks = 1024;
-        indexBlockBuilder = new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1, userComparator);
+        indexBlockBuilder = new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1,
+                internalKeyComparator.getUserComparator(), this.memory);
 
-        lastKey = Slices.EMPTY_SLICE;
+        lastKey = InternalKey.MINIMUM_KEY;
     }
 
     public long getEntryCount()
@@ -103,19 +107,11 @@ public class TableBuilder
     }
 
     public long getFileSize()
-            throws IOException
     {
         return position + dataBlockBuilder.currentSizeEstimate();
     }
 
-    public void add(BlockEntry blockEntry)
-            throws IOException
-    {
-        Preconditions.checkNotNull(blockEntry, "blockEntry is null");
-        add(blockEntry.getKey(), blockEntry.getValue());
-    }
-
-    public void add(Slice key, Slice value)
+    public void add(InternalKey key, ByteBuffer value)
             throws IOException
     {
         Preconditions.checkNotNull(key, "key is null");
@@ -124,17 +120,14 @@ public class TableBuilder
         Preconditions.checkState(!closed, "table is finished");
 
         if (entryCount > 0) {
-            assert (userComparator.compare(key, lastKey) > 0) : "key must be greater than last key";
+            Preconditions.checkState(internalKeyComparator.compare(key, lastKey) > 0,
+                    "key must be greater than last key");
         }
 
         // If we just wrote a block, we can now add the handle to index block
         if (pendingIndexEntry) {
             Preconditions.checkState(dataBlockBuilder.isEmpty(), "Internal error: Table has a pending index entry but data block builder is empty");
-
-            Slice shortestSeparator = userComparator.findShortestSeparator(lastKey, key);
-
-            Slice handleEncoding = BlockHandle.writeBlockHandle(pendingHandle);
-            indexBlockBuilder.add(shortestSeparator, handleEncoding);
+            indexBlockBuilder.addHandle(lastKey, key, pendingHandle);
             pendingIndexEntry = false;
         }
 
@@ -166,66 +159,64 @@ public class TableBuilder
             throws IOException
     {
         // close the block
-        Slice raw = blockBuilder.finish();
-
+        final ByteBuffer raw = blockBuilder.finish();
+        ByteBuffer blockContents = raw;
+        byte compressionId = 0;
         // attempt to compress the block
-        Slice blockContents = raw;
-        CompressionType blockCompressionType = CompressionType.NONE;
-        if (compressionType == CompressionType.SNAPPY) {
-            ensureCompressedOutputCapacity(maxCompressedLength(raw.length()));
+        if (compression != null) {
+            // include space for packing the block trailer
+            ByteBuffer compressedContents = memory.allocate(compression.maxCompressedLength(raw)
+                    + BlockTrailer.ENCODED_LENGTH);
+
             try {
-                int compressedSize = Snappy.compress(raw.getRawArray(), raw.getRawOffset(), raw.length(), compressedOutput.getRawArray(), 0);
+                int compressedSize = compression.compress(ByteBuffers.duplicate(raw),
+                        ByteBuffers.duplicate(compressedContents));
 
                 // Don't use the compressed data if compressed less than 12.5%,
-                if (compressedSize < raw.length() - (raw.length() / 8)) {
-                    blockContents = compressedOutput.slice(0, compressedSize);
-                    blockCompressionType = CompressionType.SNAPPY;
+                if (compressedSize < raw.remaining() - (raw.remaining() / 8)) {
+                    compressedContents.limit(compressedContents.position() + compressedSize);
+                    blockContents = compressedContents;
+                    compressionId = compression.persistentId();
                 }
             }
-            catch (IOException ignored) {
+            catch (Exception e) {
+                LOGGER.warn("Compression failed", e);
                 // compression failed, so just store uncompressed form
+                blockContents = raw;
+                compressionId = 0;
+            }
+            finally {
+                if (blockContents != compressedContents) {
+                    memory.free(compressedContents);
+                }
             }
         }
 
         // create block trailer
-        BlockTrailer blockTrailer = new BlockTrailer(blockCompressionType, crc32c(blockContents, blockCompressionType));
-        Slice trailer = BlockTrailer.writeBlockTrailer(blockTrailer);
+        BlockTrailer blockTrailer = new BlockTrailer(compressionId, crc32c(blockContents, compressionId));
+
+        // trailer space was reserved either in compressed output or finished block
+        blockContents.mark().position(blockContents.limit()).limit(blockContents.limit() + BlockTrailer.ENCODED_LENGTH);
+        BlockTrailer.writeBlockTrailer(blockTrailer, blockContents);
+        blockContents.reset();
 
         // create a handle to this block
-        BlockHandle blockHandle = new BlockHandle(position, blockContents.length());
+        BlockHandle blockHandle = new BlockHandle(position, blockContents.remaining() - BlockTrailer.ENCODED_LENGTH);
 
         // write data and trailer
-        position += fileChannel.write(new ByteBuffer[] {blockContents.toByteBuffer(), trailer.toByteBuffer()});
+        try {
+            position += file.write(blockContents);
+        }
+        finally {
+            if (blockContents != raw) {
+                memory.free(blockContents);
+            }
+        }
 
         // clean up state
         blockBuilder.reset();
 
         return blockHandle;
-    }
-
-    private static int maxCompressedLength(int length)
-    {
-        // Compressed data can be defined as:
-        //    compressed := item* literal*
-        //    item       := literal* copy
-        //
-        // The trailing literal sequence has a space blowup of at most 62/60
-        // since a literal of length 60 needs one tag byte + one extra byte
-        // for length information.
-        //
-        // Item blowup is trickier to measure.  Suppose the "copy" op copies
-        // 4 bytes of data.  Because of a special check in the encoding code,
-        // we produce a 4-byte copy only if the offset is < 65536.  Therefore
-        // the copy op takes 3 bytes to encode, and this type of item leads
-        // to at most the 62/60 blowup for representing literals.
-        //
-        // Suppose the "copy" op copies 5 bytes of data.  If the offset is big
-        // enough, it will take 5 bytes to encode the copy op.  Therefore the
-        // worst case here is a one-byte literal followed by a five-byte copy.
-        // I.e., 6 bytes of input turn into 7 bytes of "compressed" data.
-        //
-        // This last factor dominates the blowup, so the final estimate is:
-        return 32 + length + (length / 6);
     }
 
     public void finish()
@@ -240,16 +231,20 @@ public class TableBuilder
         closed = true;
 
         // write (empty) meta index block
-        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator());
+        BlockBuilder metaIndexBlockBuilder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator(),
+                this.memory);
         // TODO(postrelease): Add stats and other meta blocks
-        BlockHandle metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);
+        BlockHandle metaindexBlockHandle;
+        try {
+            metaindexBlockHandle = writeBlock(metaIndexBlockBuilder);
+        }
+        finally {
+            metaIndexBlockBuilder.close();
+        }
 
         // add last handle to index block
         if (pendingIndexEntry) {
-            Slice shortSuccessor = userComparator.findShortSuccessor(lastKey);
-
-            Slice handleEncoding = BlockHandle.writeBlockHandle(pendingHandle);
-            indexBlockBuilder.add(shortSuccessor, handleEncoding);
+            indexBlockBuilder.addHandle(lastKey, null, pendingHandle);
             pendingIndexEntry = false;
         }
 
@@ -258,8 +253,15 @@ public class TableBuilder
 
         // write footer
         Footer footer = new Footer(metaindexBlockHandle, indexBlockHandle);
-        Slice footerEncoding = Footer.writeFooter(footer);
-        position += fileChannel.write(footerEncoding.toByteBuffer());
+        ByteBuffer footerEncoding = this.memory.allocate(Footer.ENCODED_LENGTH);
+        footerEncoding.mark();
+        Footer.writeFooter(footer, footerEncoding).reset();
+        try {
+            position += file.write(footerEncoding);
+        }
+        finally {
+            memory.free(footerEncoding);
+        }
     }
 
     public void abandon()
@@ -268,19 +270,18 @@ public class TableBuilder
         closed = true;
     }
 
-    public static int crc32c(Slice data, CompressionType type)
+    public static int crc32c(ByteBuffer data, byte compressionId)
     {
-        PureJavaCrc32C crc32c = new PureJavaCrc32C();
-        crc32c.update(data.getRawArray(), data.getRawOffset(), data.length());
-        crc32c.update(type.persistentId() & 0xFF);
-        return crc32c.getMaskedValue();
+        ByteBufferCrc32 crc32 = ByteBuffers.crc32();
+        crc32.update(data, data.position(), data.remaining());
+        crc32.update(compressionId & 0xFF);
+        return ByteBuffers.maskChecksum(crc32.getIntValue());
     }
 
-    public void ensureCompressedOutputCapacity(int capacity)
+    @Override
+    public void close()
     {
-        if (compressedOutput != null && compressedOutput.length() > capacity) {
-            return;
-        }
-        compressedOutput = Slices.allocate(capacity);
+        dataBlockBuilder.close();
+        indexBlockBuilder.close();
     }
 }

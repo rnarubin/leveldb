@@ -19,8 +19,8 @@ package org.iq80.leveldb.impl;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.FileUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -36,9 +36,9 @@ public class Iq80DBFactory
         implements DBFactory
 {
     /**
-     * @deprecated use {@link Options#useMMap(boolean) Options.useMMap(boolean)} instead
+     * @deprecated use {@link Options#env(Env)} with non-mmap Env as appropriate
      */
-    public static final boolean USE_MMAP = Options.USE_MMAP_DEFAULT;
+    public static final boolean USE_MMAP = DbImpl.USE_MMAP_DEFAULT;
 
     public static final String VERSION;
 
@@ -73,8 +73,9 @@ public class Iq80DBFactory
     public void destroy(File path, Options options)
             throws IOException
     {
-        // TODO: This should really only delete leveldb-created files.
-        FileUtils.deleteRecursively(path);
+        // TODO rework the DBFactory interface, it's not file agnostic
+        Env fsEnv = new FileChannelEnv(null, path.toPath());
+        fsEnv.deleteDir(fsEnv.createDBDir());
     }
 
     @Override

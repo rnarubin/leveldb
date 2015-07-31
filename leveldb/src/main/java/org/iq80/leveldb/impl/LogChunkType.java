@@ -30,14 +30,21 @@ public enum LogChunkType
     BAD_CHUNK,
     UNKNOWN;
 
-    public static LogChunkType getLogChunkTypeByPersistentId(int persistentId)
-    {
-        for (LogChunkType logChunkType : LogChunkType.values()) {
-            if (logChunkType.persistentId != null && logChunkType.persistentId == persistentId) {
-                return logChunkType;
+    private static final LogChunkType[] indexedTypes = new LogChunkType[5];
+    static {
+        for (LogChunkType type : LogChunkType.values()) {
+            if (type.persistentId != null) {
+                indexedTypes[type.persistentId] = type;
             }
         }
-        return UNKNOWN;
+    }
+
+    public static LogChunkType getLogChunkTypeByPersistentId(int persistentId)
+    {
+        if (persistentId < 0 || persistentId >= indexedTypes.length) {
+            return UNKNOWN;
+        }
+        return indexedTypes[persistentId];
     }
 
     private final Integer persistentId;

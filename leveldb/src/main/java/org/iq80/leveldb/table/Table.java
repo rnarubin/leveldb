@@ -20,56 +20,82 @@ package org.iq80.leveldb.table;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.MemoryManager;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.Env.RandomReadFile;
+import org.iq80.leveldb.impl.EncodedInternalKey;
+import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
+import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.TableIterator;
-import org.iq80.leveldb.util.VariableLengthQuantity;
+import org.iq80.leveldb.util.ReferenceCounted;
+import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Comparator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public abstract class Table
-        implements SeekingIterable<Slice, Slice>, AutoCloseable
+public final class Table
+        extends ReferenceCounted<Table>
+        implements SeekingIterable<InternalKey, ByteBuffer>, AutoCloseable
 {
-    private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
-    protected final String name;
-    protected final FileChannel fileChannel;
-    protected final Comparator<Slice> comparator;
-    protected final boolean verifyChecksums;
-    protected final Block indexBlock;
-    protected final BlockHandle metaindexBlockHandle;
-    private final AtomicInteger refCount;
 
-    public Table(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+    private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
+    private static final Decoder<InternalKey> INTERNAL_KEY_DECODER = new Decoder<InternalKey>()
+    {
+        @Override
+        public InternalKey decode(ByteBuffer b)
+        {
+            return new EncodedInternalKey(b);
+        }
+    };
+    private final RandomReadFile file;
+    private final Comparator<InternalKey> comparator;
+    private final Block<InternalKey> indexBlock;
+    private final BlockHandle metaindexBlockHandle;
+    private final MemoryManager memory;
+    private final Compression compression;
+    private final boolean verifyChecksums;
+
+    public Table(RandomReadFile file, Comparator<InternalKey> comparator, Options options)
             throws IOException
     {
-        Preconditions.checkNotNull(name, "name is null");
-        Preconditions.checkNotNull(fileChannel, "fileChannel is null");
-        long size = fileChannel.size();
+        Preconditions.checkNotNull(file, "file is null");
+        long size = file.size();
         Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH, "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
         Preconditions.checkNotNull(comparator, "comparator is null");
 
-        this.name = name;
-        this.fileChannel = fileChannel;
-        this.verifyChecksums = verifyChecksums;
+        this.verifyChecksums = options.verifyChecksums();
+        this.memory = options.memoryManager();
+        this.compression = options.compression();
+
+        this.file = file;
         this.comparator = comparator;
 
-        Footer footer = init();
-        indexBlock = readBlock(footer.getIndexBlockHandle());
-        metaindexBlockHandle = footer.getMetaindexBlockHandle();
-        this.refCount = new AtomicInteger(1);
+        Footer footer;
+        {
+            ByteBuffer footerBuf = null;
+            try {
+                footerBuf = file.read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH);
+                footer = Footer.readFooter(footerBuf);
+            }
+            finally {
+                if (footerBuf != null) {
+                    file.deallocator().free(footerBuf);
+                }
+            }
+        }
+        this.indexBlock = readBlock(footer.getIndexBlockHandle());
+        this.metaindexBlockHandle = footer.getMetaindexBlockHandle();
     }
-
-    protected abstract Footer init()
-            throws IOException;
 
     @Override
     public TableIterator iterator()
@@ -77,10 +103,10 @@ public abstract class Table
         return new TableIterator(this, indexBlock.iterator());
     }
 
-    public Block openBlock(Slice blockEntry)
+    public Block<InternalKey> openBlock(ByteBuffer blockEntry)
     {
-        BlockHandle blockHandle = BlockHandle.readBlockHandle(blockEntry.input());
-        Block dataBlock;
+        BlockHandle blockHandle = BlockHandle.readBlockHandle(ByteBuffers.duplicate(blockEntry));
+        Block<InternalKey> dataBlock;
         try {
             dataBlock = readBlock(blockHandle);
         }
@@ -90,15 +116,75 @@ public abstract class Table
         return dataBlock;
     }
 
-    protected static ByteBuffer uncompressedScratch = ByteBuffer.allocateDirect(4 * 1024 * 1024);
-
-    protected abstract Block readBlock(BlockHandle blockHandle)
-            throws IOException;
-
-    protected int uncompressedLength(ByteBuffer data)
+    private static ByteBuffer uncompress(Compression compression, ByteBuffer compressedData, MemoryManager memory)
     {
-        int length = VariableLengthQuantity.readVariableLengthInt(data.duplicate());
-        return length;
+        ByteBuffer dst = memory.allocate(compression.maxUncompressedLength(compressedData));
+        final int oldpos = dst.position();
+        final int length = compression.uncompress(compressedData, dst);
+        dst.limit(oldpos + length).position(oldpos);
+        return dst;
+    }
+
+    private Block<InternalKey> readBlock(BlockHandle blockHandle)
+            throws IOException
+    {
+        // read block trailer
+        ByteBuffer readBuffer = file.read(blockHandle.getOffset(), blockHandle.getDataSize()
+                + BlockTrailer.ENCODED_LENGTH);
+
+        Preconditions.checkState(readBuffer != null, "block handle offset greater than file size (%s, %d)",
+                blockHandle.toString(), file.size());
+        Preconditions.checkState(readBuffer.remaining() == blockHandle.getDataSize() + BlockTrailer.ENCODED_LENGTH,
+                "read buffer incorrect size (%d, %d)", readBuffer.remaining(), blockHandle.getDataSize()
+                        + BlockTrailer.ENCODED_LENGTH);
+
+        final int dataStart = readBuffer.position();
+        readBuffer.position(readBuffer.limit() - BlockTrailer.ENCODED_LENGTH);
+        BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(readBuffer);
+        readBuffer.limit(readBuffer.limit() - BlockTrailer.ENCODED_LENGTH).position(dataStart);
+
+        // only verify check sums if explicitly asked by the user
+        if (verifyChecksums) {
+            // checksum data and the compression type in the trailer
+            ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            checksum.update(readBuffer, dataStart, blockHandle.getDataSize() + 1);
+            int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
+
+            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
+        }
+
+        ByteBuffer blockData = uncompressIfNecessary(readBuffer, blockTrailer.getCompressionId());
+        boolean didUncompress = blockData != readBuffer;
+        Closeable cleaner;
+        if (didUncompress) {
+            file.deallocator().free(readBuffer);
+            cleaner = ByteBuffers.freer(blockData, memory);
+        }
+        else {
+            cleaner = ByteBuffers.freer(readBuffer, file.deallocator());
+        }
+
+        return new Block<InternalKey>(blockData, comparator, memory, INTERNAL_KEY_DECODER, cleaner);
+    }
+
+    private ByteBuffer uncompressIfNecessary(ByteBuffer compressedData, byte compressionId)
+    {
+        // TODO(postrelease) multiple live compressions
+        if (compressionId == 0) {
+            // not compressed
+            return compressedData;
+        }
+        if (compression != null && compressionId == compression.persistentId()) {
+            // id matches user compression
+            return uncompress(compression, compressedData, memory);
+        }
+        if (compressionId == 1) {
+            // id matches Snappy, but not user compression, implying legacy data
+            return uncompress(Snappy.instance(), compressedData, memory);
+        }
+        else {
+            throw new DBException("Unknown compression identifier: " + compressionId);
+        }
     }
 
     /**
@@ -109,19 +195,20 @@ public abstract class Table
      * For example, the approximate offset of the last key in the table will
      * be close to the file length.
      */
-    public long getApproximateOffsetOf(Slice key)
+    public long getApproximateOffsetOf(InternalKey key)
     {
-        BlockIterator iterator = indexBlock.iterator();
-        iterator.seek(key);
-        if (iterator.hasNext()) {
-            BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue().input());
-            return blockHandle.getOffset();
-        }
+        try (BlockIterator<InternalKey> iterator = indexBlock.iterator()) {
+            iterator.seek(key);
+            if (iterator.hasNext()) {
+                BlockHandle blockHandle = BlockHandle.readBlockHandle(iterator.next().getValue());
+                return blockHandle.getOffset();
+            }
 
-        // key is past the last key in the file.  Approximate the offset
-        // by returning the offset of the metaindex block (which is
-        // right near the end of the file).
-        return metaindexBlockHandle.getOffset();
+            // key is past the last key in the file. Approximate the offset
+            // by returning the offset of the metaindex block (which is
+            // right near the end of the file).
+            return metaindexBlockHandle.getOffset();
+        }
     }
 
     @Override
@@ -129,84 +216,58 @@ public abstract class Table
     {
         StringBuilder sb = new StringBuilder();
         sb.append("Table");
-        sb.append("{name='").append(name).append('\'');
+        sb.append("{file=").append(file);
         sb.append(", comparator=").append(comparator);
         sb.append(", verifyChecksums=").append(verifyChecksums);
         sb.append('}');
         return sb.toString();
     }
 
-    public Table retain()
+    @Override
+    protected final Table getThis()
     {
-        int count;
-        do {
-            count = refCount.get();
-            if (count == 0) {
-                // raced with a final release,
-                // force the caller to re-read from cache
-                return null;
-            }
-        }
-        while (!refCount.compareAndSet(count, count + 1));
         return this;
     }
 
-    public void release()
-    {
-        if (refCount.decrementAndGet() == 0) {
-            try {
-                closer().call();
-            }
-            catch (Exception e) {
-            }
-        }
-    }
-
     @Override
-    public void close()
+    protected void dispose()
     {
-        release();
-    }
-
-    @Override
-    public void finalize()
-            throws Throwable
-    {
-        if (refCount.get() != 0) {
-            LOGGER.warn("table finalized with {} open refs", refCount.get());
-        }
         try {
             closer().call();
         }
         catch (Exception e) {
-            LOGGER.warn("exception in finalizing table", e);
-            throw e;
-        }
-        finally {
-            super.finalize();
+            Throwables.propagate(e);
         }
     }
 
     public Callable<?> closer()
     {
-        return new Closer(fileChannel);
+        return new Closer(getReferenceCount(), file, indexBlock);
     }
 
     private static class Closer
             implements Callable<Void>
     {
-        private final Closeable closeable;
+        private final AutoCloseable[] closeables;
+        private final AtomicInteger refCount;
 
-        public Closer(Closeable closeable)
+        public Closer(AtomicInteger refCount, AutoCloseable... closeables)
         {
-            this.closeable = closeable;
+            this.refCount = refCount;
+            this.closeables = closeables;
         }
 
         @Override
         public Void call()
         {
-            Closeables.closeQuietly(closeable);
+            if (refCount.get() != 0) {
+                LOGGER.warn("table finalized with {} open refs", refCount.get());
+            }
+            for (AutoCloseable c : closeables) {
+                Closeables.closeQuietly(c);
+            }
             return null;
         }
     }
+
 }

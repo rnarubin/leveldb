@@ -18,6 +18,7 @@
 package org.iq80.leveldb;
 
 import java.io.Closeable;
+import java.nio.ByteBuffer;
 
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
@@ -27,5 +28,9 @@ public interface WriteBatch
 {
     WriteBatch put(byte[] key, byte[] value);
 
+    WriteBatch put(ByteBuffer key, ByteBuffer value);
+
     WriteBatch delete(byte[] key);
+
+    WriteBatch delete(ByteBuffer key);
 }

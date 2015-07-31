@@ -17,31 +17,36 @@
  */
 package org.iq80.leveldb.impl;
 
+import java.nio.ByteBuffer;
+
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Slice;
+
+import org.iq80.leveldb.util.ByteBuffers;
 
 public class LookupResult
 {
-    public static LookupResult ok(LookupKey key, Slice value)
+    public static LookupResult ok(LookupKey key, ByteBuffer value, boolean needsFreeing)
     {
-        return new LookupResult(key, value, false);
+        return new LookupResult(key, value, false, needsFreeing);
     }
 
     public static LookupResult deleted(LookupKey key)
     {
-        return new LookupResult(key, null, true);
+        return new LookupResult(key, null, true, false);
     }
 
     private final LookupKey key;
-    private final Slice value;
+    private final ByteBuffer value;
     private final boolean deleted;
+    private final boolean needsFreeing;
 
-    private LookupResult(LookupKey key, Slice value, boolean deleted)
+    private LookupResult(LookupKey key, ByteBuffer value, boolean deleted, boolean needsFreeing)
     {
         Preconditions.checkNotNull(key, "key is null");
+        this.needsFreeing = needsFreeing;
         this.key = key;
         if (value != null) {
-            this.value = value.slice();
+            this.value = needsFreeing ? value : ByteBuffers.duplicate(value);
         }
         else {
             this.value = null;
@@ -54,16 +59,18 @@ public class LookupResult
         return key;
     }
 
-    public Slice getValue()
+    public ByteBuffer getValue()
     {
-        if (value == null) {
-            return null;
-        }
         return value;
     }
 
     public boolean isDeleted()
     {
         return deleted;
+    }
+
+    public boolean needsFreeing()
+    {
+        return needsFreeing;
     }
 }

@@ -17,7 +17,6 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
@@ -25,21 +24,23 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
-import com.google.common.io.Files;
 
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.GrowingBuffer;
 import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.Level0Iterator;
 import org.iq80.leveldb.util.MergingIterator;
-import org.iq80.leveldb.util.Slice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -78,7 +79,7 @@ public class VersionSet
     private long prevLogNumber;
 
     private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
-    private final File databaseDir;
+    private final Path databaseDir;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
     private final Options options;
@@ -86,7 +87,10 @@ public class VersionSet
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(File databaseDir, TableCache tableCache, InternalKeyComparator internalKeyComparator, Options options)
+    public VersionSet(Path databaseDir,
+            TableCache tableCache,
+            InternalKeyComparator internalKeyComparator,
+            Options options)
             throws IOException
     {
         this.databaseDir = databaseDir;
@@ -101,25 +105,22 @@ public class VersionSet
     private void initializeIfNeeded()
             throws IOException
     {
-        File currentFile = new File(databaseDir, Filename.currentFileName());
-
-        if (!currentFile.exists()) {
+        if (!options.env().fileExists(FileInfo.current())) {
             VersionEdit edit = new VersionEdit();
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
             edit.setNextFileNumber(nextFileNumber.get());
             edit.setLastSequenceNumber(lastSequence.get());
 
-            LogWriter log = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
-            try {
+            long fileNum;
+            try (LogWriter log = Logs.createLogWriter(FileInfo.manifest(manifestFileNumber), manifestFileNumber,
+                    options); GrowingBuffer record = edit.encode(options.memoryManager())) {
+                fileNum = log.getFileNumber();
                 writeSnapshot(log);
-                log.addRecord(edit.encode(), true);
-            }
-            finally {
-               log.close();
+                log.addRecord(record.get(), true);
             }
 
-            Filename.setCurrentFile(databaseDir, log.getFileNumber());
+            setCurrentFile(options.env(), fileNum);
         }
     }
 
@@ -210,7 +211,7 @@ public class VersionSet
             if (!c.getInputs()[which].isEmpty()) {
                 if (c.getLevel() + which == 0) {
                     List<FileMetaData> files = c.getInputs()[which];
-                    list.add(new Level0Iterator(tableCache, files, internalKeyComparator));
+                    list.add(Level0.createLevel0Iterator(tableCache, files, internalKeyComparator));
                 }
                 else {
                     // Create concatenating iterator for the files from this level
@@ -222,11 +223,13 @@ public class VersionSet
     }
 
     public LookupResult get(LookupKey key)
+            throws IOException
     {
-        return current.get(key);
+        return current.get(key, options.memoryManager());
     }
 
-    public boolean overlapInLevel(int level, Slice smallestUserKey, Slice largestUserKey)
+    // TODO remove maybe
+    public boolean overlapInLevel(int level, ByteBuffer smallestUserKey, ByteBuffer largestUserKey)
     {
         return current.overlapInLevel(level, smallestUserKey, largestUserKey);
     }
@@ -283,31 +286,33 @@ public class VersionSet
         finalizeVersion(version);
 
         boolean createdNewManifest = false;
+        FileInfo manifestFile = FileInfo.manifest(manifestFileNumber);
         try {
             // Initialize new descriptor log file if necessary by creating
             // a temporary file that contains a snapshot of the current version.
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
-                descriptorLog = Logs.createLogWriter(new File(databaseDir, Filename.descriptorFileName(manifestFileNumber)), manifestFileNumber, options);
+                descriptorLog = Logs.createLogWriter(manifestFile, manifestFileNumber, options);
                 writeSnapshot(descriptorLog);
                 createdNewManifest = true;
             }
 
             // Write new record to MANIFEST log
-            Slice record = edit.encode();
-            descriptorLog.addRecord(record, true);
+            try (GrowingBuffer record = edit.encode(options.memoryManager())) {
+                descriptorLog.addRecord(record.get(), true);
+            }
 
             // If we just created a new descriptor file, install it by writing a
             // new CURRENT file that points to it.
             if (createdNewManifest) {
-                Filename.setCurrentFile(databaseDir, descriptorLog.getFileNumber());
+                setCurrentFile(options.env(), descriptorLog.getFileNumber());
             }
         }
         catch (IOException e) {
             // New manifest file was not installed, so clean up state and delete the file
             if (createdNewManifest) {
                 descriptorLog.close();
-                descriptorLog.delete();
+                options.env().deleteFile(manifestFile);
                 descriptorLog = null;
             }
             throw e;
@@ -332,8 +337,9 @@ public class VersionSet
         // Save files
         edit.addFiles(current.getFiles());
 
-        Slice record = edit.encode();
-        log.addRecord(record, true);
+        try (GrowingBuffer record = edit.encode(options.memoryManager())) {
+            log.addRecord(record.get(), true);
+        }
     }
 
     public void recover()
@@ -341,19 +347,20 @@ public class VersionSet
     {
 
         // Read "CURRENT" file, which contains a pointer to the current manifest file
-        File currentFile = new File(databaseDir, Filename.currentFileName());
-        Preconditions.checkState(currentFile.exists(), "CURRENT file does not exist");
+        FileInfo currentFile = FileInfo.current();
+        Preconditions.checkState(options.env().fileExists(currentFile), "CURRENT file does not exist");
 
-        String currentName = Files.toString(currentFile, Charsets.UTF_8);
+        String currentName = readStringFromFile(options.env(), currentFile);
         if (currentName.isEmpty() || currentName.charAt(currentName.length() - 1) != '\n') {
             throw new IllegalStateException("CURRENT file does not end with newline");
         }
         currentName = currentName.substring(0, currentName.length() - 1);
 
         // open file channel
-        try (@SuppressWarnings("resource")
-        FileChannel fileChannel = new FileInputStream(new File(databaseDir, currentName)).getChannel()) {
-
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
+                FileInfo.manifest(descriptorFileNumber(currentName)));
+                LogReader reader = new LogReader(fileInput, throwExceptionMonitor(), true, 0,
+                        options.memoryManager())) {
             // read log edit log
             Long nextFileNumber = null;
             Long lastSequence = null;
@@ -361,10 +368,10 @@ public class VersionSet
             Long prevLogNumber = null;
             Builder builder = new Builder(this, current);
 
-            LogReader reader = new LogReader(fileChannel, throwExceptionMonitor(), true, 0);
-            for (Slice record = reader.readRecord(); record != null; record = reader.readRecord()) {
+            for (ByteBuffer record = reader.readRecord(); record != null; record = reader.readRecord()) {
                 // read version edit
                 VersionEdit edit = new VersionEdit(record);
+                options.memoryManager().free(record);
 
                 // verify comparator
                 // todo implement user comparator
@@ -629,9 +636,9 @@ public class VersionSet
     List<FileMetaData> getOverlappingInputs(int level, InternalKey begin, InternalKey end)
     {
         ImmutableList.Builder<FileMetaData> files = ImmutableList.builder();
-        Slice userBegin = begin.getUserKey();
-        Slice userEnd = end.getUserKey();
-        UserComparator userComparator = internalKeyComparator.getUserComparator();
+        ByteBuffer userBegin = begin.getUserKey();
+        ByteBuffer userEnd = end.getUserKey();
+        DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
         for (FileMetaData fileMetaData : current.getFiles(level)) {
             if (userComparator.compare(fileMetaData.getLargest().getUserKey(), userBegin) < 0 ||
                     userComparator.compare(fileMetaData.getSmallest().getUserKey(), userEnd) > 0) {
@@ -685,9 +692,72 @@ public class VersionSet
     }
 
     /**
-     * A helper class so we can efficiently apply a whole sequence
-     * of edits to a particular state without creating intermediate
-     * Versions that contain full copies of the intermediate state.
+     * Make the CURRENT file point to the descriptor file with the specified
+     * number.
+     *
+     * @return true if successful; false otherwise
+     */
+    public static void setCurrentFile(Env env, long descriptorNumber)
+            throws IOException
+    {
+        String manifest = descriptorStringName(descriptorNumber);
+        FileInfo temp = FileInfo.temp(descriptorNumber);
+
+        writeStringToFileSync(env, manifest + "\n", temp);
+
+        try {
+            env.replace(temp, FileInfo.current());
+        }
+        catch (IOException e) {
+            env.deleteFile(temp);
+            throw e;
+        }
+    }
+
+    private static final String MANIFEST_PREFIX = "MANIFEST-";
+
+    public static String descriptorStringName(long fileNumber)
+    {
+        Preconditions.checkArgument(fileNumber >= 0, "number is negative");
+        return String.format(MANIFEST_PREFIX + "%06d", fileNumber);
+    }
+
+    public static long descriptorFileNumber(String stringName)
+    {
+        return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
+    }
+
+    public static void writeStringToFileSync(Env env, String str, FileInfo fileInfo)
+            throws IOException
+    {
+        try (SequentialWriteFile file = env.openSequentialWriteFile(fileInfo)) {
+            file.write(ByteBuffer.wrap(str.getBytes(StandardCharsets.UTF_8)));
+            file.sync();
+        }
+    }
+
+    public static String readStringFromFile(Env env, FileInfo fileInfo)
+            throws IOException
+    {
+        StringBuilder builder = new StringBuilder();
+        // rare enough that it's really not an issue not using the
+        // MemoryManager; furthermore, accessing the known underlying array
+        // facilitates String conversion
+        ByteBuffer buffer = ByteBuffer.allocate(4096);
+        try (SequentialReadFile reader = env.openSequentialReadFile(fileInfo)) {
+            while (reader.read(buffer) > 0) {
+                buffer.flip();
+                builder.append(new String(buffer.array(), buffer.position(), buffer.remaining(), StandardCharsets.UTF_8));
+                buffer.clear();
+            }
+        }
+        return builder.toString();
+    }
+
+    /**
+     * A helper class so we can efficiently apply a whole sequence of edits to a
+     * particular state without creating intermediate Versions that contain full
+     * copies of the intermediate state.
      */
     private static class Builder
     {

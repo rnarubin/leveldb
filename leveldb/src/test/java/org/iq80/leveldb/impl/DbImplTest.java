@@ -21,7 +21,6 @@ import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Maps.immutableEntry;
 import static java.util.Arrays.asList;
-import static org.iq80.leveldb.CompressionType.NONE;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.table.BlockHelper.afterString;
 import static org.iq80.leveldb.table.BlockHelper.assertReverseSequence;
@@ -37,42 +36,53 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
-import org.iq80.leveldb.util.DbIterator;
+import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.FileUtils;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import com.google.common.base.FinalizablePhantomReference;
+import com.google.common.base.FinalizableReferenceQueue;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
 
+@SuppressWarnings("deprecation")
 public class DbImplTest
 {
     // You can set the STRESS_FACTOR system property to make the tests run more iterations.
@@ -89,16 +99,19 @@ public class DbImplTest
     public void testBackgroundCompaction()
             throws Exception
     {
-        Options options = Options.make();
-        options.maxOpenFiles(100);
-        options.createIfMissing(true);
-        try (DbImpl db = new DbImpl(options, this.databaseDir)) {
-            Random random = new Random(301);
-            for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-                db.put(randomString(random, 64).getBytes(), new byte[] { 0x01 }, new WriteOptions().sync(false));
-                db.get(randomString(random, 64).getBytes());
-                if ((i % 50000) == 0 && i != 0) {
-                    System.out.println(i + " rows written");
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make().memoryManager(strictMemory);
+            options.maxOpenFiles(100);
+            options.createIfMissing(true);
+            try (DbImpl db = new DbImpl(options, this.databaseDir)) {
+                Random random = new Random(301);
+                for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+                    db.put(strictMemory.wrap(randomString(random, 64).getBytes()),
+                            strictMemory.wrap(new byte[] { 0x01 }), WriteOptions.make().sync(false));
+                    db.get(randomString(random, 64).getBytes());
+                    if ((i % 50000) == 0 && i != 0) {
+                        System.out.println(i + " rows written");
+                    }
                 }
             }
         }
@@ -108,15 +121,17 @@ public class DbImplTest
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
-        Options options = Options.make();
-        options.createIfMissing(true);
-        try (DbImpl db = new DbImpl(options, databaseDir)) {
-            for (int index = 0; index < 5000000; index++) {
-                String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
-                String value = "This is element "
-                        + index
-                        + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
-                db.put(key.getBytes("UTF-8"), value.getBytes("UTF-8"));
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make().memoryManager(strictMemory);
+            options.createIfMissing(true);
+            try (DbImpl db = new DbImpl(options, databaseDir)) {
+                for (int index = 0; index < 5000000; index++) {
+                    String key = "Key LOOOOOOOOOOOOOOOOOONG KEY " + index;
+                    String value = "This is element "
+                            + index
+                            + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
+                    db.put(strictMemory.wrap(key.getBytes("UTF-8")), strictMemory.wrap(value.getBytes("UTF-8")));
+                }
             }
         }
     }
@@ -301,6 +316,7 @@ public class DbImplTest
         db.put("a", "va");
 
         try(StringDbIterator iter = db.iterator()){
+            iter.seekToFirst();
            assertSequence(iter, immutableEntry("a", "va"));
         }
     }
@@ -315,6 +331,7 @@ public class DbImplTest
         db.put("c", "vc");
 
         try(StringDbIterator iterator = db.iterator()){
+            iterator.seekToFirst();
             assertSequence(iterator,
                     immutableEntry("a", "va"),
                     immutableEntry("b", "vb"),
@@ -495,7 +512,7 @@ public class DbImplTest
     public void testSparseMerge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compression(null), databaseDir);
 
         fillLevels(db, "A", "Z");
 
@@ -536,7 +553,7 @@ public class DbImplTest
     public void testApproximateSizes()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000).compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().writeBufferSize(100000000).compression(null), databaseDir);
 
         assertBetween(db.size("", "xyz"), 0, 0);
         db.reopen();
@@ -578,7 +595,7 @@ public class DbImplTest
     public void testApproximateSizesMixOfSmallAndLarge()
             throws Exception
     {
-        DbStringWrapper db = new DbStringWrapper(Options.make().compressionType(NONE), databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make().compression(null), databaseDir);
         Random random = new Random(301);
         String big1 = randomString(random, 100000);
         db.put(key(0), randomString(random, 10000));
@@ -618,7 +635,7 @@ public class DbImplTest
         db.put("foo", "hello");
 
         try (StringDbIterator iterator = db.iterator()) {
-
+            iterator.seekToFirst();
             db.put("foo", "newvalue1");
             for (int i = 0; i < 100; i++) {
                 db.put(key(i), key(i) + longString(100000, 'v'));
@@ -829,15 +846,8 @@ public class DbImplTest
         }
     }
 
-    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
-    public void testCantCreateDirectoryReturnMessage()
-            throws Exception
-    {
-        new DbStringWrapper(Options.make(), new File(DOES_NOT_EXIST_FILENAME));
-    }
-
     @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
-    public void testDBDirectoryIsFileRetrunMessage()
+    public void testDBDirectoryIsFileReturnMessage()
             throws Exception
     {
         File databaseFile = new File(databaseDir + "/imafile");
@@ -858,7 +868,7 @@ public class DbImplTest
     }
 
     @Test
-    public void testCustomComparator()
+    public void testCustomLegacyComparator()
             throws Exception
     {
         DbStringWrapper db = new DbStringWrapper(Options.make().comparator(new ReverseDBComparator()), databaseDir);
@@ -877,6 +887,7 @@ public class DbImplTest
         }
 
         try (StringDbIterator seekingIterator = db.iterator()) {
+            seekingIterator.seekToFirst();
             for (Entry<String, String> entry : entries) {
                 assertTrue(seekingIterator.hasNext());
                 assertEquals(seekingIterator.peek(), entry);
@@ -968,10 +979,6 @@ public class DbImplTest
         }
 
         try (StringDbIterator seekingIterator = db.iterator()) {
-            assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
-            assertSequence(seekingIterator, entries);
-            assertReverseSequence(seekingIterator, reverseEntries);
-
             seekingIterator.seekToFirst();
             assertReverseSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
             assertSequence(seekingIterator, entries);
@@ -1008,8 +1015,8 @@ public class DbImplTest
                 assertReverseSequence(seekingIterator, prevEntries);
             }
 
-            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
-            seekingIterator.seek(endKey.toString(UTF_8));
+            byte[] endKey = new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF };
+            seekingIterator.seek(new String(endKey, UTF_8));
             assertSequence(seekingIterator, Collections.<Entry<String, String>> emptyList());
             assertReverseSequence(seekingIterator, reverseEntries);
         }
@@ -1028,7 +1035,12 @@ public class DbImplTest
             throws Exception
     {
         for (DbStringWrapper db : opened) {
-            db.close();
+            try {
+                db.close();
+            }
+            finally {
+                db.memory.close();
+            }
         }
         opened.clear();
         FileUtils.deleteRecursively(databaseDir);
@@ -1169,27 +1181,129 @@ public class DbImplTest
         }
     }
 
+    public static class StrictMemoryManager
+            implements MemoryManager, Closeable
+    {
+        private final FinalizableReferenceQueue phantomQueue = new FinalizableReferenceQueue();
+        private final Set<FinalizablePhantomReference<ByteBuffer>> refSet = Sets.newConcurrentHashSet();
+        private final Map<ByteBuffer, MetaData> bufMap = new MapMaker().weakKeys().makeMap();
+        private volatile Throwable backgroundException = null;
+        private static final boolean enforce = false;
+
+        @Override
+        public ByteBuffer allocate(int capacity)
+        {
+            ByteBuffer b = ByteBuffer.allocate(capacity + 16).order(ByteOrder.LITTLE_ENDIAN);
+            b.putLong(0, -1L).putLong(b.capacity() - 8, -1L);
+            b.limit(b.capacity() - 8).position(8);
+            return enforce ? trackBuffer(b) : b;
+        }
+
+        public ByteBuffer wrap(byte[] arr)
+        {
+            ByteBuffer b = ByteBuffer.wrap(arr).order(ByteOrder.LITTLE_ENDIAN);
+            return enforce ? trackBuffer(b) : b;
+        }
+
+        private ByteBuffer trackBuffer(ByteBuffer buf)
+        {
+            final MetaData metaData = new MetaData(new AtomicBoolean(false),
+            // null,
+                    new Throwable(),
+                    new Object());
+            bufMap.put(buf, metaData);
+            refSet.add(new FinalizablePhantomReference<ByteBuffer>(buf, phantomQueue)
+            {
+                @Override
+                public void finalizeReferent()
+                {
+                    refSet.remove(this);
+                    if (!metaData.freed.get()) {
+                        backgroundException = new IllegalStateException("buffer GC without free",
+                                metaData.allocStackHolder);
+                    }
+                }
+            });
+            return buf;
+        }
+
+        @Override
+        public void free(ByteBuffer buffer)
+        {
+            if (enforce) {
+                MetaData metaData = bufMap.get(buffer);
+                if (metaData == null) {
+                    throw new IllegalStateException("free called on buffer from foreign source");
+                }
+                if (metaData.freed.compareAndSet(false, true)) {
+                    metaData.freeStackHolder = new Throwable();
+                    metaData.info[0] = metaData.freeStackHolder.getStackTrace();
+                }
+                else {
+                    throw new IllegalStateException("double free", metaData.allocStackHolder);
+                }
+
+                // force data corruption on use-after-free
+                Arrays.fill(buffer.array(), (byte) 0xff);
+            }
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            phantomQueue.close();
+            if (backgroundException != null) {
+                Throwables.propagate(backgroundException);
+            }
+            for (Entry<ByteBuffer, MetaData> entry : bufMap.entrySet()) {
+                if (!entry.getValue().freed.get()) {
+                    throw new IllegalStateException("buffer never freed", entry.getValue().allocStackHolder);
+                }
+            }
+        }
+
+        private static class MetaData
+        {
+            public final AtomicBoolean freed;
+            public final Throwable allocStackHolder;
+            public Throwable freeStackHolder = null;
+            private final Object[] info;
+
+            public MetaData(AtomicBoolean freed, Throwable stackHolder, Object... info)
+            {
+                this.freed = freed;
+                this.allocStackHolder = stackHolder;
+                this.info = info;
+            }
+
+            @Override
+            public String toString()
+            {
+                return "MetaData [freed=" + freed + ", info=" + Arrays.deepToString(info) + ", holders="
+                        + allocStackHolder + ", " + freeStackHolder + "]";
+            }
+        }
+
+    }
+
     private class DbStringWrapper
     {
         private final Options options;
         private final File databaseDir;
         private DbImpl db;
+        private final StrictMemoryManager memory;
 
         private DbStringWrapper(Options options, File databaseDir)
                 throws IOException
         {
-            this.options = options.verifyChecksums(true).createIfMissing(true).errorIfExists(true);
+            this.options = options.verifyChecksums(true)
+                    .createIfMissing(true)
+                    .errorIfExists(true)
+                    .memoryManager(memory = new StrictMemoryManager());
             this.databaseDir = databaseDir;
             this.db = new DbImpl(options, databaseDir);
             opened.add(this);
-        }
-
-        private DbStringWrapper()
-        {
-            //crash and burn
-            options = null;
-            databaseDir = null;
-            db = null;
         }
 
         public String get(String key)
@@ -1203,7 +1317,7 @@ public class DbImplTest
 
         public String get(String key, Snapshot snapshot)
         {
-            byte[] slice = db.get(toByteArray(key), new ReadOptions().snapshot(snapshot));
+            byte[] slice = db.get(toByteArray(key), ReadOptions.make().snapshot(snapshot));
             if (slice == null) {
                 return null;
             }
@@ -1247,7 +1361,7 @@ public class DbImplTest
 
         public void compactRange(int level, String start, String limit)
         {
-            db.compactRange(level, Slices.copiedBuffer(start, UTF_8), Slices.copiedBuffer(limit, UTF_8));
+            db.compactRange(level, ByteBuffer.wrap(start.getBytes(UTF_8)), ByteBuffer.wrap(limit.getBytes(UTF_8)));
         }
 
         public void compact(String start, String limit)
@@ -1260,7 +1374,7 @@ public class DbImplTest
                 }
             }
             for (int level = 0; level < maxLevelWithFiles; level++) {
-                db.compactRange(level, Slices.copiedBuffer("", UTF_8), Slices.copiedBuffer("~", UTF_8));
+                db.compactRange(level, ByteBuffer.wrap("".getBytes(UTF_8)), ByteBuffer.wrap("~".getBytes(UTF_8)));
             }
         }
 
@@ -1305,19 +1419,19 @@ public class DbImplTest
                 throws IOException
         {
             ImmutableList.Builder<String> result = ImmutableList.builder();
-            try (final DbIterator iter = db.internalIterator()) {
-                for (Entry<InternalKey, Slice> entry : new Iterable<Entry<InternalKey, Slice>>()
+            try (final MergingIterator iter = db.internalIterator()) {
+                for (Entry<InternalKey, ByteBuffer> entry : new Iterable<Entry<InternalKey, ByteBuffer>>()
                 {
                     @Override
-                    public Iterator<Entry<InternalKey, Slice>> iterator()
+                    public Iterator<Entry<InternalKey, ByteBuffer>> iterator()
                     {
                         return iter;
                     }
                 }) {
-                    String entryKey = entry.getKey().getUserKey().toString(UTF_8);
+                    String entryKey = new String(ByteBuffers.toArray(entry.getKey().getUserKey()), UTF_8);
                     if (entryKey.equals(userKey)) {
                         if (entry.getKey().getValueType() == ValueType.VALUE) {
-                            result.add(entry.getValue().toString(UTF_8));
+                            result.add(new String(ByteBuffers.toArray(entry.getValue()), UTF_8));
                         }
                         else {
                             result.add("DEL");
@@ -1399,7 +1513,6 @@ public class DbImplTest
             return iterator.hasPrev();
         }
 
-        @Override
         public void seekToLast()
         {
             iterator.seekToLast();

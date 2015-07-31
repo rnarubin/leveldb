@@ -17,10 +17,13 @@
  */
 package org.iq80.leveldb.table;
 
-import org.iq80.leveldb.util.Slice;
+import java.nio.ByteBuffer;
+
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.util.ByteBuffers;
 
 public class BytewiseComparator
-        implements UserComparator
+        implements DBBufferComparator
 {
     @Override
     public String name()
@@ -29,48 +32,49 @@ public class BytewiseComparator
     }
 
     @Override
-    public int compare(Slice sliceA, Slice sliceB)
+    public int compare(ByteBuffer sliceA, ByteBuffer sliceB)
     {
-        return sliceA.compareTo(sliceB);
+        return ByteBuffers.compare(sliceA, sliceB);
     }
 
     @Override
-    public Slice findShortestSeparator(
-            Slice start,
-            Slice limit)
+    public boolean findShortestSeparator(ByteBuffer start, ByteBuffer limit)
     {
         // Find length of common prefix
-        int sharedBytes = BlockBuilder.calculateSharedBytes(start, limit);
+        int sharedBytes = ByteBuffers.calculateSharedBytes(start, limit);
 
         // Do not shorten if one string is a prefix of the other
-        if (sharedBytes < Math.min(start.length(), limit.length())) {
+        if (sharedBytes < Math.min(start.remaining(), limit.remaining())) {
             // if we can add one to the last shared byte without overflow and the two keys differ by more than
             // one increment at this location.
-            int lastSharedByte = start.getUnsignedByte(sharedBytes);
-            if (lastSharedByte < 0xff && lastSharedByte + 1 < limit.getUnsignedByte(sharedBytes)) {
-                Slice result = start.copySlice(0, sharedBytes + 1);
-                result.setByte(sharedBytes, lastSharedByte + 1);
+            int startShared = start.position() + sharedBytes;
+            int lastSharedByte = ByteBuffers.getUnsignedByte(start, startShared);
+            if (lastSharedByte < 0xff
+                    && lastSharedByte + 1 < ByteBuffers.getUnsignedByte(limit, limit.position() + sharedBytes)) {
+                start.put(startShared, (byte) (lastSharedByte + 1));
+                start.limit(startShared + 1);
 
-                assert (compare(result, limit) < 0) : "start must be less than last limit";
-                return result;
+                assert (compare(start, limit) < 0) : "start must be less than limit";
+                return true;
             }
         }
-        return start;
+        return false;
     }
 
     @Override
-    public Slice findShortSuccessor(Slice key)
+    public boolean findShortSuccessor(ByteBuffer key)
     {
         // Find first character that can be incremented
-        for (int i = 0; i < key.length(); i++) {
-            int b = key.getUnsignedByte(i);
+        for (int i = 0; i < key.remaining(); i++) {
+            int pos = key.position() + i;
+            int b = ByteBuffers.getUnsignedByte(key, pos);
             if (b != 0xff) {
-                Slice result = key.copySlice(0, i + 1);
-                result.setByte(i, b + 1);
-                return result;
+                key.put(pos, (byte) (b + 1));
+                key.limit(pos + 1);
+                return true;
             }
         }
         // key is a run of 0xffs.  Leave it alone.
-        return key;
+        return false;
     }
 }

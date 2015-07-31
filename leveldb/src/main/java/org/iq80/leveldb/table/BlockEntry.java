@@ -18,11 +18,9 @@
 package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.Slice;
 
+import java.nio.ByteBuffer;
 import java.util.Map.Entry;
-
-import static com.google.common.base.Charsets.UTF_8;
 
 /**
  * Binary Structure
@@ -70,37 +68,54 @@ import static com.google.common.base.Charsets.UTF_8;
  * </tbody>
  * </table>
  */
-public class BlockEntry
-        implements Entry<Slice, Slice>
+public class BlockEntry<T>
+        implements Entry<T, ByteBuffer>
 {
-    private final Slice key;
-    private final Slice value;
+    private final T key;
+    private final ByteBuffer value;
+    private final ByteBuffer encodedKey;
 
-    public BlockEntry(Slice key, Slice value)
+    private BlockEntry(T key, ByteBuffer encodedKey, ByteBuffer value)
     {
         Preconditions.checkNotNull(key, "key is null");
         Preconditions.checkNotNull(value, "value is null");
         this.key = key;
+        this.encodedKey = encodedKey;
         this.value = value;
     }
 
+    public static <T> BlockEntry<T> of(T key, ByteBuffer encodedKey, ByteBuffer value)
+    {
+        return new BlockEntry<T>(key, encodedKey, value);
+    }
+
+    public static BlockEntry<ByteBuffer> of(ByteBuffer key, ByteBuffer value)
+    {
+        return new BlockEntry<ByteBuffer>(key, key, value);
+    }
+
     @Override
-    public Slice getKey()
+    public T getKey()
     {
         return key;
     }
 
     @Override
-    public Slice getValue()
+    public ByteBuffer getValue()
     {
         return value;
+    }
+
+    public ByteBuffer getEncodedKey()
+    {
+        return encodedKey;
     }
 
     /**
      * @throws UnsupportedOperationException always
      */
     @Override
-    public final Slice setValue(Slice value)
+    public final ByteBuffer setValue(ByteBuffer value)
     {
         throw new UnsupportedOperationException();
     }
@@ -115,12 +130,15 @@ public class BlockEntry
             return false;
         }
 
-        BlockEntry entry = (BlockEntry) o;
+        BlockEntry<?> entry = (BlockEntry<?>) o;
 
         if (!key.equals(entry.key)) {
             return false;
         }
         if (!value.equals(entry.value)) {
+            return false;
+        }
+        if (!encodedKey.equals(entry.encodedKey)) {
             return false;
         }
 
@@ -140,8 +158,8 @@ public class BlockEntry
     {
         StringBuilder sb = new StringBuilder();
         sb.append("BlockEntry");
-        sb.append("{key=").append(key.toString(UTF_8));      // todo don't print the real value
-        sb.append(", value=").append(value.toString(UTF_8));
+        sb.append("{key=").append(key.toString());
+        sb.append(", value=").append(value.toString());
         sb.append('}');
         return sb.toString();
     }

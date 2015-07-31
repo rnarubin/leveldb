@@ -21,10 +21,15 @@ import java.util.Comparator;
 
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
+ * @deprecated use {@link DBBufferComparator} instead
  */
 public interface DBComparator
         extends Comparator<byte[]>
 {
+    /**
+     * The name of the comparator. Used to check for comparator mismatches
+     * (i.e., a DB created with one comparator is accessed using a different comparator)
+     */
     String name();
 
     /**

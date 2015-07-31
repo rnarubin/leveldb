@@ -15,18 +15,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.iq80.leveldb.util;
 
-import java.util.Comparator;
+package org.iq80.leveldb;
 
-public final class SliceComparator
-        implements Comparator<Slice>
+/**
+ * @see <a
+ * href="https://docs.oracle.com/javase/8/docs/api/java/util/function/LongToIntFunction.html">LongToIntFunction</a>
+ */
+public interface LongToIntFunction
 {
-    public static final SliceComparator SLICE_COMPARATOR = new SliceComparator();
-
-    @Override
-    public int compare(Slice sliceA, Slice sliceB)
-    {
-        return sliceA.compareTo(sliceB);
-    }
+    public int applyAsInt(long operand);
 }

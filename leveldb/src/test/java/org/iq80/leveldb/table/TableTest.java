@@ -17,24 +17,30 @@
  */
 package org.iq80.leveldb.table;
 
-import com.google.common.base.Preconditions;
-
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
+import org.iq80.leveldb.impl.FileChannelEnv;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.MMapEnv;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.Slice;
-import org.iq80.leveldb.util.Slices;
+import org.iq80.leveldb.impl.TransientInternalKey;
+import org.iq80.leveldb.impl.ValueType;
+import org.iq80.leveldb.util.Snappy;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.util.Arrays;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 
@@ -43,18 +49,32 @@ import static org.testng.Assert.assertTrue;
 
 public abstract class TableTest
 {
-    private File file;
-    private RandomAccessFile randomAccessFile;
-    private FileChannel fileChannel;
+    private static final DBBufferComparator byteCompare = new BytewiseComparator();
+    private FileInfo fileInfo;
+    protected final Path dbpath;
 
-    protected abstract Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
-            throws IOException;
+    public TableTest()
+    {
+        try {
+            dbpath = Files.createTempDirectory("leveldb");
+        }
+        catch (IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    protected abstract Env getEnv();
 
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyFile()
             throws Exception
     {
-        createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true).close();
+        getEnv().openSequentialWriteFile(fileInfo).close();
+        new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare), Options.make()
+                .env(getEnv())
+                .bufferComparator(byteCompare)
+                .verifyChecksums(true)
+                .compression(Snappy.instance())).close();
     }
 
     @Test
@@ -68,21 +88,21 @@ public abstract class TableTest
     public void testSingleEntrySingleBlock()
             throws Exception
     {
-        tableTest(Integer.MAX_VALUE, Integer.MAX_VALUE,
-                BlockHelper.createBlockEntry("name", "dain sundstrom"));
+        tableTest(Integer.MAX_VALUE, Integer.MAX_VALUE, BlockHelper.createInternalEntry("name", "dain sundstrom", 0));
     }
 
     @Test
     public void testMultipleEntriesWithSingleBlock()
             throws Exception
     {
-        List<BlockEntry> entries = asList(
-                BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
-                BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
-                BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
-                BlockHelper.createBlockEntry("scotch/light", "Oban 14"),
-                BlockHelper.createBlockEntry("scotch/medium", "Highland Park"),
-                BlockHelper.createBlockEntry("scotch/strong", "Lagavulin"));
+        long seq = 0;
+        List<Entry<InternalKey, ByteBuffer>> entries = asList(
+                BlockHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+                BlockHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+                BlockHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+                BlockHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
+                BlockHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
+                BlockHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
         for (int i = 1; i < entries.size(); i++) {
             tableTest(Integer.MAX_VALUE, i, entries);
@@ -93,86 +113,95 @@ public abstract class TableTest
     public void testMultipleEntriesWithMultipleBlock()
             throws Exception
     {
-        List<BlockEntry> entries = asList(
-                BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
-                BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
-                BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
-                BlockHelper.createBlockEntry("scotch/light", "Oban 14"),
-                BlockHelper.createBlockEntry("scotch/medium", "Highland Park"),
-                BlockHelper.createBlockEntry("scotch/strong", "Lagavulin"));
+        long seq = 0;
+        List<Entry<InternalKey, ByteBuffer>> entries = asList(
+                BlockHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+                BlockHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+                BlockHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+                BlockHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
+                BlockHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
+                BlockHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
         // one entry per block
         tableTest(1, Integer.MAX_VALUE, entries);
 
         // about 3 blocks
-        tableTest(BlockHelper.estimateBlockSize(Integer.MAX_VALUE, entries) / 3, Integer.MAX_VALUE, entries);
+        tableTest(BlockHelper.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3, Integer.MAX_VALUE, entries);
     }
 
-    private void tableTest(int blockSize, int blockRestartInterval, BlockEntry... entries)
+    @SafeVarargs
+    private final void tableTest(int blockSize, int blockRestartInterval, Entry<InternalKey, ByteBuffer>... entries)
             throws IOException
     {
         tableTest(blockSize, blockRestartInterval, asList(entries));
     }
 
-    private void tableTest(int blockSize, int blockRestartInterval, List<BlockEntry> entries)
+    private void tableTest(int blockSize, int blockRestartInterval, List<Entry<InternalKey, ByteBuffer>> entries)
             throws IOException
     {
-        List<BlockEntry> reverseEntries = Arrays.asList(new BlockEntry[entries.size()]);
-        Collections.copy(reverseEntries, entries);
+        List<Entry<InternalKey, ByteBuffer>> reverseEntries = new ArrayList<>(entries);
         Collections.reverse(reverseEntries);
 
         reopenFile();
-        Options options = Options.make().blockSize(blockSize).blockRestartInterval(blockRestartInterval);
-        TableBuilder builder = new TableBuilder(options, fileChannel, new BytewiseComparator());
+        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
+            Options options = Options.make()
+                    .blockSize(blockSize)
+                    .blockRestartInterval(blockRestartInterval)
+                    .memoryManager(strictMemory)
+                    .compression(Snappy.instance())
+                    .bufferComparator(byteCompare);
 
-        for (BlockEntry entry : entries) {
-            builder.add(entry);
-        }
-        builder.finish();
-
-        try (Table table = createTable(file.getAbsolutePath(), fileChannel, new BytewiseComparator(), true)) {
-            ReverseSeekingIterator<Slice, Slice> seekingIterator = table.iterator();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
-            BlockHelper.assertSequence(seekingIterator, entries);
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-            seekingIterator.seekToFirst();
-            BlockHelper.assertReverseSequence(seekingIterator, Collections.<Entry<Slice, Slice>> emptyList());
-            BlockHelper.assertSequence(seekingIterator, entries);
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-            seekingIterator.seekToLast();
-            if (reverseEntries.size() > 0) {
-                BlockHelper.assertSequence(seekingIterator, reverseEntries.get(0));
-                seekingIterator.seekToLast();
-                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries.subList(1, reverseEntries.size()));
+            try (SequentialWriteFile writeFile = getEnv().openSequentialWriteFile(fileInfo);
+                    TableBuilder builder = new TableBuilder(options, writeFile, new InternalKeyComparator(
+                            options.bufferComparator()))) {
+                for (Entry<InternalKey, ByteBuffer> entry : entries) {
+                    builder.add(entry.getKey(), entry.getValue());
+                }
+                builder.finish();
             }
-            BlockHelper.assertSequence(seekingIterator, entries);
 
-            long lastApproximateOffset = 0;
-            for (BlockEntry entry : entries) {
-                List<BlockEntry> nextEntries = entries.subList(entries.indexOf(entry), entries.size());
-                seekingIterator.seek(entry.getKey());
-                BlockHelper.assertSequence(seekingIterator, nextEntries);
+            try (Table table = new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare),
+                    options); TableIterator tableIter = table.retain().iterator()) {
+                ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
 
-                seekingIterator.seek(BlockHelper.before(entry));
-                BlockHelper.assertSequence(seekingIterator, nextEntries);
+                seekingIterator.seekToFirst();
+                BlockHelper.assertReverseSequence(seekingIterator,
+                        Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
+                BlockHelper.assertSequence(seekingIterator, entries);
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
 
-                seekingIterator.seek(BlockHelper.after(entry));
-                BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+                seekingIterator.seekToEnd();
+                BlockHelper.assertSequence(seekingIterator, Collections.<Entry<InternalKey, ByteBuffer>> emptyList());
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+                BlockHelper.assertSequence(seekingIterator, entries);
 
-                long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                long lastApproximateOffset = 0;
+                for (Entry<InternalKey, ByteBuffer> entry : entries) {
+                    List<Entry<InternalKey, ByteBuffer>> nextEntries = entries.subList(entries.indexOf(entry),
+                            entries.size());
+                    seekingIterator.seek(entry.getKey());
+                    BlockHelper.assertSequence(seekingIterator, nextEntries);
+
+                    seekingIterator.seek(BlockHelper.beforeInternalKey(entry));
+                    BlockHelper.assertSequence(seekingIterator, nextEntries);
+
+                    seekingIterator.seek(BlockHelper.afterInternalKey(entry));
+                    BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
+
+                    long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+                    assertTrue(approximateOffset >= lastApproximateOffset);
+                    lastApproximateOffset = approximateOffset;
+                }
+
+                InternalKey endKey = new TransientInternalKey(ByteBuffer.wrap(new byte[] { (byte) 0xFF, (byte) 0xFF,
+                        (byte) 0xFF, (byte) 0xFF }), 0, ValueType.VALUE);
+                seekingIterator.seek(endKey);
+                BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry<InternalKey>> emptyList());
+                BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
+
+                long approximateOffset = table.getApproximateOffsetOf(endKey);
                 assertTrue(approximateOffset >= lastApproximateOffset);
-                lastApproximateOffset = approximateOffset;
             }
-
-            Slice endKey = Slices.wrappedBuffer(new byte[] { (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF });
-            seekingIterator.seek(endKey);
-            BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry> emptyList());
-            BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-
-            long approximateOffset = table.getApproximateOffsetOf(endKey);
-            assertTrue(approximateOffset >= lastApproximateOffset);
         }
     }
 
@@ -181,24 +210,59 @@ public abstract class TableTest
             throws Exception
     {
         reopenFile();
-        Preconditions.checkState(0 == fileChannel.position(), "Expected fileChannel.position %s to be 0", fileChannel.position());
     }
 
     private void reopenFile()
             throws IOException
     {
-        file = File.createTempFile("table", ".db");
-        file.delete();
-        randomAccessFile = new RandomAccessFile(file, "rw");
-        fileChannel = randomAccessFile.getChannel();
+        if (fileInfo != null && getEnv().fileExists(fileInfo)) {
+            getEnv().deleteFile(fileInfo);
+        }
+        fileInfo = FileInfo.table(42);
     }
 
     @AfterMethod
     public void tearDown()
             throws Exception
     {
-        Closeables.closeQuietly(fileChannel);
-        Closeables.closeQuietly(randomAccessFile);
-        file.delete();
+        if (fileInfo != null && getEnv().fileExists(fileInfo)) {
+            getEnv().deleteFile(fileInfo);
+        }
+    }
+
+    public static class FileChannelTableTest
+            extends TableTest
+    {
+        private StrictMemoryManager strictMemory;
+        private Env env;
+
+        @BeforeMethod
+        public void setupEnv()
+        {
+            env = new FileChannelEnv(strictMemory = new StrictMemoryManager(), dbpath);
+        }
+
+        @AfterMethod
+        public void tearDownEnv()
+                throws IOException
+        {
+            strictMemory.close();
+        }
+
+        @Override
+        protected Env getEnv()
+        {
+            return env;
+        }
+    }
+
+    public static class MMapTableTest
+            extends TableTest
+    {
+        @Override
+        protected Env getEnv()
+        {
+            return new MMapEnv(dbpath);
+        }
     }
 }
