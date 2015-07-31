@@ -40,6 +40,7 @@ import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.CustomUserComparator;
 import org.iq80.leveldb.table.TableBuilder;
 import org.iq80.leveldb.table.UserComparator;
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.DbIterator;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.ObjectPool;
@@ -245,6 +246,10 @@ public class DbImpl
             // schedule compactions
             maybeScheduleCompaction();
             compactionExecutor.prestartAllCoreThreads();
+        }
+        catch (Throwable t) {
+            Closeables.closeQuietly(this);
+            throw t;
         }
         finally {
             mutex.unlock();
