@@ -124,7 +124,7 @@ public interface Env
 
     /**
      * Lock the specified file. Used to prevent concurrent access to the same db
-     * by multiple processes. The caller should call unlockFile(lock) to release
+     * by multiple processes. The caller should call LockFile.close() to release
      * the lock. If the process exits, the lock will be automatically released.
      * 
      * If somebody else already holds the lock, finishes immediately, i.e. this

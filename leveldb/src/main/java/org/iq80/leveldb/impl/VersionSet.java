@@ -37,6 +37,7 @@ import org.iq80.leveldb.util.MergingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -60,6 +61,7 @@ import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
 
 public class VersionSet
+        implements Closeable
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(VersionSet.class);
 
@@ -124,7 +126,8 @@ public class VersionSet
         }
     }
 
-    public void destroy()
+    @Override
+    public void close()
             throws IOException
     {
         if (descriptorLog != null) {

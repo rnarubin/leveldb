@@ -25,6 +25,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.Channel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicLong;
@@ -121,7 +122,8 @@ public class FileChannelEnv
             extends FileChannelFile
             implements LockFile
     {
-        private final FileLock fileLock;
+        private FileLock fileLock;
+        private boolean acquired = false;
 
         public FileChannelLockFile(Path path)
                 throws IOException
@@ -129,6 +131,11 @@ public class FileChannelEnv
             super(FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
             try {
                 fileLock = channel.tryLock();
+                acquired = true;
+            }
+            catch (OverlappingFileLockException e) {
+                fileLock = null;
+                acquired = false;
             }
             catch (Exception e) {
                 Closeables.closeQuietly(channel);
@@ -138,7 +145,7 @@ public class FileChannelEnv
 
         public boolean isValid()
         {
-            return fileLock.isValid();
+            return acquired && fileLock.isValid();
         }
 
         @Override

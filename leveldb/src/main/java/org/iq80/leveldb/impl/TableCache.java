@@ -33,6 +33,7 @@ import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.ExecutionException;
 
 public final class TableCache
+        implements AutoCloseable
 {
     private final LoadingCache<Long, Table> cache;
 
@@ -108,6 +109,7 @@ public final class TableCache
         return table;
     }
 
+    @Override
     public void close()
     {
         cache.invalidateAll();

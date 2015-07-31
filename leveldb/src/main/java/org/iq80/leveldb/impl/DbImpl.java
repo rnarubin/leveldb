@@ -317,51 +317,49 @@ public class DbImpl
 
         backgroundCompaction.clear();
 
-        compactionExecutor.shutdown();
         try {
-            compactionExecutor.awaitTermination(1, TimeUnit.DAYS);
-        }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        try {
-            versions.destroy();
-        }
-        catch (IOException e) {
-            LOGGER.error("{} error in closing", this, e);
-        }
-
-        MemTables tables = memTables;
-        tables.mutable.acquireAll();
-        try {
-            Closeables.closeIO(tables.mutable.log, tables.mutable.memTable);
-        }
-        catch (IOException e) {
-            LOGGER.error("{} error in closing", this, e);
-        }
-        finally {
-            tables.mutable.releaseAll();
-        }
-
-        if (tables.immutableExists()) {
-            tables.immutable.acquireAll();
+            compactionExecutor.shutdown();
             try {
-                Closeables.closeIO(tables.immutable.log, tables.immutable.memTable);
+                compactionExecutor.awaitTermination(1, TimeUnit.DAYS);
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            Closeables.closeQuietly(versions);
+
+            MemTables tables = memTables;
+            tables.mutable.acquireAll();
+            try {
+                Closeables.closeIO(tables.mutable.log, tables.mutable.memTable);
             }
             catch (IOException e) {
                 LOGGER.error("{} error in closing", this, e);
             }
             finally {
-                tables.immutable.releaseAll();
+                tables.mutable.releaseAll();
+            }
+
+            if (tables.immutableExists()) {
+                tables.immutable.acquireAll();
+                try {
+                    Closeables.closeIO(tables.immutable.log, tables.immutable.memTable);
+                }
+                catch (IOException e) {
+                    LOGGER.error("{} error in closing", this, e);
+                }
+                finally {
+                    tables.immutable.releaseAll();
+                }
             }
         }
-
-        tableCache.close();
-        try {
-            dbLock.close();
-        }
-        catch (IOException e) {
-            LOGGER.error("{} error in closing", this, e);
+        finally {
+            try {
+                Closeables.closeIO(tableCache, dbLock);
+            }
+            catch (IOException e) {
+                LOGGER.warn("{} error in closing", this, e);
+            }
         }
     }
 

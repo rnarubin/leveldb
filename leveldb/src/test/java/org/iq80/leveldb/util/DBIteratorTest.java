@@ -501,36 +501,44 @@ public class DBIteratorTest
 
     @Test
     public void testFailureWithoutSeek() throws IOException
-    {
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().next();
+    {        if(db != null){
+            db.close();
+        }
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.next();
             Assert.fail();
-        }catch(IllegalStateException expected){}
-
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().prev();
+        }
+        catch (IllegalStateException expected) {}
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.prev();
             Assert.fail();
-        }catch(IllegalStateException expected){}
-
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().hasNext();
+        }
+        catch (IllegalStateException expected) {
+        }
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.hasNext();
             Assert.fail();
-        }catch(IllegalStateException expected){}
-
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().hasPrev();
+        }
+        catch (IllegalStateException expected) {
+        }
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.hasPrev();
             Assert.fail();
-        }catch(IllegalStateException expected){}
-
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().peekNext();
+        }
+        catch (IllegalStateException expected) {
+        }
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.peekNext();
             Assert.fail();
-        }catch(IllegalStateException expected){}
-
-        try{
-            Iq80DBFactory.factory.open(tempDir, options).iterator().peekPrev();
+        }
+        catch (IllegalStateException expected) {
+        }
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+            iter.peekPrev();
             Assert.fail();
-        }catch(IllegalStateException expected){}
+        }
+        catch (IllegalStateException expected) {
+        }
     }
 
     @Test
