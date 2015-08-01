@@ -45,9 +45,9 @@ public class MMapEnv
     // could consider smaller values to evaluate performance characteristics
     private static final long MMAP_SIZE_LIMIT = Integer.MAX_VALUE;
 
-    public MMapEnv(Path databaseDir)
+    public MMapEnv()
     {
-        super(MemoryManagers.heap(), databaseDir);
+        super(MemoryManagers.heap());
     }
 
     // @Override

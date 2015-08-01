@@ -129,16 +129,18 @@ public final class BlockHelper
 
     public static <K, V> void assertEntryEquals(Entry<K, V> actual, Entry<K, V> expected)
     {
-        if (actual.getKey() instanceof ByteBuffer) {
-            assertByteBufferEquals((ByteBuffer) actual.getKey(), (ByteBuffer) expected.getKey());
+        if (actual.getKey() instanceof InternalKey) {
+            assertEquals(actual.getKey(), expected.getKey());
             assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
         }
-        assertEquals(actual, expected);
+        else {
+            assertEquals(actual, expected);
+        }
     }
 
     public static void assertByteBufferEquals(ByteBuffer actual, ByteBuffer expected)
     {
-        assertEquals(actual, expected);
+        assertTrue(ByteBuffers.compare(actual, expected) == 0);
     }
 
     public static String beforeString(Entry<String, ?> expectedEntry)

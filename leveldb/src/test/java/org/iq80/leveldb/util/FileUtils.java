@@ -25,7 +25,6 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
 
-//TODO either remove this class or move it to test, not used in impl
 public final class FileUtils
 {
     private static final int TEMP_DIR_ATTEMPTS = 10000;

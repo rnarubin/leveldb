@@ -27,6 +27,7 @@ import com.google.common.collect.Maps;
 
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Env.SequentialReadFile;
@@ -41,7 +42,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -81,7 +81,7 @@ public class VersionSet
     private long prevLogNumber;
 
     private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
-    private final Path databaseDir;
+    private final DBHandle dbHandle;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
     private final Options options;
@@ -89,13 +89,13 @@ public class VersionSet
     private LogWriter descriptorLog;
     private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
 
-    public VersionSet(Path databaseDir,
+    public VersionSet(DBHandle dbHandle,
             TableCache tableCache,
             InternalKeyComparator internalKeyComparator,
             Options options)
             throws IOException
     {
-        this.databaseDir = databaseDir;
+        this.dbHandle = dbHandle;
         this.tableCache = tableCache;
         this.internalKeyComparator = internalKeyComparator;
         this.options = options;
@@ -107,7 +107,7 @@ public class VersionSet
     private void initializeIfNeeded()
             throws IOException
     {
-        if (!options.env().fileExists(FileInfo.current())) {
+        if (!options.env().fileExists(FileInfo.current(dbHandle))) {
             VersionEdit edit = new VersionEdit();
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
@@ -115,7 +115,8 @@ public class VersionSet
             edit.setLastSequenceNumber(lastSequence.get());
 
             long fileNum;
-            try (LogWriter log = Logs.createLogWriter(FileInfo.manifest(manifestFileNumber), manifestFileNumber,
+            try (LogWriter log = Logs.createLogWriter(FileInfo.manifest(dbHandle, manifestFileNumber),
+                    manifestFileNumber,
                     options); GrowingBuffer record = edit.encode(options.memoryManager())) {
                 fileNum = log.getFileNumber();
                 writeSnapshot(log);
@@ -289,7 +290,7 @@ public class VersionSet
         finalizeVersion(version);
 
         boolean createdNewManifest = false;
-        FileInfo manifestFile = FileInfo.manifest(manifestFileNumber);
+        FileInfo manifestFile = FileInfo.manifest(dbHandle, manifestFileNumber);
         try {
             // Initialize new descriptor log file if necessary by creating
             // a temporary file that contains a snapshot of the current version.
@@ -350,7 +351,7 @@ public class VersionSet
     {
 
         // Read "CURRENT" file, which contains a pointer to the current manifest file
-        FileInfo currentFile = FileInfo.current();
+        FileInfo currentFile = FileInfo.current(dbHandle);
         Preconditions.checkState(options.env().fileExists(currentFile), "CURRENT file does not exist");
 
         String currentName = readStringFromFile(options.env(), currentFile);
@@ -361,7 +362,7 @@ public class VersionSet
 
         // open file channel
         try (SequentialReadFile fileInput = options.env().openSequentialReadFile(
-                FileInfo.manifest(descriptorFileNumber(currentName)));
+                FileInfo.manifest(dbHandle, descriptorFileNumber(currentName)));
                 LogReader reader = new LogReader(fileInput, throwExceptionMonitor(), true, 0,
                         options.memoryManager())) {
             // read log edit log
@@ -700,16 +701,16 @@ public class VersionSet
      *
      * @return true if successful; false otherwise
      */
-    public static void setCurrentFile(Env env, long descriptorNumber)
+    public void setCurrentFile(Env env, long descriptorNumber)
             throws IOException
     {
         String manifest = descriptorStringName(descriptorNumber);
-        FileInfo temp = FileInfo.temp(descriptorNumber);
+        FileInfo temp = FileInfo.temp(dbHandle, descriptorNumber);
 
         writeStringToFileSync(env, manifest + "\n", temp);
 
         try {
-            env.replace(temp, FileInfo.current());
+            env.replace(temp, FileInfo.current(dbHandle));
         }
         catch (IOException e) {
             env.deleteFile(temp);

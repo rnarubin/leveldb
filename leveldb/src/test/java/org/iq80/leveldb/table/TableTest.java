@@ -24,6 +24,7 @@ import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.impl.FileChannelEnv;
+import org.iq80.leveldb.impl.FileSystemEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.MMapEnv;
@@ -51,7 +52,7 @@ public abstract class TableTest
 {
     private static final DBBufferComparator byteCompare = new BytewiseComparator();
     private FileInfo fileInfo;
-    protected final Path dbpath;
+    private final Path dbpath;
 
     public TableTest()
     {
@@ -69,7 +70,6 @@ public abstract class TableTest
     public void testEmptyFile()
             throws Exception
     {
-        getEnv().openSequentialWriteFile(fileInfo).close();
         new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare), Options.make()
                 .env(getEnv())
                 .bufferComparator(byteCompare)
@@ -160,8 +160,9 @@ public abstract class TableTest
                 builder.finish();
             }
 
-            try (Table table = new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare),
-                    options); TableIterator tableIter = table.retain().iterator()) {
+            try (Table table = new Table(getEnv().openRandomReadFile(fileInfo),
+                    new InternalKeyComparator(byteCompare), options);
+                    TableIterator tableIter = table.retain().iterator()) {
                 ReverseSeekingIterator<InternalKey, ByteBuffer> seekingIterator = tableIter;
 
                 seekingIterator.seekToFirst();
@@ -218,7 +219,8 @@ public abstract class TableTest
         if (fileInfo != null && getEnv().fileExists(fileInfo)) {
             getEnv().deleteFile(fileInfo);
         }
-        fileInfo = FileInfo.table(42);
+        Files.createFile(dbpath.resolve("000042.ldb"));
+        fileInfo = FileInfo.table(FileSystemEnv.handle(dbpath), 42);
     }
 
     @AfterMethod
@@ -239,7 +241,7 @@ public abstract class TableTest
         @BeforeMethod
         public void setupEnv()
         {
-            env = new FileChannelEnv(strictMemory = new StrictMemoryManager(), dbpath);
+            env = new FileChannelEnv(strictMemory = new StrictMemoryManager());
         }
 
         @AfterMethod
@@ -262,7 +264,7 @@ public abstract class TableTest
         @Override
         protected Env getEnv()
         {
-            return new MMapEnv(dbpath);
+            return new MMapEnv();
         }
     }
 }

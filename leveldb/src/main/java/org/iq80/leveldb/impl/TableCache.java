@@ -23,6 +23,7 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 
+import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
@@ -39,7 +40,7 @@ public final class TableCache
 
     // private final Finalizer<Table> finalizer = new Finalizer<>(1);
 
-    public TableCache(
+    public TableCache(final DBHandle dbHandle,
             int tableCacheSize,
             final InternalKeyComparator userComparator,
             final Options options,
@@ -68,7 +69,7 @@ public final class TableCache
                     public Table load(Long fileNumber)
                             throws IOException
                     {
-                        return openTableFile(fileNumber, userComparator, options);
+                        return openTableFile(dbHandle, fileNumber, userComparator, options);
                     }
                 });
     }
@@ -121,12 +122,13 @@ public final class TableCache
         cache.invalidate(number);
     }
 
-    private static Table openTableFile(
+    private static Table openTableFile(DBHandle dbHandle,
             long fileNumber,
             InternalKeyComparator userComparator,
             Options options)
             throws IOException
     {
-        return new Table(options.env().openRandomReadFile(FileInfo.table(fileNumber)), userComparator, options);
+        return new Table(options.env().openRandomReadFile(FileInfo.table(dbHandle, fileNumber)), userComparator,
+                options);
     }
 }

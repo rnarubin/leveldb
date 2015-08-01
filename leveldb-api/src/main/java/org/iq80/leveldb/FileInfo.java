@@ -18,6 +18,8 @@
 
 package org.iq80.leveldb;
 
+import org.iq80.leveldb.Env.DBHandle;
+
 public class FileInfo
 {
 
@@ -37,56 +39,56 @@ public class FileInfo
 
     private final FileInfo.FileType fileType;
     private final long fileNumber;
+    private final DBHandle db;
 
-    protected FileInfo(FileInfo.FileType fileType)
+    protected FileInfo(DBHandle db, FileInfo.FileType fileType)
     {
-        this(fileType, -1);
+        this(db, fileType, -1);
     }
 
-    protected FileInfo(FileInfo.FileType fileType, long fileNumber)
+    protected FileInfo(DBHandle db, FileInfo.FileType fileType, long fileNumber)
     {
         this.fileType = fileType;
         this.fileNumber = fileNumber;
+        this.db = db;
     }
 
-    public static FileInfo log(long number)
+    public static FileInfo log(DBHandle db, long number)
     {
-        return new FileInfo(FileType.LOG, number);
+        return new FileInfo(db, FileType.LOG, number);
     }
 
-    public static FileInfo table(long number)
+    public static FileInfo table(DBHandle db, long number)
     {
-        return new FileInfo(FileType.TABLE, number);
+        return new FileInfo(db, FileType.TABLE, number);
     }
 
-    private static final FileInfo LOCK = new FileInfo(FileType.DB_LOCK);
-    public static FileInfo lock()
+    public static FileInfo lock(DBHandle db)
     {
-        return LOCK;
+        return new FileInfo(db, FileType.DB_LOCK);
     }
 
-    private static final FileInfo CURRENT = new FileInfo(FileType.CURRENT);
-    public static FileInfo current()
+    public static FileInfo current(DBHandle db)
     {
-        return CURRENT;
+        return new FileInfo(db, FileType.CURRENT);
     }
 
-    public static FileInfo temp(long number)
+    public static FileInfo temp(DBHandle db, long number)
     {
-        return new FileInfo(FileType.TEMP, number);
+        return new FileInfo(db, FileType.TEMP, number);
     }
 
-    public static FileInfo manifest(long number)
+    public static FileInfo manifest(DBHandle db, long number)
     {
-        return new FileInfo(FileType.MANIFEST, number);
+        return new FileInfo(db, FileType.MANIFEST, number);
     }
 
-    public static FileInfo legacyInfoLog()
+    public static FileInfo legacyInfoLog(DBHandle db)
     {
-        return new FileInfo(FileType.INFO_LOG);
+        return new FileInfo(db, FileType.INFO_LOG);
     }
 
-    public FileInfo.FileType getFileType()
+    public FileType getFileType()
     {
         return fileType;
     }
@@ -96,11 +98,20 @@ public class FileInfo
         return fileNumber;
     }
 
+    /**
+     * @return a DBHandle representing the database to which this file belongs
+     */
+    public DBHandle getOwner()
+    {
+        return db;
+    }
+
     @Override
     public int hashCode()
     {
         final int prime = 31;
         int result = 1;
+        result = prime * result + ((db == null) ? 0 : db.hashCode());
         result = prime * result + (int) (fileNumber ^ (fileNumber >>> 32));
         result = prime * result + ((fileType == null) ? 0 : fileType.hashCode());
         return result;
@@ -116,6 +127,12 @@ public class FileInfo
         if (getClass() != obj.getClass())
             return false;
         FileInfo other = (FileInfo) obj;
+        if (db == null) {
+            if (other.db != null)
+                return false;
+        }
+        else if (!db.equals(other.db))
+            return false;
         if (fileNumber != other.fileNumber)
             return false;
         if (fileType != other.fileType)
@@ -126,12 +143,7 @@ public class FileInfo
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("FileInfo");
-        sb.append("{fileType=").append(fileType);
-        sb.append(", fileNumber=").append(fileNumber);
-        sb.append('}');
-        return sb.toString();
+        return "FileInfo [fileType=" + fileType + ", fileNumber=" + fileNumber + ", db=" + db + "]";
     }
 }
 

@@ -87,14 +87,13 @@ public class DbImpl
     @Override
     public String toString()
     {
-        return "DbImpl [databaseDir=" + databaseDir + "]";
+        return "DbImpl [handle=" + dbHandle + "]";
     }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DbImpl.class);
 
     private final Options options;
     private final UserOptions userOptions;
-    private final Path databaseDir;
     private final DBHandle dbHandle;
     private final TableCache tableCache;
     private final LockFile dbLock;
@@ -135,13 +134,17 @@ public class DbImpl
     public DbImpl(Options userOptions, Path databaseDir)
             throws IOException
     {
+        this(userOptions, FileSystemEnv.handle(databaseDir));
+    }
+    
+    public DbImpl(Options userOptions, DBHandle handle)
+            throws IOException
+    {
         Preconditions.checkNotNull(userOptions, "options is null");
-        Preconditions.checkNotNull(databaseDir, "databaseDir is null");
+        Preconditions.checkNotNull(handle, "databaseHandle is null");
         this.userOptions = new UserOptions(Options.copy(userOptions));
-        this.options = sanitizeOptions(userOptions, databaseDir);
+        this.options = sanitizeOptions(userOptions);
         Env env = this.options.env();
-
-        this.databaseDir = databaseDir;
 
         //use custom comparator if set
         DBBufferComparator userComparator = options.bufferComparator();
@@ -157,36 +160,37 @@ public class DbImpl
         compactionExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, backgroundCompaction,
                 compactionThreadFactory);
 
-        // Reserve ten files or so for other uses and give the rest to TableCache.
-        int tableCacheSize = options.maxOpenFiles() - 10;
-        tableCache = new TableCache(tableCacheSize, internalKeyComparator, options,
-                backgroundExceptionHandler);
-
         // create the version set
 
         // create the database dir if it does not already exist
-        dbHandle = env.createDBDir();
+        dbHandle = env.createDBDir(handle);
+
+        // Reserve ten files or so for other uses and give the rest to
+        // TableCache.
+        int tableCacheSize = options.maxOpenFiles() - 10;
+        tableCache = new TableCache(dbHandle, tableCacheSize, internalKeyComparator, options,
+                backgroundExceptionHandler);
 
         mutex.lock();
         try {
             // lock the database dir
-            FileInfo lockFile = FileInfo.lock();
+            FileInfo lockFile = FileInfo.lock(dbHandle);
             dbLock = env.lockFile(lockFile);
             if (dbLock == null) {
                 throw new IOException("Unable to acquire lock on " + lockFile);
             }
 
             // verify the "current" file
-            if (env.fileExists(FileInfo.current())) {
+            if (env.fileExists(FileInfo.current(dbHandle))) {
                 Preconditions.checkArgument(!options.errorIfExists(),
-                        "Database '%s' exists and the error if exists option is enabled", databaseDir);
+                        "Database '%s' exists and the error if exists option is enabled", dbHandle);
             }
             else {
                 Preconditions.checkArgument(options.createIfMissing(),
-                        "Database '%s' does not exist and the create if missing option is disabled", databaseDir);
+                        "Database '%s' does not exist and the create if missing option is disabled", dbHandle);
             }
 
-            versions = new VersionSet(databaseDir, tableCache, internalKeyComparator, options);
+            versions = new VersionSet(dbHandle, tableCache, internalKeyComparator, options);
 
             // load  (and recover) current version
             versions.recover();
@@ -222,7 +226,7 @@ public class DbImpl
 
             // open transaction log
             long logFileNumber = versions.getNextFileNumber();
-            LogWriter log = Logs.createLogWriter(FileInfo.log(logFileNumber), logFileNumber, options);
+            LogWriter log = Logs.createLogWriter(FileInfo.log(dbHandle, logFileNumber), logFileNumber, options);
             MemTable table = new MemTable(internalKeyComparator, this.userOptions.specifiedMemoryManager(),
                     options.memoryManager());
             this.memTables = new MemTables(new MemTableAndLog(table, log), null);
@@ -261,7 +265,7 @@ public class DbImpl
 
     // deprecated wrt user-facing api
     @SuppressWarnings("deprecation")
-    private static Options sanitizeOptions(Options userOptions, Path databaseDir)
+    private static Options sanitizeOptions(Options userOptions)
     {
         Options ret = Options.copy(userOptions);
         if (ret.memoryManager() == null) {
@@ -282,7 +286,7 @@ public class DbImpl
             // TODO mmap sanitize
             // ret.env(USE_MMAP_DEFAULT ? MMapEnv.INSTANCE : new
             // FileChannelEnv(ret.memoryManager()));
-            ret.env(new FileChannelEnv(ret.memoryManager(), databaseDir));
+            ret.env(new FileChannelEnv(ret.memoryManager()));
         }
         return ret;
     }
@@ -590,7 +594,7 @@ public class DbImpl
         Preconditions.checkState(mutex.isHeldByCurrentThread());
 
         LogMonitor logMonitor = LogMonitors.logMonitor();
-        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(FileInfo.log(fileNumber));
+        try (SequentialReadFile fileInput = options.env().openSequentialReadFile(FileInfo.log(dbHandle, fileNumber));
                 LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, options.memoryManager())) {
 
             LOGGER.info("{} recovering log #{}", this, fileNumber);
@@ -1068,7 +1072,7 @@ public class DbImpl
                 try {
                     this.memTables = new MemTables(new MemTableAndLog(new MemTable(internalKeyComparator,
                             userOptions.specifiedMemoryManager(), options.memoryManager()), Logs.createLogWriter(
-                            FileInfo.log(logNumber), logNumber, options)), current);
+                            FileInfo.log(dbHandle, logNumber), logNumber, options)), current);
                 }
                 catch (IOException e) {
                     //we've failed to create a new memtable and update mutable/immutable
@@ -1183,7 +1187,7 @@ public class DbImpl
             throws IOException
     {
         Env env = options.env();
-        FileInfo fileInfo = FileInfo.table(fileNumber);
+        FileInfo fileInfo = FileInfo.table(dbHandle, fileNumber);
         try {
             InternalKey smallest = null;
             InternalKey largest = null;
@@ -1353,7 +1357,7 @@ public class DbImpl
             compactionState.currentSmallest = null;
             compactionState.currentLargest = null;
 
-            compactionState.outfile = options.env().openSequentialWriteFile(FileInfo.table(fileNumber));
+            compactionState.outfile = options.env().openSequentialWriteFile(FileInfo.table(dbHandle, fileNumber));
             compactionState.builder = new TableBuilder(options, compactionState.outfile, internalKeyComparator);
         }
         finally {
@@ -1420,7 +1424,7 @@ public class DbImpl
             // Discard any files we may have created during this failed compaction
             for (FileMetaData output : compact.outputs) {
                 try {
-                    options.env().deleteFile(FileInfo.table(output.getNumber()));
+                    options.env().deleteFile(FileInfo.table(dbHandle, output.getNumber()));
                 }
                 catch (IOException deleteFailed) {
                     LOGGER.warn("{} failed to delete file {}", this, output, deleteFailed);

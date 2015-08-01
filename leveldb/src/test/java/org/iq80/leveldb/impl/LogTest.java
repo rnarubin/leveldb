@@ -161,8 +161,7 @@ public abstract class LogTest
         testConcurrentLog(records, true, 8);
     }
 
-    // TODO: fix multimapping
-    @Test(enabled = false)
+    @Test
     public void testManyHugeRecordsConcurrently()
             throws InterruptedException, ExecutionException, IOException
     {
@@ -254,8 +253,6 @@ public abstract class LogTest
 
         try (StrictMemoryManager strictMemory = new StrictMemoryManager();
                 SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
-                // FileInputStream fileInput = new
-                // FileInputStream(writer.getFile());
                 LogReader reader = new LogReader(fileInput, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
 
             for (ByteBuffer actual = reader.readRecord(); actual != null; actual = reader.readRecord()) {
@@ -270,7 +267,7 @@ public abstract class LogTest
     public void setUp()
             throws Exception
     {
-        filePath = FileInfo.log(42);
+        filePath = FileInfo.log(FileSystemEnv.handle(Files.createTempDirectory("leveldb")), 42);
         writer = Logs.createLogWriter(filePath, 42, getOptions());
     }
 
@@ -287,19 +284,18 @@ public abstract class LogTest
     public void testLogRecordBounds()
             throws Exception
     {
-        FileInfo file = FileInfo.log(-1);
         try {
             int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
             ByteBuffer record = ByteBuffer.allocate(recordSize);
 
-            LogWriter writer = Logs.createLogWriter(file, 10, getOptions());
+            LogWriter writer = Logs.createLogWriter(filePath, 10, getOptions());
             writer.addRecord(record, true);
             writer.close();
 
             LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
 
             try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-                    SequentialReadFile fileInput = getEnv().openSequentialReadFile(file);
+                    SequentialReadFile fileInput = getEnv().openSequentialReadFile(filePath);
                     LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, strictMemory)) {
 
                 int count = 0;
@@ -312,7 +308,7 @@ public abstract class LogTest
             }
         }
         finally {
-            getEnv().deleteFile(file);
+            getEnv().deleteFile(filePath);
         }
     }
 
@@ -368,9 +364,8 @@ public abstract class LogTest
 
         @BeforeClass
         public void open()
-                throws IOException
         {
-            env = new FileChannelEnv(strictMemory, Files.createTempDirectory("leveldb"));
+            env = new FileChannelEnv(strictMemory);
             options = Options.make().env(env).memoryManager(strictMemory);
             strictMemory = new StrictMemoryManager();
         }

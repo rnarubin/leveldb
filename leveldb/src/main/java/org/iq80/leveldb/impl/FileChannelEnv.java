@@ -41,14 +41,14 @@ public class FileChannelEnv
 {
     private final MemoryManager memory;
 
-    public FileChannelEnv(MemoryManager memory, Path databaseDir)
+    public FileChannelEnv(MemoryManager memory)
     {
-        this(memory, databaseDir, false);
+        this(memory, false);
     }
 
-    public FileChannelEnv(MemoryManager memory, Path databaseDir, boolean legacySST)
+    public FileChannelEnv(MemoryManager memory, boolean legacySST)
     {
-        super(databaseDir, legacySST);
+        super(legacySST);
         this.memory = memory;
     }
 

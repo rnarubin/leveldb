@@ -21,7 +21,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
-import com.google.common.io.Files;
 
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBFactory;
@@ -34,13 +33,17 @@ import org.iq80.leveldb.impl.DbImpl;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.EnumMap;
@@ -135,7 +138,7 @@ public class DbBenchmark
         databaseDir = new File((String) flags.get(Flag.db));
 
         // delete heap files in db
-        for (File file : FileUtils.listFiles(databaseDir)) {
+        for (File file : databaseDir.listFiles()) {
             if (file.getName().startsWith("heap-")) {
                 file.delete();
             }
@@ -316,7 +319,7 @@ public class DbBenchmark
             int numberOfCpus = 0;
             String cpuType = null;
             String cacheSize = null;
-            for (String line : CharStreams.readLines(Files.newReader(cpuInfo, UTF_8))) {
+            for (String line : CharStreams.readLines(com.google.common.io.Files.newReader(cpuInfo, UTF_8))) {
                 ImmutableList<String> parts = ImmutableList.copyOf(Splitter.on(':').omitEmptyStrings().trimResults().limit(2).split(line));
                 if (parts.size() != 2) {
                     continue;
@@ -719,10 +722,20 @@ public class DbBenchmark
     }
 
     private void destroyDb()
+            throws IOException
     {
         Closeables.closeQuietly(db_);
         db_ = null;
-        FileUtils.deleteRecursively(databaseDir);
+        Files.delete(Files.walkFileTree(databaseDir.toPath(), new SimpleFileVisitor<Path>()
+        {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                    throws IOException
+            {
+                Files.delete(file);
+                return super.visitFile(file, attrs);
+            }
+        }));
     }
 
     private void printStats()

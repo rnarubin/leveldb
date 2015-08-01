@@ -24,7 +24,6 @@ import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -32,9 +31,9 @@ import org.testng.annotations.Test;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
@@ -44,10 +43,6 @@ import static org.testng.Assert.assertTrue;
  */
 public class NativeInteropTest
 {
-    private static final AtomicInteger NEXT_ID = new AtomicInteger();
-
-    private final File databaseDir = FileUtils.createTempDir("leveldb");
-
     public static byte[] bytes(String value)
     {
         if (value == null) {
@@ -96,15 +91,6 @@ public class NativeInteropTest
         this.jnifactory = jnifactory;
     }
 
-    File getTestDirectory(String name)
-            throws IOException
-    {
-        File rc = new File(databaseDir, name);
-        iq80factory.destroy(rc, Options.make().createIfMissing(true));
-        rc.mkdirs();
-        return rc;
-    }
-
     @Test
     public void testCRUDviaIQ80()
             throws IOException, DBException
@@ -136,10 +122,8 @@ public class NativeInteropTest
     public void crud(DBFactory firstFactory, DBFactory secondFactory)
             throws IOException, DBException
     {
-        File path = getTestDirectory(getClass().getName() + "_" + NEXT_ID.incrementAndGet());
-        Options options = Options.make()
-                .createIfMissing(true)
-                .env(new FileChannelEnv(MemoryManagers.heap(), path.toPath(), true));
+        File path = Files.createTempDirectory("leveldb").toFile();
+        Options options = Options.make().createIfMissing(true).env(new FileChannelEnv(MemoryManagers.heap(), true));
         DB db = firstFactory.open(path, options);
 
         WriteOptions wo = WriteOptions.make().sync(false);

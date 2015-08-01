@@ -21,12 +21,12 @@ import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.FileUtils;
 import org.testng.annotations.Test;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 
 import static org.testng.Assert.assertTrue;
@@ -38,8 +38,6 @@ import static org.testng.Assert.assertTrue;
  */
 public class ApiTest
 {
-    private final File databaseDir = FileUtils.createTempDir("leveldb");
-
     public static byte[] bytes(String value)
     {
         if (value == null) {
@@ -73,23 +71,14 @@ public class ApiTest
 
     private final DBFactory factory = Iq80DBFactory.factory;
 
-    File getTestDirectory(String name)
-            throws IOException
-    {
-        File rc = new File(databaseDir, name);
-        factory.destroy(rc, Options.make().createIfMissing(true));
-        rc.mkdirs();
-        return rc;
-    }
-
     @Test
     public void testCompaction()
             throws IOException, DBException
     {
         Options options = Options.make().createIfMissing(true).compression(null);
 
-        File path = getTestDirectory("testCompaction");
-        DB db = factory.open(path, options);
+        Path tempDir = Files.createTempDirectory("leveldb");
+        DB db = factory.open(tempDir.toFile(), options);
 
         System.out.println("Adding");
         for (int i = 0; i < 1000 * 1000; i++) {
@@ -100,7 +89,7 @@ public class ApiTest
         }
 
         db.close();
-        db = factory.open(path, options);
+        db = factory.open(tempDir.toFile(), options);
 
         System.out.println("Deleting");
         for (int i = 0; i < 1000 * 1000; i++) {
@@ -111,7 +100,7 @@ public class ApiTest
         }
 
         db.close();
-        db = factory.open(path, options);
+        db = factory.open(tempDir.toFile(), options);
 
         System.out.println("Adding");
         for (int i = 0; i < 1000 * 1000; i++) {

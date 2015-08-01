@@ -97,9 +97,12 @@ public interface Env
      * Creates a directory to contain all files owned by this database if one
      * does not already exist. Does nothing if it does exist
      * 
-     * @return a handle to the created
+     * @param existing
+     *            a handle to an already existing database. Can be null,
+     *            indicating the database does not yet exist
+     * @return a handle to the created database
      */
-    DBHandle createDBDir()
+    DBHandle createDBDir(DBHandle existing)
             throws IOException;
 
     /**
@@ -117,6 +120,13 @@ public interface Env
     /**
      * A handle used to identify a directory containing files for a particular
      * database
+     */
+    /*
+     * the right thing to do here would actually be use a generic type parameter
+     * instead of this handle. the trouble is that that type would have to be
+     * woven into DbImpl, Env, FileInfo, Options, etc, at which point the gain
+     * of type safety in the already rare case of using a non-default env is
+     * outweighed by code simplicity
      */
     public interface DBHandle
     {

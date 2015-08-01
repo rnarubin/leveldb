@@ -89,7 +89,6 @@ public class DbImplTest
     public static final double STRESS_FACTOR = Double.parseDouble(System.getProperty("STRESS_FACTOR", "1"));
 
     private static final String DOES_NOT_EXIST_FILENAME = "/foo/bar/doowop/idontexist";
-    private static final String DOES_NOT_EXIST_FILENAME_PATTERN = ".foo.bar.doowop.idontexist";
 
     private File databaseDir;
 

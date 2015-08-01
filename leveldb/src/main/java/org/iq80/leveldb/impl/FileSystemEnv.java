@@ -36,19 +36,11 @@ import org.iq80.leveldb.FileInfo;
 public abstract class FileSystemEnv
         implements Env
 {
-    private final Path databaseDir;
-
     // whether new tables should be written with .sst extension
     private final boolean legacySST;
 
-    public FileSystemEnv(Path databaseDir)
+    public FileSystemEnv(boolean legacySST)
     {
-        this(databaseDir, false);
-    }
-
-    public FileSystemEnv(Path databaseDir, boolean legacySST)
-    {
-        this.databaseDir = databaseDir;
         this.legacySST = legacySST;
     }
 
@@ -59,7 +51,8 @@ public abstract class FileSystemEnv
 
     protected Path getPath(FileInfo fileInfo, boolean legacy)
     {
-        return databaseDir.resolve(getFileName(fileInfo, legacy));
+        assert fileInfo.getOwner() instanceof DBPath;
+        return ((DBPath) fileInfo.getOwner()).path.resolve(getFileName(fileInfo, legacy));
     }
 
     @SuppressWarnings("deprecation")
@@ -155,7 +148,7 @@ public abstract class FileSystemEnv
         Files.move(getPath(src), getPath(target), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
-    protected class DBPath
+    protected static class DBPath
             implements DBHandle
     {
         private final Path path;
@@ -164,22 +157,32 @@ public abstract class FileSystemEnv
         {
             this.path = path;
         }
+
+        @Override
+        public String toString()
+        {
+            return "DBPath [path=" + path + "]";
+        }
+    }
+
+    public static DBPath handle(Path path)
+    {
+        return new DBPath(path);
     }
 
     public DBPath pathFromHandle(DBHandle handle)
     {
-        DBPath dbpath;
-        if (!(handle instanceof DBPath) || !(dbpath = (DBPath) handle).path.equals(databaseDir)) {
+        if (!(handle instanceof DBPath)) {
             throw new IllegalArgumentException("given handle from different env:" + handle);
         }
-        return dbpath;
+        return (DBPath) handle;
     }
 
     @Override
-    public DBPath createDBDir()
+    public DBPath createDBDir(DBHandle handle)
             throws IOException
     {
-        DBPath dbpath = new DBPath(databaseDir);
+        DBPath dbpath = pathFromHandle(handle);
         if (!Files.exists(dbpath.path)) {
             Files.createDirectories(dbpath.path);
         }
@@ -215,7 +218,7 @@ public abstract class FileSystemEnv
         List<FileInfo> list = new ArrayList<>();
         try (DirectoryStream<Path> dir = Files.newDirectoryStream(dbpath.path)) {
             for (Path p : dir) {
-                list.add(parseFileName(p));
+                list.add(parseFileName(handle, p));
             }
         }
         catch (DirectoryIteratorException e) {
@@ -224,7 +227,7 @@ public abstract class FileSystemEnv
         return list;
     }
 
-    public static FileInfo parseFileName(Path path)
+    private static FileInfo parseFileName(DBHandle handle, Path path)
     {
         // Owned filenames have the form:
         // dbname/CURRENT
@@ -235,29 +238,29 @@ public abstract class FileSystemEnv
         // dbname/[0-9]+.(log|sst|dbtmp)
         String fileName = path.getFileName().toString();
         if ("CURRENT".equals(fileName)) {
-            return FileInfo.current();
+            return FileInfo.current(handle);
         }
         else if ("LOCK".equals(fileName)) {
-            return FileInfo.lock();
+            return FileInfo.lock(handle);
         }
         else if ("LOG".equals(fileName) || "LOG.old".equals(fileName)) {
-            return FileInfo.legacyInfoLog();
+            return FileInfo.legacyInfoLog(handle);
         }
         else if (fileName.startsWith("MANIFEST-")) {
             long fileNumber = Long.parseLong(fileName.substring("MANIFEST-".length()));
-            return FileInfo.manifest(fileNumber);
+            return FileInfo.manifest(handle, fileNumber);
         }
         else if (fileName.endsWith(".log")) {
             long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
-            return FileInfo.log(fileNumber);
+            return FileInfo.log(handle, fileNumber);
         }
         else if (fileName.endsWith(".ldb") || fileName.endsWith(".sst")) {
             long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
-            return FileInfo.table(fileNumber);
+            return FileInfo.table(handle, fileNumber);
         }
         else if (fileName.endsWith(".dbtmp")) {
             long fileNumber = Long.parseLong(removeSuffix(fileName, 6));
-            return FileInfo.temp(fileNumber);
+            return FileInfo.temp(handle, fileNumber);
         }
         throw new IllegalArgumentException("Unknown file type:" + path);
     }

@@ -74,8 +74,7 @@ public class Iq80DBFactory
             throws IOException
     {
         // TODO rework the DBFactory interface, it's not file agnostic
-        Env fsEnv = new FileChannelEnv(null, path.toPath());
-        fsEnv.deleteDir(fsEnv.createDBDir());
+        new FileChannelEnv(null).deleteDir(FileSystemEnv.handle(path.toPath()));
     }
 
     @Override
