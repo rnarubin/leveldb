@@ -28,7 +28,7 @@ import com.google.common.collect.Maps;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
-import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.Env.TemporaryWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
@@ -704,13 +704,11 @@ public class VersionSet
     public void setCurrentFile(Env env, long descriptorNumber)
             throws IOException
     {
-        String manifest = descriptorStringName(descriptorNumber);
         FileInfo temp = FileInfo.temp(dbHandle, descriptorNumber);
 
-        writeStringToFileSync(env, manifest + "\n", temp);
-
-        try {
-            env.replace(temp, FileInfo.current(dbHandle));
+        try (TemporaryWriteFile file = env.openTemporaryWriteFile(temp, FileInfo.current(dbHandle))) {
+            file.write(ByteBuffer.wrap((descriptorStringName(descriptorNumber) + "\n").getBytes(StandardCharsets.UTF_8)));
+            file.sync();
         }
         catch (IOException e) {
             env.deleteFile(temp);
@@ -729,15 +727,6 @@ public class VersionSet
     public static long descriptorFileNumber(String stringName)
     {
         return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
-    }
-
-    public static void writeStringToFileSync(Env env, String str, FileInfo fileInfo)
-            throws IOException
-    {
-        try (SequentialWriteFile file = env.openSequentialWriteFile(fileInfo)) {
-            file.write(ByteBuffer.wrap(str.getBytes(StandardCharsets.UTF_8)));
-            file.sync();
-        }
     }
 
     public static String readStringFromFile(Env env, FileInfo fileInfo)

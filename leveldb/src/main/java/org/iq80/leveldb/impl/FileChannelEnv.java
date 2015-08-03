@@ -26,7 +26,9 @@ import java.nio.channels.Channel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -64,6 +66,13 @@ public class FileChannelEnv
             throws IOException
     {
         return new FileChannelSequentialWriteFile(path);
+    }
+
+    @Override
+    public TemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
+            throws IOException
+    {
+        return new FileChannelTemporaryWriteFile(temp, target);
     }
 
     @Override
@@ -118,7 +127,7 @@ public class FileChannelEnv
         }
     }
 
-    private static class FileChannelLockFile
+    private static final class FileChannelLockFile
             extends FileChannelFile
             implements LockFile
     {
@@ -215,7 +224,7 @@ public class FileChannelEnv
         }
     }
 
-    private static final class FileChannelSequentialWriteFile
+    private static class FileChannelSequentialWriteFile
             extends FileChannelFile
             implements SequentialWriteFile
     {
@@ -227,24 +236,47 @@ public class FileChannelEnv
         }
 
         @Override
-        public int write(ByteBuffer src)
+        public final int write(ByteBuffer src)
                 throws IOException
         {
             return channel.write(src);
         }
 
         @Override
-        public void sync()
+        public final void sync()
                 throws IOException
         {
             channel.force(false);
         }
 
         @Override
-        public long size()
+        public final long size()
                 throws IOException
         {
             return channel.size();
+        }
+    }
+
+    private static final class FileChannelTemporaryWriteFile
+            extends FileChannelSequentialWriteFile
+            implements TemporaryWriteFile
+    {
+        private final Path temp, target;
+
+        public FileChannelTemporaryWriteFile(Path temp, Path target)
+                throws IOException
+        {
+            super(temp);
+            this.temp = temp;
+            this.target = target;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            super.close();
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

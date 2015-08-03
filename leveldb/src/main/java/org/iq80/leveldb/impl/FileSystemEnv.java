@@ -25,7 +25,6 @@ import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
@@ -93,6 +92,13 @@ public abstract class FileSystemEnv
     }
 
     @Override
+    public TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
+            throws IOException
+    {
+        return openTemporaryWriteFile(getPath(temp), getPath(target));
+    }
+
+    @Override
     public SequentialReadFile openSequentialReadFile(FileInfo fileInfo)
             throws IOException
     {
@@ -121,6 +127,9 @@ public abstract class FileSystemEnv
     protected abstract SequentialWriteFile openSequentialWriteFile(Path path)
             throws IOException;
 
+    protected abstract TemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
+            throws IOException;
+
     protected abstract SequentialReadFile openSequentialReadFile(Path path)
             throws IOException;
 
@@ -139,13 +148,6 @@ public abstract class FileSystemEnv
             throws IOException
     {
         return Files.exists(getPath(fileInfo));
-    }
-
-    @Override
-    public void replace(FileInfo src, FileInfo target)
-            throws IOException
-    {
-        Files.move(getPath(src), getPath(target), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
     protected static class DBPath

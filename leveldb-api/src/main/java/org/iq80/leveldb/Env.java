@@ -51,8 +51,16 @@ public interface Env
             throws IOException;
 
     /**
+     * Creates and opens a new {@link TemporaryWriteFile} with the given temp
+     * file info. Upon closing, the data in the temp file should be atomically
+     * saved to the target file info, replacing the target file if it exists
+     */
+    TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
+            throws IOException;
+
+    /**
      * Opens an existing {@link SequentialReadFile} with the given file info.
-     * 
+     *
      * @throws FileNotFoundException
      *             if a file with this info does not exist
      */
@@ -61,7 +69,7 @@ public interface Env
 
     /**
      * Opens an existing {@link RandomReadFile} with the given file info.
-     * 
+     *
      * @throws FileNotFoundException
      *             if a file with this info does not exist
      */
@@ -70,7 +78,7 @@ public interface Env
 
     /**
      * Deletes the file with the given path
-     * 
+     *
      * @throws FileNotFoundException
      *             if a file with this info does not exist
      */
@@ -86,20 +94,13 @@ public interface Env
             throws IOException;
 
     /**
-     * Replaces the file described by <tt>target</tt> with the file described by
-     * <tt>src</tt>. <tt>src</tt> should be relocated whether the target already
-     * exists or not
-     */
-    void replace(FileInfo src, FileInfo target)
-            throws IOException;
-
-    /**
      * Creates a directory to contain all files owned by this database if one
      * does not already exist. Does nothing if it does exist
-     * 
+     *
      * @param existing
      *            a handle to an already existing database. Can be null,
-     *            indicating the database does not yet exist
+     *            indicating the database does not yet exist or its existence
+     *            has not been determined
      * @return a handle to the created database
      */
     DBHandle createDBDir(DBHandle existing)
@@ -110,7 +111,7 @@ public interface Env
      */
     void deleteDir(DBHandle handle)
             throws IOException;
-    
+
     /**
      * Returns an iterable over the files owned by the given DB
      */
@@ -136,12 +137,12 @@ public interface Env
      * Lock the specified file. Used to prevent concurrent access to the same db
      * by multiple processes. The caller should call LockFile.close() to release
      * the lock. If the process exits, the lock will be automatically released.
-     * 
+     *
      * If somebody else already holds the lock, finishes immediately, i.e. this
      * call does not wait for existing locks to go away.
-     * 
+     *
      * May create the named file if it does not already exist.
-     * 
+     *
      * @return a LockFile object if the file was successfully locked. Otherwise,
      *         return <tt>null</tt> if the file is already held
      */
@@ -187,7 +188,7 @@ public interface Env
          * Given the current position of the file, return a {@link WriteRegion}
          * of the specified size beginning at that position for use by a single
          * writer
-         * 
+         *
          * @param getSize
          *            a function which applied to the current end position of
          *            the file returns the amount of space that the writer will
@@ -261,6 +262,23 @@ public interface Env
     }
 
     /**
+     * A temporary file which serves to atomically save data to a particular
+     * file name
+     */
+    public interface TemporaryWriteFile
+            extends SequentialWriteFile
+    {
+        /**
+         * Save the data written to the temporary file to the given target file
+         * name (in addition to releasing associated resources as required by
+         * {@link Closeable#close() close})
+         */
+        @Override
+        public void close()
+                throws IOException;
+    }
+
+    /**
      * A file which is read sequentially. Will only be used by one thread at a
      * time
      */
@@ -292,7 +310,7 @@ public interface Env
          * @param length
          *            the number of bytes to read from the file; must be
          *            non-negative
-         * 
+         *
          * @return a buffer containing the bytes read, possibly zero, or
          *         <tt>null</tt> if the given position is greater than or equal
          *         to the file's current size
