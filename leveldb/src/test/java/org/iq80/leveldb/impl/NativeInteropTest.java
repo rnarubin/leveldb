@@ -24,7 +24,7 @@ import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -123,71 +123,84 @@ public class NativeInteropTest
             throws IOException, DBException
     {
         File path = Files.createTempDirectory("leveldb").toFile();
-        Options options = Options.make().createIfMissing(true).env(new FileChannelEnv(MemoryManagers.heap(), true));
-        DB db = firstFactory.open(path, options);
-
+        Options options = Options.make().createIfMissing(true);
         WriteOptions wo = WriteOptions.make().sync(false);
         ReadOptions ro = ReadOptions.make().fillCache(true).verifyChecksums(true);
-        db.put(bytes("Tampa"), bytes("green"));
-        db.put(bytes("London"), bytes("red"));
-        db.put(bytes("New York"), bytes("blue"));
+        DB db;
 
-        db.close();
-        db = secondFactory.open(path, options);
+        try (StrictEnv env = new StrictEnv(true)) {
+            options.env(env);
+            db = firstFactory.open(path, options);
 
-        assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
-        assertEquals(db.get(bytes("London"), ro), bytes("red"));
-        assertEquals(db.get(bytes("New York"), ro), bytes("blue"));
+            db.put(bytes("Tampa"), bytes("green"));
+            db.put(bytes("London"), bytes("red"));
+            db.put(bytes("New York"), bytes("blue"));
 
-        try (DBIterator iter = db.iterator(ro)) {
-            iter.seekToFirst();
-            Entry<byte[], byte[]> next = iter.next();
-            assertEquals(next.getKey(), bytes("London"));
-            assertEquals(next.getValue(), bytes("red"));
-            next = iter.next();
-            assertEquals(next.getKey(), bytes("New York"));
-            assertEquals(next.getValue(), bytes("blue"));
-            next = iter.next();
-            assertEquals(next.getKey(), bytes("Tampa"));
-            assertEquals(next.getValue(), bytes("green"));
-            Assert.assertFalse(iter.hasNext());
+            db.close();
         }
 
-        db.delete(bytes("New York"), wo);
+        try (StrictEnv env = new StrictEnv(true)) {
+            options.env(env);
+            db = secondFactory.open(path, options);
 
-        assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
-        assertEquals(db.get(bytes("London"), ro), bytes("red"));
-        assertNull(db.get(bytes("New York"), ro));
+            assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
+            assertEquals(db.get(bytes("London"), ro), bytes("red"));
+            assertEquals(db.get(bytes("New York"), ro), bytes("blue"));
 
-        try (DBIterator iter = db.iterator(ro)) {
-            iter.seekToFirst();
-            Entry<byte[], byte[]> next = iter.next();
-            assertEquals(next.getKey(), bytes("London"));
-            assertEquals(next.getValue(), bytes("red"));
-            next = iter.next();
-            assertEquals(next.getKey(), bytes("Tampa"));
-            assertEquals(next.getValue(), bytes("green"));
-            Assert.assertFalse(iter.hasNext());
+            try (DBIterator iter = db.iterator(ro)) {
+                iter.seekToFirst();
+                Entry<byte[], byte[]> next = iter.next();
+                assertEquals(next.getKey(), bytes("London"));
+                assertEquals(next.getValue(), bytes("red"));
+                next = iter.next();
+                assertEquals(next.getKey(), bytes("New York"));
+                assertEquals(next.getValue(), bytes("blue"));
+                next = iter.next();
+                assertEquals(next.getKey(), bytes("Tampa"));
+                assertEquals(next.getValue(), bytes("green"));
+                Assert.assertFalse(iter.hasNext());
+            }
+
+            db.delete(bytes("New York"), wo);
+
+            assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
+            assertEquals(db.get(bytes("London"), ro), bytes("red"));
+            assertNull(db.get(bytes("New York"), ro));
+
+            try (DBIterator iter = db.iterator(ro)) {
+                iter.seekToFirst();
+                Entry<byte[], byte[]> next = iter.next();
+                assertEquals(next.getKey(), bytes("London"));
+                assertEquals(next.getValue(), bytes("red"));
+                next = iter.next();
+                assertEquals(next.getKey(), bytes("Tampa"));
+                assertEquals(next.getValue(), bytes("green"));
+                Assert.assertFalse(iter.hasNext());
+            }
+
+            db.close();
         }
 
-        db.close();
-        db = firstFactory.open(path, options);
+        try (StrictEnv env = new StrictEnv(true)) {
+            options.env(env);
+            db = firstFactory.open(path, options);
 
-        assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
-        assertEquals(db.get(bytes("London"), ro), bytes("red"));
-        assertNull(db.get(bytes("New York"), ro));
+            assertEquals(db.get(bytes("Tampa"), ro), bytes("green"));
+            assertEquals(db.get(bytes("London"), ro), bytes("red"));
+            assertNull(db.get(bytes("New York"), ro));
 
-        try (DBIterator iter = db.iterator(ro)) {
-            iter.seekToFirst();
-            Entry<byte[], byte[]> next = iter.next();
-            assertEquals(next.getKey(), bytes("London"));
-            assertEquals(next.getValue(), bytes("red"));
-            next = iter.next();
-            assertEquals(next.getKey(), bytes("Tampa"));
-            assertEquals(next.getValue(), bytes("green"));
-            Assert.assertFalse(iter.hasNext());
+            try (DBIterator iter = db.iterator(ro)) {
+                iter.seekToFirst();
+                Entry<byte[], byte[]> next = iter.next();
+                assertEquals(next.getKey(), bytes("London"));
+                assertEquals(next.getValue(), bytes("red"));
+                next = iter.next();
+                assertEquals(next.getKey(), bytes("Tampa"));
+                assertEquals(next.getValue(), bytes("green"));
+                Assert.assertFalse(iter.hasNext());
+            }
+
+            db.close();
         }
-
-        db.close();
     }
 }

@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -50,6 +51,8 @@ import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -98,15 +101,15 @@ public class DbImplTest
     public void testBackgroundCompaction()
             throws Exception
     {
-        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
-            Options options = Options.make().memoryManager(strictMemory);
+        try (StrictEnv env = new StrictEnv()) {
+            Options options = Options.make().env(env).memoryManager(env.strictMemory);
             options.maxOpenFiles(100);
             options.createIfMissing(true);
             try (DbImpl db = new DbImpl(options, this.databaseDir)) {
                 Random random = new Random(301);
                 for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
-                    db.put(strictMemory.wrap(randomString(random, 64).getBytes()),
-                            strictMemory.wrap(new byte[] { 0x01 }), WriteOptions.make().sync(false));
+                    db.put(env.strictMemory.wrap(randomString(random, 64).getBytes()),
+                            env.strictMemory.wrap(new byte[] { 0x01 }), WriteOptions.make().sync(false));
                     db.get(randomString(random, 64).getBytes());
                     if ((i % 50000) == 0 && i != 0) {
                         System.out.println(i + " rows written");
@@ -120,8 +123,8 @@ public class DbImplTest
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
-        try (StrictMemoryManager strictMemory = new StrictMemoryManager()) {
-            Options options = Options.make().memoryManager(strictMemory);
+        try (StrictEnv env = new StrictEnv()) {
+            Options options = Options.make().env(env).memoryManager(env.strictMemory);
             options.createIfMissing(true);
             try (DbImpl db = new DbImpl(options, databaseDir)) {
                 for (int index = 0; index < 5000000; index++) {
@@ -129,7 +132,7 @@ public class DbImplTest
                     String value = "This is element "
                             + index
                             + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZASDFASDKLFJASDFKJSDFLKSDJFLKJSDHFLKJHSDJFSDFHJASDFLKJSDF";
-                    db.put(strictMemory.wrap(key.getBytes("UTF-8")), strictMemory.wrap(value.getBytes("UTF-8")));
+                    db.put(env.strictMemory.wrap(key.getBytes("UTF-8")), env.strictMemory.wrap(value.getBytes("UTF-8")));
                 }
             }
         }
@@ -139,9 +142,8 @@ public class DbImplTest
     public void testEmpty()
             throws Exception
     {
-        Options options = Options.make();
         File databaseDir = this.databaseDir;
-        DbStringWrapper db = new DbStringWrapper(options, databaseDir);
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
         assertNull(db.get("foo"));
     }
 
@@ -149,20 +151,22 @@ public class DbImplTest
     public void testEmptyBatch()
             throws Exception
     {
-        // open new db
-        Options options = Options.make().createIfMissing(true);
-        DB db = new Iq80DBFactory().open(databaseDir, options);
+        try (StrictEnv env = new StrictEnv()) {
+            // open new db
+            Options options = Options.make().createIfMissing(true).env(env).memoryManager(env.strictMemory);
+            DB db = new Iq80DBFactory().open(databaseDir, options);
 
-        // write an empty batch
-        WriteBatch batch = db.createWriteBatch();
-        batch.close();
-        db.write(batch);
+            // write an empty batch
+            WriteBatch batch = db.createWriteBatch();
+            batch.close();
+            db.write(batch);
 
-        // close the db
-        db.close();
+            // close the db
+            db.close();
 
-        // reopen db
-        new Iq80DBFactory().open(databaseDir, options).close();
+            // reopen db
+            new Iq80DBFactory().open(databaseDir, options).close();
+        }
     }
 
     @Test
@@ -1038,7 +1042,7 @@ public class DbImplTest
                 db.close();
             }
             finally {
-                db.memory.close();
+                db.env.close();
             }
         }
         opened.clear();
@@ -1286,12 +1290,163 @@ public class DbImplTest
 
     }
 
+    public static class StrictEnv
+            extends FileChannelEnv
+            implements Closeable
+    {
+        private final ConcurrentMap<? super FileChannelFile, MetaData> openMap = new ConcurrentHashMap<FileChannelFile, MetaData>();
+        public final StrictMemoryManager strictMemory;
+
+        private static class MetaData
+        {
+            public final Throwable openStackHolder;
+
+            public MetaData(Throwable openStackHolder)
+            {
+                this.openStackHolder = openStackHolder;
+            }
+        }
+
+        public StrictEnv()
+        {
+            this(false);
+        }
+
+        public StrictEnv(boolean legacySST)
+        {
+            super(new StrictMemoryManager(), legacySST);
+            this.strictMemory = (StrictMemoryManager) super.memory;
+        }
+
+        private static <T> T add(Map<? super T, MetaData> set, T obj)
+        {
+            set.put(obj, new MetaData(new Throwable()));
+            return obj;
+        }
+
+        @Override
+        public FileChannelConcurrentWriteFile openMultiWriteFile(Path path)
+                throws IOException
+        {
+            return add(openMap, new FileChannelConcurrentWriteFile(path)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+            });
+        }
+
+        @Override
+        public FileChannelSequentialWriteFile openSequentialWriteFile(Path path)
+                throws IOException
+        {
+            return add(openMap, new FileChannelSequentialWriteFile(path)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+            });
+        }
+
+        @Override
+        public FileChannelTemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
+                throws IOException
+        {
+            return add(openMap, new FileChannelTemporaryWriteFile(temp, target)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+            });
+        }
+
+        @Override
+        public FileChannelReadFile openSequentialReadFile(Path path)
+                throws IOException
+        {
+            return add(openMap, new FileChannelReadFile(path, super.memory)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+            });
+        }
+
+        @Override
+        public FileChannelReadFile openRandomReadFile(Path path)
+                throws IOException
+        {
+            return add(openMap, new FileChannelReadFile(path, super.memory)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+            });
+        }
+
+        @Override
+        public LockFile lockFile(Path path)
+                throws IOException
+        {
+            FileChannelLockFile lockFile = add(openMap, new FileChannelLockFile(path)
+            {
+                @Override
+                public void close()
+                        throws IOException
+                {
+                    super.close();
+                    openMap.remove(this);
+                }
+
+            });
+            if (lockFile.isValid()) {
+                return lockFile;
+            }
+            else {
+                lockFile.close();
+                return null;
+            }
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            strictMemory.close();
+            if (!openMap.isEmpty()) {
+                Entry<? super FileChannelFile, MetaData> entry = openMap.entrySet().iterator().next();
+                throw new IllegalStateException(String.format("%d file(s) never closed; %s:",
+                        openMap.entrySet().size(), entry.getKey()), entry.getValue().openStackHolder);
+            }
+        }
+    }
+
     private class DbStringWrapper
     {
         private final Options options;
         private final File databaseDir;
         private DbImpl db;
-        private final StrictMemoryManager memory;
+        private final StrictEnv env;
 
         private DbStringWrapper(Options options, File databaseDir)
                 throws IOException
@@ -1299,7 +1454,8 @@ public class DbImplTest
             this.options = options.verifyChecksums(true)
                     .createIfMissing(true)
                     .errorIfExists(true)
-                    .memoryManager(memory = new StrictMemoryManager());
+                    .env(env = new StrictEnv())
+                    .memoryManager(env.strictMemory);
             this.databaseDir = databaseDir;
             this.db = new DbImpl(options, databaseDir);
             opened.add(this);

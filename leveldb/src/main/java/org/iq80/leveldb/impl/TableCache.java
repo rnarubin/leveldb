@@ -38,8 +38,6 @@ public final class TableCache
 {
     private final LoadingCache<Long, Table> cache;
 
-    // private final Finalizer<Table> finalizer = new Finalizer<>(1);
-
     public TableCache(final DBHandle dbHandle,
             int tableCacheSize,
             final InternalKeyComparator userComparator,
@@ -54,7 +52,6 @@ public final class TableCache
                     public void onRemoval(RemovalNotification<Long, Table> notification)
                     {
                         Table table = notification.getValue();
-                        // finalizer.addCleanup(table, table.closer());
                         try {
                             table.release(); // corresponding to constructor implicit retain
                         }
@@ -114,7 +111,6 @@ public final class TableCache
     public void close()
     {
         cache.invalidateAll();
-        // finalizer.destroy();
     }
 
     public void evict(long number)

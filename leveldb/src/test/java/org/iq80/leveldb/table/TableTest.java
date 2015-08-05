@@ -19,15 +19,15 @@ package org.iq80.leveldb.table;
 
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
-import org.iq80.leveldb.impl.FileChannelEnv;
 import org.iq80.leveldb.impl.FileSystemEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
-import org.iq80.leveldb.impl.MMapEnv;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
@@ -70,11 +70,13 @@ public abstract class TableTest
     public void testEmptyFile()
             throws Exception
     {
-        new Table(getEnv().openRandomReadFile(fileInfo), new InternalKeyComparator(byteCompare), Options.make()
-                .env(getEnv())
-                .bufferComparator(byteCompare)
-                .verifyChecksums(true)
-                .compression(Snappy.instance())).close();
+        try (RandomReadFile file = getEnv().openRandomReadFile(fileInfo)) {
+            new Table(file, new InternalKeyComparator(byteCompare), Options.make()
+                    .env(getEnv())
+                    .bufferComparator(byteCompare)
+                    .verifyChecksums(true)
+                    .compression(Snappy.instance())).close();
+        }
     }
 
     @Test
@@ -149,7 +151,8 @@ public abstract class TableTest
                     .blockRestartInterval(blockRestartInterval)
                     .memoryManager(strictMemory)
                     .compression(Snappy.instance())
-                    .bufferComparator(byteCompare);
+                    .bufferComparator(byteCompare)
+                    .env(getEnv());
 
             try (SequentialWriteFile writeFile = getEnv().openSequentialWriteFile(fileInfo);
                     TableBuilder builder = new TableBuilder(options, writeFile, new InternalKeyComparator(
@@ -235,20 +238,19 @@ public abstract class TableTest
     public static class FileChannelTableTest
             extends TableTest
     {
-        private StrictMemoryManager strictMemory;
-        private Env env;
+        private StrictEnv env;
 
         @BeforeMethod
         public void setupEnv()
         {
-            env = new FileChannelEnv(strictMemory = new StrictMemoryManager());
+            env = new StrictEnv();
         }
 
         @AfterMethod
         public void tearDownEnv()
                 throws IOException
         {
-            strictMemory.close();
+            env.close();
         }
 
         @Override
@@ -258,13 +260,9 @@ public abstract class TableTest
         }
     }
 
-    public static class MMapTableTest
-            extends TableTest
-    {
-        @Override
-        protected Env getEnv()
-        {
-            return new MMapEnv();
-        }
-    }
+    /*
+     * TODO mmap env public static class MMapTableTest extends TableTest {
+     * 
+     * @Override protected Env getEnv() { return new MMapEnv(); } }
+     */
 }

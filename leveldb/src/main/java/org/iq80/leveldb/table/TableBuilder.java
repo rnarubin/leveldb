@@ -27,6 +27,7 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.Closeables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -280,8 +281,8 @@ public class TableBuilder
 
     @Override
     public void close()
+            throws IOException
     {
-        dataBlockBuilder.close();
-        indexBlockBuilder.close();
+        Closeables.closeIO(dataBlockBuilder, indexBlockBuilder);
     }
 }

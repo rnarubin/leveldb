@@ -127,10 +127,10 @@ public class MMapEnv
         private final MappedByteBuffer mmap;
         private final ByteBuffer buffer;
 
-        public SingleMMapReadFile(FileChannel channel)
+        public SingleMMapReadFile(Path path, FileChannel channel)
                 throws IOException
         {
-            super(channel);
+            super(path, channel);
             long fileSize = channel.size();
             assert fileSize <= Integer.MAX_VALUE : "cannot map more than integer max in single buffer";
             this.mmap = channel.map(MapMode.READ_ONLY, 0, (int) fileSize);
@@ -213,10 +213,10 @@ public class MMapEnv
         private long position;
         private MappedByteBuffer mmap;
 
-        public MultiMMapSequentialReadFile(FileChannel channel)
+        public MultiMMapSequentialReadFile(Path path, FileChannel channel)
                 throws IOException
         {
-            super(channel);
+            super(path, channel);
             fileSize = channel.size();
             position = channel.position();
             remap();
@@ -267,9 +267,9 @@ public class MMapEnv
             extends FileChannelFile
             implements RandomReadFile
     {
-        public MultiMMapRandomReadFile(FileChannel channel)
+        public MultiMMapRandomReadFile(Path path, FileChannel channel)
         {
-            super(channel);
+            super(path, channel);
             throw new UnsupportedOperationException();
         }
 
@@ -307,7 +307,12 @@ public class MMapEnv
         public MMapSequentialWriteFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.READ, // read option necessary for READ_WRITE mapmode
+            super(path, FileChannel.open(path, StandardOpenOption.READ, // read
+                                                                        // option
+                                                                        // necessary
+                                                                        // for
+                                                                        // READ_WRITE
+                                                                        // mapmode
                     StandardOpenOption.WRITE, StandardOpenOption.CREATE));
             position = channel.position();
             remap();

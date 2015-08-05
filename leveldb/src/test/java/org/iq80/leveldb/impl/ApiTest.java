@@ -21,6 +21,7 @@ import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBException;
 import org.iq80.leveldb.DBFactory;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.testng.annotations.Test;
 
 import java.io.IOException;
@@ -75,41 +76,47 @@ public class ApiTest
     public void testCompaction()
             throws IOException, DBException
     {
-        Options options = Options.make().createIfMissing(true).compression(null);
+        try (StrictEnv env = new StrictEnv()) {
+            Options options = Options.make()
+                    .createIfMissing(true)
+                    .compression(null)
+                    .env(env)
+                    .memoryManager(env.strictMemory);
 
-        Path tempDir = Files.createTempDirectory("leveldb");
-        DB db = factory.open(tempDir.toFile(), options);
+            Path tempDir = Files.createTempDirectory("leveldb");
+            DB db = factory.open(tempDir.toFile(), options);
 
-        System.out.println("Adding");
-        for (int i = 0; i < 1000 * 1000; i++) {
-            if (i % 100000 == 0) {
-                System.out.println("  at: " + i);
+            System.out.println("Adding");
+            for (int i = 0; i < 1000 * 1000; i++) {
+                if (i % 100000 == 0) {
+                    System.out.println("  at: " + i);
+                }
+                db.put(bytes("key" + i), bytes("value" + i));
             }
-            db.put(bytes("key" + i), bytes("value" + i));
-        }
 
-        db.close();
-        db = factory.open(tempDir.toFile(), options);
+            db.close();
+            db = factory.open(tempDir.toFile(), options);
 
-        System.out.println("Deleting");
-        for (int i = 0; i < 1000 * 1000; i++) {
-            if (i % 100000 == 0) {
-                System.out.println("  at: " + i);
+            System.out.println("Deleting");
+            for (int i = 0; i < 1000 * 1000; i++) {
+                if (i % 100000 == 0) {
+                    System.out.println("  at: " + i);
+                }
+                db.delete(bytes("key" + i));
             }
-            db.delete(bytes("key" + i));
-        }
 
-        db.close();
-        db = factory.open(tempDir.toFile(), options);
+            db.close();
+            db = factory.open(tempDir.toFile(), options);
 
-        System.out.println("Adding");
-        for (int i = 0; i < 1000 * 1000; i++) {
-            if (i % 100000 == 0) {
-                System.out.println("  at: " + i);
+            System.out.println("Adding");
+            for (int i = 0; i < 1000 * 1000; i++) {
+                if (i % 100000 == 0) {
+                    System.out.println("  at: " + i);
+                }
+                db.put(bytes("key" + i), bytes("value" + i));
             }
-            db.put(bytes("key" + i), bytes("value" + i));
-        }
 
-        db.close();
+            db.close();
+        }
     }
 }

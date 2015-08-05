@@ -573,11 +573,11 @@ public class DbImpl
     }
 
     private void cleanupCompaction(CompactionState compactionState)
+            throws IOException
     {
-        Preconditions.checkState(mutex.isHeldByCurrentThread());
-
         if (compactionState.builder != null) {
             compactionState.builder.abandon();
+            Closeables.closeIO(compactionState.builder, compactionState.outfile);
         }
         else {
             Preconditions.checkArgument(compactionState.outfile == null);
@@ -1332,6 +1332,15 @@ public class DbImpl
             if (compactionState.builder != null) {
                 finishCompactionOutputFile(compactionState);
             }
+        }
+        catch (Throwable t) {
+            try {
+                cleanupCompaction(compactionState);
+            }
+            catch (Throwable cleanupT) {
+                throw cleanupT;
+            }
+            throw t;
         }
         finally {
             mutex.lock();

@@ -25,6 +25,7 @@ import org.iq80.leveldb.Env;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
@@ -275,6 +276,7 @@ public abstract class LogTest
     public void tearDown()
             throws Exception
     {
+        writer.close();
         if (filePath != null && getEnv().fileExists(filePath)) {
             getEnv().deleteFile(filePath);
         }
@@ -348,8 +350,7 @@ public abstract class LogTest
     public static class FileLogTest
             extends LogTest
     {
-        private StrictMemoryManager strictMemory;
-        private Env env;
+        private StrictEnv env;
         private Options options;
 
         protected Options getOptions()
@@ -365,16 +366,15 @@ public abstract class LogTest
         @BeforeClass
         public void open()
         {
-            env = new FileChannelEnv(strictMemory);
-            options = Options.make().env(env).memoryManager(strictMemory);
-            strictMemory = new StrictMemoryManager();
+            env = new StrictEnv();
+            options = Options.make().env(env).memoryManager(env.strictMemory);
         }
 
         @AfterClass
         public void closeMemory()
                 throws IOException
         {
-            strictMemory.close();
+            env.close();
         }
     }
 

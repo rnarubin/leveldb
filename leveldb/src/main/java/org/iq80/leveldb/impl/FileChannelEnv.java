@@ -41,7 +41,7 @@ import org.iq80.leveldb.util.SizeOf;
 public class FileChannelEnv
         extends FileSystemEnv
 {
-    private final MemoryManager memory;
+    protected final MemoryManager memory;
 
     public FileChannelEnv(MemoryManager memory)
     {
@@ -55,35 +55,35 @@ public class FileChannelEnv
     }
 
     @Override
-    public ConcurrentWriteFile openMultiWriteFile(Path path)
+    public FileChannelConcurrentWriteFile openMultiWriteFile(Path path)
             throws IOException
     {
         return new FileChannelConcurrentWriteFile(path);
     }
 
     @Override
-    public SequentialWriteFile openSequentialWriteFile(Path path)
+    public FileChannelSequentialWriteFile openSequentialWriteFile(Path path)
             throws IOException
     {
         return new FileChannelSequentialWriteFile(path);
     }
 
     @Override
-    public TemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
+    public FileChannelTemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
             throws IOException
     {
         return new FileChannelTemporaryWriteFile(temp, target);
     }
 
     @Override
-    public SequentialReadFile openSequentialReadFile(Path path)
+    public FileChannelReadFile openSequentialReadFile(Path path)
             throws IOException
     {
         return new FileChannelReadFile(path, memory);
     }
 
     @Override
-    public RandomReadFile openRandomReadFile(Path path)
+    public FileChannelReadFile openRandomReadFile(Path path)
             throws IOException
     {
         return new FileChannelReadFile(path, memory);
@@ -107,9 +107,11 @@ public class FileChannelEnv
             implements Channel
     {
         protected final FileChannel channel;
+        protected final Path path;
 
-        protected FileChannelFile(FileChannel channel)
+        protected FileChannelFile(Path path, FileChannel channel)
         {
+            this.path = path;
             this.channel = channel;
         }
 
@@ -125,9 +127,16 @@ public class FileChannelEnv
         {
             channel.close();
         }
+
+        @Override
+        public String toString()
+        {
+            String name = getClass().getSimpleName();
+            return (name.isEmpty() ? getClass().getName() : name) + "[path=" + path + "]";
+        }
     }
 
-    private static final class FileChannelLockFile
+    protected static class FileChannelLockFile
             extends FileChannelFile
             implements LockFile
     {
@@ -137,7 +146,8 @@ public class FileChannelEnv
         public FileChannelLockFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
+            super(path, FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE,
+                    StandardOpenOption.CREATE));
             try {
                 fileLock = channel.tryLock();
                 acquired = true;
@@ -172,7 +182,7 @@ public class FileChannelEnv
         }
     }
 
-    private static final class FileChannelReadFile
+    protected static class FileChannelReadFile
             extends FileChannelFile
             implements SequentialReadFile, RandomReadFile
     {
@@ -181,7 +191,7 @@ public class FileChannelEnv
         public FileChannelReadFile(Path path, MemoryManager memory)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.READ));
+            super(path, FileChannel.open(path, StandardOpenOption.READ));
             this.memory = memory;
         }
 
@@ -224,14 +234,14 @@ public class FileChannelEnv
         }
     }
 
-    private static class FileChannelSequentialWriteFile
+    protected static class FileChannelSequentialWriteFile
             extends FileChannelFile
             implements SequentialWriteFile
     {
         public FileChannelSequentialWriteFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND,
+            super(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND,
                             StandardOpenOption.CREATE));
         }
 
@@ -257,7 +267,7 @@ public class FileChannelEnv
         }
     }
 
-    private static final class FileChannelTemporaryWriteFile
+    protected static class FileChannelTemporaryWriteFile
             extends FileChannelSequentialWriteFile
             implements TemporaryWriteFile
     {
@@ -280,7 +290,7 @@ public class FileChannelEnv
         }
     }
 
-    private static final class FileChannelConcurrentWriteFile
+    protected static class FileChannelConcurrentWriteFile
             extends FileChannelFile
             implements ConcurrentWriteFile
     {
@@ -288,7 +298,7 @@ public class FileChannelEnv
         public FileChannelConcurrentWriteFile(Path path)
                 throws IOException
         {
-            super(FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
+            super(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
             this.filePosition = new AtomicLong(0);
         }
 
