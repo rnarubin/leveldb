@@ -137,13 +137,6 @@ public class DbBenchmark
 
         databaseDir = new File((String) flags.get(Flag.db));
 
-        // delete heap files in db
-        for (File file : databaseDir.listFiles()) {
-            if (file.getName().startsWith("heap-")) {
-                file.delete();
-            }
-        }
-
         if (!useExisting) {
             destroyDb();
         }
@@ -726,7 +719,8 @@ public class DbBenchmark
     {
         Closeables.closeQuietly(db_);
         db_ = null;
-        Files.delete(Files.walkFileTree(databaseDir.toPath(), new SimpleFileVisitor<Path>()
+        if (Files.exists(databaseDir.toPath())) {
+            Files.delete(Files.walkFileTree(databaseDir.toPath(), new SimpleFileVisitor<Path>()
         {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
@@ -735,7 +729,8 @@ public class DbBenchmark
                 Files.delete(file);
                 return super.visitFile(file, attrs);
             }
-        }));
+            }));
+        }
     }
 
     private void printStats()
