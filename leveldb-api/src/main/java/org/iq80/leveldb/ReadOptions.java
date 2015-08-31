@@ -53,6 +53,12 @@ public class ReadOptions
         }
     }
 
+    @Override
+    public String toString()
+    {
+        return OptionsUtil.toString(this);
+    }
+
     private boolean verifyChecksums = false;
     private boolean fillCache = true;
     private Snapshot snapshot = null;

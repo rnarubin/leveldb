@@ -53,8 +53,15 @@ public class WriteOptions
         }
     }
 
+    @Override
+    public String toString()
+    {
+        return OptionsUtil.toString(this);
+    }
+
     private boolean sync = false;
     private boolean snapshot = false;
+    private boolean disableLog = false;
 
     public boolean sync()
     {
@@ -62,11 +69,11 @@ public class WriteOptions
     }
 
     /**
-     * If true, the write will be flushed from the operating system buffer cache
-     * (by calling {@link org.iq80.leveldb.Env.ConcurrentWriteFile.WriteRegion#sync
+     * If true, the write will be flushed from associated buffer caches (by
+     * calling {@link org.iq80.leveldb.Env.ConcurrentWriteFile.WriteRegion#sync
      * sync}) before the write is considered complete. If this flag is true,
      * writes will be slower.
-     * 
+     * <p>
      * If this flag is false, and the machine crashes, some recent writes may be
      * lost.
      */
@@ -88,6 +95,28 @@ public class WriteOptions
     public WriteOptions snapshot(boolean snapshot)
     {
         this.snapshot = snapshot;
+        return this;
+    }
+
+    public boolean disableLog()
+    {
+        return disableLog;
+    }
+
+    /**
+     * If true, the write will not be written to the persisted log, and will
+     * only be written to media when the encompassing memtable is flushed.
+     * <p>
+     * In order to preserve data in the event of an orderly shutdown (one in
+     * which {@link DB#close()} is called), closing may take longer when this
+     * flag is enabled
+     * <p>
+     * If this flag is enabled and the application crashes, this write may be
+     * lost
+     */
+    public WriteOptions disableLog(boolean disableLog)
+    {
+        this.disableLog = disableLog;
         return this;
     }
 }

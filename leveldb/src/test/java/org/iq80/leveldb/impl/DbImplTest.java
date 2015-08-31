@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,6 +60,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.FileInfo.FileType;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.Range;
@@ -70,13 +74,16 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.FileUtils;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import com.google.common.base.FinalizablePhantomReference;
 import com.google.common.base.FinalizableReferenceQueue;
+import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapMaker;
@@ -223,6 +230,56 @@ public class DbImplTest
         db.put("foo", "v1");
         db.compactMemTable();
         assertEquals(db.get("foo"), "v1");
+    }
+
+    @Test
+    public void testDisableLog()
+            throws IOException
+    {
+        byte[] k1 = new byte[] { 1, 2, 3, 4 }, v1 = new byte[]{2, 3, 4, 5}, k2 = new byte[] { 5, 6, 7, 8 }, v2 = new byte[]{6, 7, 8, 9};
+        DBHandle handle;
+        try (StrictEnv env = new StrictEnv();
+                DbImpl db = new DbImpl(Options.make().env(env),
+                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+            final long size1 = getLogFileSize(env, handle);
+            db.put(k1, v1, WriteOptions.make().sync(true));
+            final long size2 = getLogFileSize(env, handle);
+            Assert.assertTrue(size2 > size1, "precheck failed, log should grow when enabled");
+            Assert.assertEquals(db.get(k1), v1);
+        }
+
+        try (StrictEnv env = new StrictEnv();
+                DbImpl db = new DbImpl(Options.make().env(env),
+                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+            Assert.assertEquals(db.get(k1), v1);
+
+            final long size1 = getLogFileSize(env, handle);
+            db.put(k2, v2, WriteOptions.make().disableLog(true));
+            final long size2 = getLogFileSize(env, handle);
+            Assert.assertTrue(size2 == size1, "log grew when disabled");
+            Assert.assertEquals(db.get(k2), v2);
+        }
+
+        try (StrictEnv env = new StrictEnv();
+                DbImpl db = new DbImpl(Options.make().env(env),
+                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+            Assert.assertEquals(db.get(k2), v2, "log disabled value should persist across close");
+        }
+    }
+    
+    private static long getLogFileSize(StrictEnv env, DBHandle handle)
+            throws IOException
+    {
+        FluentIterable<FileInfo> logs = FluentIterable.from(env.getOwnedFiles(handle)).filter(new Predicate<FileInfo>()
+        {
+            @Override
+            public boolean apply(FileInfo input)
+            {
+                return input.getFileType() == FileType.LOG;
+            }
+        });
+        Assert.assertEquals(logs.size(), 1);
+        return Files.size(env.getPath(logs.first().get()));
     }
 
     @Test

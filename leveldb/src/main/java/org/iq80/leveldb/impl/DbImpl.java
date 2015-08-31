@@ -330,32 +330,14 @@ public class DbImpl
                 Thread.currentThread().interrupt();
             }
 
-            Closeables.closeQuietly(versions);
-
             MemTables tables = memTables;
-            tables.mutable.acquireAll();
-            try {
-                Closeables.closeIO(tables.mutable.log, tables.mutable.memTable);
-            }
-            catch (IOException e) {
-                LOGGER.error("{} error in closing", this, e);
-            }
-            finally {
-                tables.mutable.releaseAll();
-            }
+            closeMemAndLog(tables.mutable, versions);
 
             if (tables.immutableExists()) {
-                tables.immutable.acquireAll();
-                try {
-                    Closeables.closeIO(tables.immutable.log, tables.immutable.memTable);
-                }
-                catch (IOException e) {
-                    LOGGER.error("{} error in closing", this, e);
-                }
-                finally {
-                    tables.immutable.releaseAll();
-                }
+                closeMemAndLog(tables.immutable, versions);
             }
+
+            Closeables.closeQuietly(versions);
         }
         finally {
             try {
@@ -365,6 +347,37 @@ public class DbImpl
                 LOGGER.warn("{} error in closing", this, e);
             }
         }
+    }
+
+    private void closeMemAndLog(MemTableAndLog memlog, VersionSet versions)
+    {
+        memlog.acquireAll();
+        try {
+            try {
+                if (memlog.isUnpersisted()) {
+                    VersionEdit edit = new VersionEdit();
+                    writeLevel0Table(memlog.memTable, edit, versions.getCurrent());
+
+                    edit.setPreviousLogNumber(0);
+                    edit.setLogNumber(memlog.log.getFileNumber());
+                    versions.logAndApply(edit);
+                }
+            }
+            finally {
+                Closeables.closeIO(memlog.log, memlog.memTable);
+            }
+            if (memlog.isUnpersisted()) {
+                // delete log as we've already flushed
+                options.env().deleteFile(FileInfo.log(dbHandle, memlog.log.getFileNumber()));
+            }
+        }
+        catch (IOException e) {
+            LOGGER.error("{} error in closing", this, e);
+        }
+        finally {
+            memlog.releaseAll();
+        }
+
     }
 
     @Override
@@ -856,15 +869,20 @@ public class DbImpl
                 sequenceEnd = sequenceBegin + sequenceDelta - 1;
 
                 // Log write
-                ByteBuffer record = writeWriteBatch(updates, sequenceBegin);
-                try {
-                    memlog.log.addRecord(record, writeOptions.sync());
+                if (!writeOptions.disableLog()) {
+                    ByteBuffer record = writeWriteBatch(updates, sequenceBegin);
+                    try {
+                        memlog.log.addRecord(record, writeOptions.sync());
+                    }
+                    catch (IOException e) {
+                        throw Throwables.propagate(e);
+                    }
+                    finally {
+                        options.memoryManager().free(record);
+                    }
                 }
-                catch (IOException e) {
-                    throw Throwables.propagate(e);
-                }
-                finally {
-                    options.memoryManager().free(record);
+                else {
+                    memlog.markUnpersisted();
                 }
 
                 // Update memtable
@@ -1691,6 +1709,7 @@ public class DbImpl
         public final MemTable memTable;
         public final LogWriter log;
         private static final int maxPermits = Integer.MAX_VALUE;
+        private boolean requiresFlush = false;
 
         // serves as read/write lock with slightly more flexibility
         private final Semaphore semaphore;
@@ -1737,6 +1756,18 @@ public class DbImpl
         {
             this.semaphore.release(maxPermits - 1);
         }
+
+        public void markUnpersisted()
+        {
+            this.requiresFlush = true;
+        }
+
+        public boolean isUnpersisted()
+        {
+            // no need for volatile as this is read after semaphore acquire
+            return this.requiresFlush;
+        }
+
     }
 
     private static class MemTables

@@ -168,10 +168,11 @@ class OptionsUtil
 
     }
 
-    static String toString(Options opt)
+    static String toString(Object opt)
     {
-        StringBuilder sb = new StringBuilder("Options [");
-        for (final Field f : opt.getClass().getDeclaredFields()) {
+        Class<?> clazz = opt.getClass();
+        StringBuilder sb = new StringBuilder(clazz.getSimpleName()).append(" [");
+        for (final Field f : clazz.getDeclaredFields()) {
             final int mods = f.getModifiers();
             if (Modifier.isFinal(mods) || Modifier.isStatic(mods)) {
                 continue;
