@@ -39,7 +39,6 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -60,7 +59,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBComparator;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.Env.DelegateEnv;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.FileInfo.FileType;
 import org.iq80.leveldb.MemoryManager;
@@ -70,7 +71,9 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.impl.FileSystemEnv.DBPath;
 import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.FileUtils;
@@ -104,11 +107,16 @@ public class DbImplTest
 
     private String testName;
 
+    public Env getEnv()
+    {
+        return new FileChannelEnv(new StrictMemoryManager());
+    }
+
     @Test
     public void testBackgroundCompaction()
             throws Exception
     {
-        try (StrictEnv env = new StrictEnv()) {
+        try (StrictEnv env = new StrictEnv(getEnv())) {
             Options options = Options.make().env(env).memoryManager(env.strictMemory);
             options.maxOpenFiles(100);
             options.createIfMissing(true);
@@ -130,7 +138,7 @@ public class DbImplTest
     public void testCompactionsOnBigDataSet()
             throws Exception
     {
-        try (StrictEnv env = new StrictEnv()) {
+        try (StrictEnv env = new StrictEnv(getEnv())) {
             Options options = Options.make().env(env).memoryManager(env.strictMemory);
             options.createIfMissing(true);
             try (DbImpl db = new DbImpl(options, databaseDir)) {
@@ -158,7 +166,7 @@ public class DbImplTest
     public void testEmptyBatch()
             throws Exception
     {
-        try (StrictEnv env = new StrictEnv()) {
+        try (StrictEnv env = new StrictEnv(getEnv())) {
             // open new db
             Options options = Options.make().createIfMissing(true).env(env).memoryManager(env.strictMemory);
             DB db = new Iq80DBFactory().open(databaseDir, options);
@@ -237,10 +245,13 @@ public class DbImplTest
             throws IOException
     {
         byte[] k1 = new byte[] { 1, 2, 3, 4 }, v1 = new byte[]{2, 3, 4, 5}, k2 = new byte[] { 5, 6, 7, 8 }, v2 = new byte[]{6, 7, 8, 9};
+        Env fileSystemCheck = getEnv();
+        Assert.assertTrue(fileSystemCheck instanceof FileSystemEnv, "test depends on file system functionality");
+
         DBHandle handle;
-        try (StrictEnv env = new StrictEnv();
+        try (StrictEnv env = new StrictEnv(getEnv());
                 DbImpl db = new DbImpl(Options.make().env(env),
-                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+                        handle = env.createDBDir(FileSystemEnv.handle(databaseDir.toPath())))) {
             final long size1 = getLogFileSize(env, handle);
             db.put(k1, v1, WriteOptions.make().sync(true));
             final long size2 = getLogFileSize(env, handle);
@@ -248,9 +259,8 @@ public class DbImplTest
             Assert.assertEquals(db.get(k1), v1);
         }
 
-        try (StrictEnv env = new StrictEnv();
-                DbImpl db = new DbImpl(Options.make().env(env),
-                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+        try (StrictEnv env = new StrictEnv(getEnv());
+                DbImpl db = new DbImpl(Options.make().env(env), handle = env.createDBDir(handle))) {
             Assert.assertEquals(db.get(k1), v1);
 
             final long size1 = getLogFileSize(env, handle);
@@ -260,14 +270,13 @@ public class DbImplTest
             Assert.assertEquals(db.get(k2), v2);
         }
 
-        try (StrictEnv env = new StrictEnv();
-                DbImpl db = new DbImpl(Options.make().env(env),
-                        handle = env.createDBDir(StrictEnv.handle(databaseDir.toPath())))) {
+        try (StrictEnv env = new StrictEnv(getEnv());
+                DbImpl db = new DbImpl(Options.make().env(env), env.createDBDir(handle))) {
             Assert.assertEquals(db.get(k2), v2, "log disabled value should persist across close");
         }
     }
     
-    private static long getLogFileSize(StrictEnv env, DBHandle handle)
+    private static long getLogFileSize(DelegateEnv env, DBHandle handle)
             throws IOException
     {
         FluentIterable<FileInfo> logs = FluentIterable.from(env.getOwnedFiles(handle)).filter(new Predicate<FileInfo>()
@@ -279,7 +288,7 @@ public class DbImplTest
             }
         });
         Assert.assertEquals(logs.size(), 1);
-        return Files.size(env.getPath(logs.first().get()));
+        return Files.size(FileSystemEnv.getPath((DBPath) handle, logs.first().get(), false));
     }
 
     @Test
@@ -1344,14 +1353,13 @@ public class DbImplTest
                         + allocStackHolder + ", " + freeStackHolder + "]";
             }
         }
-
     }
 
     public static class StrictEnv
-            extends FileChannelEnv
+            extends DelegateEnv
             implements Closeable
     {
-        private final ConcurrentMap<? super FileChannelFile, MetaData> openMap = new ConcurrentHashMap<FileChannelFile, MetaData>();
+        private final ConcurrentMap<Closeable, MetaData> openMap = new ConcurrentHashMap<>();
         public final StrictMemoryManager strictMemory;
 
         private static class MetaData
@@ -1371,127 +1379,134 @@ public class DbImplTest
 
         public StrictEnv(boolean legacySST)
         {
-            super(new StrictMemoryManager(), legacySST);
-            this.strictMemory = (StrictMemoryManager) super.memory;
+            this(new FileChannelEnv(new StrictMemoryManager(), legacySST));
         }
 
-        private static <T> T add(Map<? super T, MetaData> set, T obj)
+        public StrictEnv(Env env)
         {
-            set.put(obj, new MetaData(new Throwable()));
+            super(env);
+            if (env instanceof FileChannelEnv && ((FileChannelEnv) env).memory instanceof StrictMemoryManager) {
+                this.strictMemory = (StrictMemoryManager) ((FileChannelEnv) env).memory;
+            }
+            else {
+                this.strictMemory = new StrictMemoryManager();
+            }
+        }
+
+        private <T extends Closeable> T add(T obj)
+        {
+            openMap.put(obj, new MetaData(new Throwable()));
             return obj;
         }
 
+        private <T extends Closeable> void remove(T obj)
+        {
+            openMap.remove(obj);
+        }
+
         @Override
-        public FileChannelConcurrentWriteFile openMultiWriteFile(Path path)
+        public ConcurrentWriteFile openMultiWriteFile(FileInfo info)
                 throws IOException
         {
-            return add(openMap, new FileChannelConcurrentWriteFile(path)
+            return add(new DelegateConcurrentWriteFile(super.openMultiWriteFile(info))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
             });
         }
 
         @Override
-        public FileChannelSequentialWriteFile openSequentialWriteFile(Path path)
+        public SequentialWriteFile openSequentialWriteFile(FileInfo info)
                 throws IOException
         {
-            return add(openMap, new FileChannelSequentialWriteFile(path)
+            return add(new DelegateSequentialWriteFile(super.openSequentialWriteFile(info))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
             });
         }
 
         @Override
-        public FileChannelTemporaryWriteFile openTemporaryWriteFile(Path temp, Path target)
+        public TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
                 throws IOException
         {
-            return add(openMap, new FileChannelTemporaryWriteFile(temp, target)
+            return add(new DelegateTemporaryWriteFile(super.openTemporaryWriteFile(temp, target))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
             });
         }
 
         @Override
-        public FileChannelReadFile openSequentialReadFile(Path path)
+        public SequentialReadFile openSequentialReadFile(FileInfo info)
                 throws IOException
         {
-            return add(openMap, new FileChannelReadFile(path, super.memory)
+            return add(new DelegateSequentialReadFile(super.openSequentialReadFile(info))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
             });
         }
 
         @Override
-        public FileChannelReadFile openRandomReadFile(Path path)
+        public RandomReadFile openRandomReadFile(FileInfo info)
                 throws IOException
         {
-            return add(openMap, new FileChannelReadFile(path, super.memory)
+            return add(new DelegateRandomReadFile(super.openRandomReadFile(info))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
             });
         }
 
         @Override
-        public LockFile lockFile(Path path)
+        public LockFile lockFile(FileInfo info)
                 throws IOException
         {
-            FileChannelLockFile lockFile = add(openMap, new FileChannelLockFile(path)
+            return add(new DelegateLockFile(super.lockFile(info))
             {
                 @Override
                 public void close()
                         throws IOException
                 {
                     super.close();
-                    openMap.remove(this);
+                    remove(this);
                 }
-
             });
-            if (lockFile.isValid()) {
-                return lockFile;
-            }
-            else {
-                lockFile.close();
-                return null;
-            }
         }
 
         @Override
         public void close()
                 throws IOException
         {
-            strictMemory.close();
+            Closeables.closeIO(strictMemory);
             if (!openMap.isEmpty()) {
-                Entry<? super FileChannelFile, MetaData> entry = openMap.entrySet().iterator().next();
+                Entry<? extends Closeable, MetaData> entry = openMap.entrySet().iterator().next();
                 throw new IllegalStateException(String.format("%d file(s) never closed; %s:",
                         openMap.entrySet().size(), entry.getKey()), entry.getValue().openStackHolder);
             }
@@ -1511,7 +1526,7 @@ public class DbImplTest
             this.options = options.verifyChecksums(true)
                     .createIfMissing(true)
                     .errorIfExists(true)
-                    .env(env = new StrictEnv())
+                    .env(env = new StrictEnv(getEnv()))
                     .memoryManager(env.strictMemory);
             this.databaseDir = databaseDir;
             this.db = new DbImpl(options, databaseDir);

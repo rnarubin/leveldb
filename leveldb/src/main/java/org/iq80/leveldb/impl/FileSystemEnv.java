@@ -51,7 +51,12 @@ public abstract class FileSystemEnv
     protected Path getPath(FileInfo fileInfo, boolean legacy)
     {
         assert fileInfo.getOwner() instanceof DBPath;
-        return ((DBPath) fileInfo.getOwner()).path.resolve(getFileName(fileInfo, legacy));
+        return getPath((DBPath) fileInfo.getOwner(), fileInfo, legacy);
+    }
+
+    public static Path getPath(DBPath handle, FileInfo fileInfo, boolean legacy)
+    {
+        return handle.path.resolve(getFileName(fileInfo, legacy));
     }
 
     @SuppressWarnings("deprecation")

@@ -115,7 +115,7 @@ public class DbImpl
         public void uncaughtException(Thread t, Throwable e)
         {
             // todo need a real UncaughtExceptionHandler
-            LOGGER.error("{} error in background thread {}", DbImpl.this, e);
+            LOGGER.error("{} error in background thread", DbImpl.this, e);
             backgroundException = e;
         }
     };
@@ -141,7 +141,6 @@ public class DbImpl
             throws IOException
     {
         Preconditions.checkNotNull(userOptions, "options is null");
-        Preconditions.checkNotNull(handle, "databaseHandle is null");
         this.userOptions = new UserOptions(Options.copy(userOptions));
         this.options = sanitizeOptions(userOptions);
         Env env = this.options.env();
@@ -176,7 +175,7 @@ public class DbImpl
             // lock the database dir
             FileInfo lockFile = FileInfo.lock(dbHandle);
             dbLock = env.lockFile(lockFile);
-            if (dbLock == null) {
+            if (!dbLock.isValid()) {
                 throw new IOException("Unable to acquire lock on " + lockFile);
             }
 
@@ -1341,7 +1340,9 @@ public class DbImpl
                     }
                     iterator.next();
                 }
-                compactionState.currentLargest = compactionState.currentLargest.heapCopy();
+                if (compactionState.currentLargest != null) {
+                    compactionState.currentLargest = compactionState.currentLargest.heapCopy();
+                }
             }
 
             if (shuttingDown.get()) {
@@ -1355,8 +1356,7 @@ public class DbImpl
             try {
                 cleanupCompaction(compactionState);
             }
-            catch (Throwable cleanupT) {
-                throw cleanupT;
+            catch (Throwable ignored) {
             }
             throw t;
         }

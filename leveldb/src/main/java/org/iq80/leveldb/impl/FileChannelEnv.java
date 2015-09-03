@@ -93,14 +93,7 @@ public class FileChannelEnv
     public LockFile lockFile(Path path)
             throws IOException
     {
-        FileChannelLockFile lockFile = new FileChannelLockFile(path);
-        if (lockFile.isValid()) {
-            return lockFile;
-        }
-        else {
-            lockFile.close();
-            return null;
-        }
+        return new FileChannelLockFile(path);
     }
 
     protected static abstract class FileChannelFile
@@ -162,6 +155,7 @@ public class FileChannelEnv
             }
         }
 
+        @Override
         public boolean isValid()
         {
             return acquired && fileLock.isValid();
