@@ -499,36 +499,37 @@ public class DBIteratorTest
     {        if(db != null){
             db.close();
         }
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        ReadOptions ro = ReadOptions.make();
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.next();
             Assert.fail();
         }
         catch (IllegalStateException expected) {}
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.prev();
             Assert.fail();
         }
         catch (IllegalStateException expected) {
         }
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.hasNext();
             Assert.fail();
         }
         catch (IllegalStateException expected) {
         }
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.hasPrev();
             Assert.fail();
         }
         catch (IllegalStateException expected) {
         }
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.peekNext();
             Assert.fail();
         }
         catch (IllegalStateException expected) {
         }
-        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator()) {
+        try (DB db = Iq80DBFactory.factory.open(tempDir, options); DBIterator iter = db.iterator(ro)) {
             iter.peekPrev();
             Assert.fail();
         }
