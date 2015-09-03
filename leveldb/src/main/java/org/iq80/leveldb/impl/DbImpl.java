@@ -913,7 +913,9 @@ public class DbImpl
     @Override
     public SeekingIteratorAdapter iterator()
     {
-        return iterator(DEFAULT_READ_OPTIONS);
+        SeekingIteratorAdapter iter = iterator(DEFAULT_READ_OPTIONS);
+        iter.seekToFirst();
+        return iter;
     }
 
     public SeekingIteratorAdapter iterator(ReadOptions readOptions)

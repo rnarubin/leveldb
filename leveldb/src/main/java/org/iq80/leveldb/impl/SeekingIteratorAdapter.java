@@ -25,6 +25,7 @@ import org.iq80.leveldb.util.ByteBuffers;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -125,16 +126,12 @@ public class SeekingIteratorAdapter
     public static class DbEntry
             implements Entry<byte[], byte[]>
     {
-        private final ByteBuffer key;
-        private final ByteBuffer value;
         private final byte[] k, v;
 
         public DbEntry(ByteBuffer key, ByteBuffer value)
         {
             Preconditions.checkNotNull(key, "key is null");
             Preconditions.checkNotNull(value, "value is null");
-            this.key = key;
-            this.value = value;
             this.k = ByteBuffers.toArray(ByteBuffers.duplicate(key));
             this.v = ByteBuffers.toArray(ByteBuffers.duplicate(value));
         }
@@ -158,20 +155,34 @@ public class SeekingIteratorAdapter
         }
 
         @Override
-        public boolean equals(Object object)
+        public boolean equals(Object obj)
         {
-            if (object instanceof Entry) {
-                Entry<?, ?> that = (Entry<?, ?>) object;
-                return key.equals(that.getKey()) &&
-                        value.equals(that.getValue());
-            }
-            return false;
+            if (this == obj)
+                return true;
+            if (obj == null)
+                return false;
+            if (!(obj instanceof Entry))
+                return false;
+
+            Entry<?, ?> that = (Entry<?, ?>) obj;
+            if (!(that.getKey() instanceof byte[]) || !(that.getValue() instanceof byte[]))
+                return false;
+
+            if (!Arrays.equals(k, (byte[]) that.getKey()))
+                return false;
+            if (!Arrays.equals(v, (byte[]) that.getValue()))
+                return false;
+            return true;
         }
 
         @Override
         public int hashCode()
         {
-            return key.hashCode() ^ value.hashCode();
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + Arrays.hashCode(k);
+            result = prime * result + Arrays.hashCode(v);
+            return result;
         }
 
         /**
@@ -180,7 +191,7 @@ public class SeekingIteratorAdapter
         @Override
         public String toString()
         {
-            return key + "=" + value;
+            return Arrays.toString(k) + "=" + Arrays.toString(v);
         }
     }
 }
