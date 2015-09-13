@@ -25,7 +25,7 @@ import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.iq80.leveldb.impl.DbImplTest.StrictMemoryManager;
-import org.iq80.leveldb.impl.FileSystemEnv;
+import org.iq80.leveldb.impl.PathEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
@@ -223,7 +223,7 @@ public abstract class TableTest
             getEnv().deleteFile(fileInfo);
         }
         Files.createFile(dbpath.resolve("000042.ldb"));
-        fileInfo = FileInfo.table(FileSystemEnv.handle(dbpath), 42);
+        fileInfo = FileInfo.table(PathEnv.handle(dbpath), 42);
     }
 
     @AfterMethod

@@ -34,7 +34,7 @@ public final class Logs
     public static LogWriter createLogWriter(FileInfo fileInfo, long fileNumber, Options options)
             throws IOException
     {
-        return new LogWriter(options.env().openMultiWriteFile(fileInfo), fileNumber);
+        return new LogWriter(options.env().openConcurrentWriteFile(fileInfo), fileNumber);
     }
 
     public static int getChunkChecksum(int chunkTypeId, ByteBuffer data)

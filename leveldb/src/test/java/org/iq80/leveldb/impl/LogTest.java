@@ -268,7 +268,7 @@ public abstract class LogTest
     public void setUp()
             throws Exception
     {
-        filePath = FileInfo.log(FileSystemEnv.handle(Files.createTempDirectory("leveldb")), 42);
+        filePath = FileInfo.log(PathEnv.handle(Files.createTempDirectory("leveldb")), 42);
         writer = Logs.createLogWriter(filePath, 42, getOptions());
     }
 

@@ -71,7 +71,7 @@ import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.Snapshot;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.impl.FileSystemEnv.DBPath;
+import org.iq80.leveldb.impl.PathEnv.DBPath;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
@@ -246,12 +246,12 @@ public class DbImplTest
     {
         byte[] k1 = new byte[] { 1, 2, 3, 4 }, v1 = new byte[]{2, 3, 4, 5}, k2 = new byte[] { 5, 6, 7, 8 }, v2 = new byte[]{6, 7, 8, 9};
         Env fileSystemCheck = getEnv();
-        Assert.assertTrue(fileSystemCheck instanceof FileSystemEnv, "test depends on file system functionality");
+        Assert.assertTrue(fileSystemCheck instanceof PathEnv, "test depends on file system functionality");
 
         DBHandle handle;
         try (StrictEnv env = new StrictEnv(getEnv());
                 DbImpl db = new DbImpl(Options.make().env(env),
-                        handle = env.createDBDir(FileSystemEnv.handle(databaseDir.toPath())))) {
+                        handle = env.createDBDir(PathEnv.handle(databaseDir.toPath())))) {
             final long size1 = getLogFileSize(env, handle);
             db.put(k1, v1, WriteOptions.make().sync(true));
             final long size2 = getLogFileSize(env, handle);
@@ -288,7 +288,7 @@ public class DbImplTest
             }
         });
         Assert.assertEquals(logs.size(), 1);
-        return Files.size(FileSystemEnv.getPath((DBPath) handle, logs.first().get(), false));
+        return Files.size(PathEnv.getPath((DBPath) handle, logs.first().get(), false));
     }
 
     @Test
@@ -1405,10 +1405,10 @@ public class DbImplTest
         }
 
         @Override
-        public ConcurrentWriteFile openMultiWriteFile(FileInfo info)
+        public ConcurrentWriteFile openConcurrentWriteFile(FileInfo info)
                 throws IOException
         {
-            return add(new DelegateConcurrentWriteFile(super.openMultiWriteFile(info))
+            return add(new DelegateConcurrentWriteFile(super.openConcurrentWriteFile(info))
             {
                 @Override
                 public void close()
