@@ -17,7 +17,6 @@ package org.iq80.leveldb;
 
 import java.io.Closeable;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
@@ -186,14 +185,14 @@ public interface Env {
        */
       long startPosition();
 
-      void put(byte b) throws IOException;
+      void put(byte b);
 
-      void put(ByteBuffer b) throws IOException;
+      void put(ByteBuffer b);
 
       /**
        * Must be written in {@link java.nio.ByteOrder.LITTLE_ENDIAN LITTLE_ENDIAN} byte order
        */
-      void putInt(int i) throws IOException;
+      void putInt(int i);
 
       /**
        * If any data has been logically written to the file, but not yet persisted to the underlying
@@ -216,16 +215,11 @@ public interface Env {
   public interface SequentialWriteFile extends AsynchronousCloseable {
 
     /**
-     * Writes the given data buffer to the file's current position.
+     * Appends the given data buffer to the file
      *
-     * @return the number of bytes written
+     * @return the position at which the data was written
      */
-    CompletionStage<Integer> write(ByteBuffer src);
-
-    /**
-     * @return The current size of this file, measured in bytes
-     */
-    long size() throws IOException;
+    CompletionStage<Long> write(ByteBuffer src);
 
     /**
      * If any data has been logically written to the file, but not yet persisted to the underlying
@@ -260,7 +254,7 @@ public interface Env {
     /**
      * Skip {@code n} bytes in the file
      */
-    CompletionStage<Void> skip(long n) throws IOException;
+    CompletionStage<Void> skip(long n);
   }
 
   /**
@@ -278,12 +272,12 @@ public interface Env {
      * @return a buffer containing the bytes read, possibly zero, or <tt>null</tt> if the given
      *         position is greater than or equal to the file's current size
      */
-    CompletionStage<ByteBuffer> read(long position, int length) throws IOException;
+    CompletionStage<ByteBuffer> read(long position, int length);
 
     /**
      * @return The current size of this file, measured in bytes
      */
-    long size() throws IOException;
+    long size();
   }
 
   /**
@@ -405,17 +399,17 @@ public interface Env {
     }
 
     @Override
-    public void put(final byte b) throws IOException {
+    public void put(final byte b) {
       delegate.put(b);
     }
 
     @Override
-    public void put(final ByteBuffer b) throws IOException {
+    public void put(final ByteBuffer b) {
       delegate.put(b);
     }
 
     @Override
-    public void putInt(final int i) throws IOException {
+    public void putInt(final int i) {
       delegate.putInt(i);
     }
 
@@ -446,12 +440,12 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<Integer> write(final ByteBuffer src) {
+    public CompletionStage<Long> write(final ByteBuffer src) {
       return delegate.write(src);
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() {
       return delegate.size();
     }
 
@@ -482,7 +476,7 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<Void> skip(final long n) throws IOException {
+    public CompletionStage<Void> skip(final long n) {
       return delegate.skip(n);
     }
   }
@@ -503,13 +497,12 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<ByteBuffer> read(final long position, final int length)
-        throws IOException {
+    public CompletionStage<ByteBuffer> read(final long position, final int length) {
       return delegate.read(position, length);
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() {
       return delegate.size();
     }
   }
@@ -525,12 +518,12 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<Integer> write(final ByteBuffer src) {
+    public CompletionStage<Long> write(final ByteBuffer src) {
       return delegate.write(src);
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() {
       return delegate.size();
     }
 

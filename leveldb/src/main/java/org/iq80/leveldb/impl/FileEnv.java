@@ -235,41 +235,6 @@ public class FileEnv extends PathEnv {
     }
   }
 
-  private static <T> CompletionStage<T> asyncWrite(final AsynchronousFileChannel channel,
-      final ByteBuffer src, final long position, final Function<Integer, T> getResult) {
-    final CompletableFuture<T> f = new CompletableFuture<>();
-    channel.write(src, position, null, new CompletionHandler<Integer, Void>() {
-      @Override
-      public void completed(final Integer result, final Void attachment) {
-        f.complete(getResult.apply(result));
-      }
-
-      @Override
-      public void failed(final Throwable exc, final Void attachment) {
-        f.completeExceptionally(exc);
-      }
-    });
-    return f;
-  }
-
-  private static <T> CompletionStage<T> asyncRead(final AsynchronousFileChannel channel,
-      final ByteBuffer dst, final long position, final Function<ByteBuffer, T> getResult) {
-    final CompletableFuture<T> f = new CompletableFuture<>();
-    channel.read(dst, position, null, new CompletionHandler<Integer, Void>() {
-      @Override
-      public void completed(final Integer length, final Void attachment) {
-        dst.limit(dst.position() + length);
-        f.complete(getResult.apply(dst));
-      }
-
-      @Override
-      public void failed(final Throwable exc, final Void attachment) {
-        f.completeExceptionally(exc);
-      }
-    });
-    return f;
-  }
-
   private final class SequentialWriteFileImpl extends AsyncFile implements SequentialWriteFile {
     private final AtomicLong position = new AtomicLong(0);
 
@@ -278,13 +243,21 @@ public class FileEnv extends PathEnv {
     }
 
     @Override
-    public CompletionStage<Integer> write(final ByteBuffer src) {
-      return asyncWrite(channel, src, position.getAndAdd(src.remaining()), Function.identity());
-    }
+    public CompletionStage<Long> write(final ByteBuffer src) {
+      final CompletableFuture<Long> f = new CompletableFuture<>();
+      final long pos = position.getAndAdd(src.remaining());
+      channel.write(src, pos, null, new CompletionHandler<Integer, Void>() {
+        @Override
+        public void completed(final Integer result, final Void attachment) {
+          f.complete(pos);
+        }
 
-    @Override
-    public long size() throws IOException {
-      return position.get();
+        @Override
+        public void failed(final Throwable exc, final Void attachment) {
+          f.completeExceptionally(exc);
+        }
+      });
+      return f;
     }
 
     @Override
@@ -302,13 +275,26 @@ public class FileEnv extends PathEnv {
     }
 
     @Override
-    public CompletionStage<ByteBuffer> read(final long position, final int length)
-        throws IOException {
-      return asyncRead(channel, ByteBuffer.allocateDirect(length), position, Function.identity());
+    public CompletionStage<ByteBuffer> read(final long position, final int length) {
+      final CompletableFuture<ByteBuffer> f = new CompletableFuture<>();
+      final ByteBuffer dst = ByteBuffer.allocateDirect(length);
+      channel.read(dst, position, null, new CompletionHandler<Integer, Void>() {
+        @Override
+        public void completed(final Integer length, final Void attachment) {
+          dst.flip();
+          f.complete(dst);
+        }
+
+        @Override
+        public void failed(final Throwable exc, final Void attachment) {
+          f.completeExceptionally(exc);
+        }
+      });
+      return f;
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() {
       return fileSize;
     }
   }
@@ -322,11 +308,24 @@ public class FileEnv extends PathEnv {
 
     @Override
     public CompletionStage<Integer> read(final ByteBuffer dst) {
-      return asyncRead(channel, dst, position.getAndAdd(dst.remaining()), b -> b.remaining());
+      final CompletableFuture<Integer> f = new CompletableFuture<>();
+      channel.read(dst, position.getAndAdd(dst.remaining()), null,
+          new CompletionHandler<Integer, Void>() {
+            @Override
+            public void completed(final Integer length, final Void attachment) {
+              f.complete(length);
+            }
+
+            @Override
+            public void failed(final Throwable exc, final Void attachment) {
+              f.completeExceptionally(exc);
+            }
+          });
+      return f;
     }
 
     @Override
-    public CompletionStage<Void> skip(final long n) throws IOException {
+    public CompletionStage<Void> skip(final long n) {
       position.addAndGet(n);
       return CompletableFuture.completedFuture(null);
     }
@@ -342,13 +341,8 @@ public class FileEnv extends PathEnv {
     }
 
     @Override
-    public CompletionStage<Integer> write(final ByteBuffer src) {
+    public CompletionStage<Long> write(final ByteBuffer src) {
       return tempFile.write(src);
-    }
-
-    @Override
-    public long size() throws IOException {
-      return tempFile.size();
     }
 
     @Override
@@ -426,26 +420,39 @@ public class FileEnv extends PathEnv {
       }
 
       @Override
-      public void put(final byte b) throws IOException {
+      public void put(final byte b) {
         buffer.put(b);
       }
 
       @Override
-      public void putInt(final int b) throws IOException {
+      public void putInt(final int b) {
         buffer.putInt(b);
       }
 
       @Override
-      public void put(final ByteBuffer b) throws IOException {
+      public void put(final ByteBuffer b) {
         buffer.put(b);
       }
 
       private CompletionStage<Void> flush() {
-        return buffer.flip().hasRemaining()
-            ? asyncWrite(channel, buffer, regionPosition, ignored -> {
-              buffer.clear();
-              return null;
-            }) : CompletableFuture.completedFuture(null);
+        return buffer.flip().hasRemaining() ? asyncWrite()
+            : CompletableFuture.completedFuture(null);
+      }
+
+      private CompletionStage<Void> asyncWrite() {
+        final CompletableFuture<Void> f = new CompletableFuture<>();
+        channel.write(buffer, regionPosition, null, new CompletionHandler<Integer, Void>() {
+          @Override
+          public void completed(final Integer result, final Void attachment) {
+            f.complete(null);
+          }
+
+          @Override
+          public void failed(final Throwable exc, final Void attachment) {
+            f.completeExceptionally(exc);
+          }
+        });
+        return f;
       }
 
       @Override
