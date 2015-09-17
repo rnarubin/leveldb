@@ -94,16 +94,10 @@ public class TableBuilder implements Closeable {
 
     final int estimatedBlockSize = dataBlockBuilder.currentSizeEstimate();
     return estimatedBlockSize >= blockSize
-        ? flush(state).thenApply(
+        ? writeBlock(dataBlockBuilder).thenApply(
             handle -> new BuilderState(Optional.of(handle), handle.getEndPosition(), key))
         : CompletableFuture
             .completedFuture(new BuilderState(Optional.empty(), state.position, key));
-  }
-
-  private CompletionStage<PositionedHandle> flush(final BuilderState state) {
-    assert(!state.pendingHandle.isPresent()) : "Table already has a pending index entry to flush";
-
-    return writeBlock(dataBlockBuilder);
   }
 
   private CompletionStage<PositionedHandle> writeBlock(final BlockBuilder blockBuilder) {
@@ -161,8 +155,8 @@ public class TableBuilder implements Closeable {
   public CompletionStage<Long> finish(final BuilderState state) {
 
     // flush current data block
-    final CompletionStage<?> flush =
-        dataBlockBuilder.isEmpty() ? CompletableFuture.completedFuture(null) : flush(state);
+    final CompletionStage<?> flush = dataBlockBuilder.isEmpty()
+        ? CompletableFuture.completedFuture(null) : writeBlock(dataBlockBuilder);
 
     // TODO filters in meta block
     // TODO(postrelease): Add stats and other meta blocks

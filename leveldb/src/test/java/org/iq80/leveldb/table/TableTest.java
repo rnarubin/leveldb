@@ -16,34 +16,30 @@ package org.iq80.leveldb.table;
 
 import static java.util.Arrays.asList;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 
 import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.Env;
-import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.impl.FileEnv;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.TableBuilder.BuilderState;
+import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
+import org.iq80.leveldb.util.EnvDependentTest;
+import org.iq80.leveldb.util.FileEnvTestProvider;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
 import org.testng.Assert;
@@ -51,26 +47,19 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.Maps;
+public abstract class TableTest extends EnvDependentTest {
 
-public abstract class TableTest {
   private static final DBBufferComparator byteCompare = new BytewiseComparator();
   private FileInfo fileInfo;
-  private Env env;
-
-  protected abstract Entry<? extends Env, ? extends DBHandle> createTempDB() throws Exception;
 
   @BeforeMethod
   public void setUp() throws Exception {
-    final Entry<? extends Env, ? extends DBHandle> db = createTempDB();
-    env = db.getKey();
-    fileInfo = FileInfo.table(db.getValue(), 42);
+    fileInfo = FileInfo.table(getHandle(), 42);
   }
 
   private void clearFile() throws InterruptedException, ExecutionException {
-    env.fileExists(fileInfo)
-        .thenCompose(
-            exists -> exists ? env.deleteFile(fileInfo) : CompletableFuture.completedFuture(null))
+    getEnv().fileExists(fileInfo).thenCompose(
+        exists -> exists ? getEnv().deleteFile(fileInfo) : CompletableFuture.completedFuture(null))
         .toCompletableFuture().get();
   }
 
@@ -81,14 +70,21 @@ public abstract class TableTest {
 
   @Test(expectedExceptions = IllegalArgumentException.class)
   public void testEmptyFile() throws Throwable {
+    // create empty file if it doesn't exist
+    getEnv().openSequentialWriteFile(fileInfo)
+        .thenCompose(
+            file -> CompletableFutures.composeUnconditionally(file.write(ByteBuffers.EMPTY_BUFFER),
+                ignored -> file.asyncClose()))
+        .toCompletableFuture().get();
+
     try {
-      env.openRandomReadFile(fileInfo)
-          .thenCompose(file -> CompletableFutures.composeUnconditionally(
-              Table.newTable(null, new InternalKeyComparator(byteCompare),
-                  Options.make().env(env).bufferComparator(byteCompare).verifyChecksums(true)
-                      .compression(Snappy.instance()))
-                  .thenCompose(Table::release),
-              voided -> file.asyncClose()))
+      getEnv().openRandomReadFile(fileInfo)
+          .thenCompose(
+              file -> CompletableFutures.composeUnconditionally(Table
+                  .newTable(file, new InternalKeyComparator(byteCompare),
+                      Options.make().env(getEnv()).bufferComparator(byteCompare)
+                          .verifyChecksums(true).compression(Snappy.instance()))
+              .thenCompose(Table::release), voided -> file.asyncClose()))
           .toCompletableFuture().get();
     } catch (final ExecutionException e) {
       throw e.getCause();
@@ -155,10 +151,10 @@ public abstract class TableTest {
     clearFile();
     final Options options = Options.make().blockSize(blockSize)
         .blockRestartInterval(blockRestartInterval).memoryManager(MemoryManagers.heap())
-        .compression(Snappy.instance()).bufferComparator(byteCompare).env(env);
+        .compression(Snappy.instance()).bufferComparator(byteCompare).env(getEnv());
 
     final SequentialWriteFile writeFile =
-        env.openSequentialWriteFile(fileInfo).toCompletableFuture().get();
+        getEnv().openSequentialWriteFile(fileInfo).toCompletableFuture().get();
 
     try (
         TableBuilder builder = new TableBuilder(options, writeFile,
@@ -176,8 +172,9 @@ public abstract class TableTest {
       last.thenCompose(builder::finish).toCompletableFuture().get();
     }
 
-    final Table table = Table.newTable(env.openRandomReadFile(fileInfo).toCompletableFuture().get(),
-        new InternalKeyComparator(byteCompare), options).toCompletableFuture().get();
+    final Table table =
+        Table.newTable(getEnv().openRandomReadFile(fileInfo).toCompletableFuture().get(),
+            new InternalKeyComparator(byteCompare), options).toCompletableFuture().get();
 
 
     try (TableIterator tableIter = table.retain().iterator()) {
@@ -228,26 +225,6 @@ public abstract class TableTest {
 
   }
 
-  public static class FileTableTest extends TableTest {
-
-    @Override
-    protected Entry<Env, DBHandle> createTempDB()
-        throws IOException, InterruptedException, ExecutionException {
-      final Path tempDir = Files.createTempDirectory("leveldb-testing");
-      final FileEnv env = new FileEnv();
-      return Maps.immutableEntry(env,
-          env.createDB(Optional.of(FileEnv.handle(tempDir))).toCompletableFuture().get());
-    }
-
+  public static class FileTableTest extends TableTest implements FileEnvTestProvider {
   }
-
-  /*
-   * public static class FileChannelTableTest extends TableTest { private StrictEnv env;
-   *
-   * @BeforeMethod public void setupEnv() { env = new StrictEnv(); }
-   *
-   * @AfterMethod public void tearDownEnv() throws IOException { env.close(); }
-   *
-   * @Override protected Env getEnv() { return env; } }
-   */
 }

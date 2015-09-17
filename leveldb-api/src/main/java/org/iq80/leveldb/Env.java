@@ -190,7 +190,7 @@ public interface Env {
       void put(ByteBuffer b);
 
       /**
-       * Must be written in {@link java.nio.ByteOrder.LITTLE_ENDIAN LITTLE_ENDIAN} byte order
+       * Must be written in {@link java.nio.ByteOrder#LITTLE_ENDIAN little-endian} byte order
        */
       void putInt(int i);
 
@@ -270,7 +270,8 @@ public interface Env {
      * @param length the number of bytes to read from the file; must be non-negative
      *
      * @return a buffer containing the bytes read, possibly zero, or <tt>null</tt> if the given
-     *         position is greater than or equal to the file's current size
+     *         position is greater than or equal to the file's current size. The buffer must be in
+     *         {@link java.nio.ByteOrder#LITTLE_ENDIAN little-endian} byte order
      */
     CompletionStage<ByteBuffer> read(long position, int length);
 
@@ -445,11 +446,6 @@ public interface Env {
     }
 
     @Override
-    public long size() {
-      return delegate.size();
-    }
-
-    @Override
     public CompletionStage<Void> sync() {
       return delegate.sync();
     }
@@ -520,11 +516,6 @@ public interface Env {
     @Override
     public CompletionStage<Long> write(final ByteBuffer src) {
       return delegate.write(src);
-    }
-
-    @Override
-    public long size() {
-      return delegate.size();
     }
 
     @Override

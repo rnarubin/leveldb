@@ -48,7 +48,7 @@ public final class CompletableFutures {
   public static <T> CompletionStage<Stream<T>> allOf(final Stream<CompletionStage<T>> stages) {
     @SuppressWarnings("unchecked")
     final CompletableFuture<T>[] futures =
-        (CompletableFuture<T>[]) stages.map(CompletionStage::toCompletableFuture).toArray();
+        stages.map(CompletionStage::toCompletableFuture).toArray(CompletableFuture[]::new);
 
     return CompletableFuture.allOf(futures)
         .thenApply(voided -> Stream.of(futures).map(CompletableFuture::join));

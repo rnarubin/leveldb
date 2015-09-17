@@ -113,11 +113,15 @@ public class FileEnv extends PathEnv {
 
   @Override
   protected CompletionStage<Void> deleteDB(final Path path, final Predicate<Path> fileNameFilter) {
+    // instead of blindly deleting the entire directory, delete all files owned by the DB; if the
+    // dir is empty after those deletions, delete the dir
     return submit(() -> new DirectoryIterator<Path>(path, fileNameFilter, Function.identity()))
         .thenCompose(iter -> CompletableFutures.composeUnconditionally(
             CompletableFutures.flatMapIterator(iter, this::deleteFile).thenCompose(
                 deletions -> CompletableFutures.allOf(deletions).thenApply(voided -> null)),
-            voided -> iter.asyncClose()));
+            voided -> iter.asyncClose()))
+        .thenCompose(voided -> submit(() -> !Files.list(path).findAny().isPresent())).thenCompose(
+            isEmpty -> isEmpty ? deleteFile(path) : CompletableFuture.completedFuture(null));
   }
 
   @Override
@@ -277,7 +281,7 @@ public class FileEnv extends PathEnv {
     @Override
     public CompletionStage<ByteBuffer> read(final long position, final int length) {
       final CompletableFuture<ByteBuffer> f = new CompletableFuture<>();
-      final ByteBuffer dst = ByteBuffer.allocateDirect(length);
+      final ByteBuffer dst = ByteBuffer.allocateDirect(length).order(ByteOrder.LITTLE_ENDIAN);
       channel.read(dst, position, null, new CompletionHandler<Integer, Void>() {
         @Override
         public void completed(final Integer length, final Void attachment) {

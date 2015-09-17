@@ -32,14 +32,11 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.ReferenceCounted;
 import org.iq80.leveldb.util.Snappy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
 
 public final class Table extends ReferenceCounted<Table>
     implements SeekingIterable<InternalKey, ByteBuffer> {
-  private static final Logger LOGGER = LoggerFactory.getLogger(Table.class);
 
   private final RandomReadFile file;
   private final Comparator<InternalKey> comparator;
@@ -119,7 +116,8 @@ public final class Table extends ReferenceCounted<Table>
           }
 
           return CompletableFuture.completedFuture(new Block<InternalKey>(
-              uncompressIfNecessary(readBuffer, blockTrailer.getCompressionId()).asReadOnlyBuffer(),
+              ByteBuffers
+                  .readOnly(uncompressIfNecessary(readBuffer, blockTrailer.getCompressionId())),
               comparator, buffer -> new EncodedInternalKey(buffer)));
         });
   }
