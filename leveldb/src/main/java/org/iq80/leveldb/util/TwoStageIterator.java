@@ -1,255 +1,140 @@
 /*
- * Copyright (C) 2011 the original author or authors.
- * See the notice.md file distributed with this work for additional
- * information regarding copyright ownership.
+ * Copyright (C) 2011 the original author or authors. See the notice.md file distributed with this
+ * work for additional information regarding copyright ownership.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License. You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License
+ * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+ * or implied. See the License for the specific language governing permissions and limitations under
+ * the License.
  */
 package org.iq80.leveldb.util;
 
-import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
-import org.iq80.leveldb.util.InternalIterator;
+import static org.iq80.leveldb.util.Iterators.Direction.NEXT;
+import static org.iq80.leveldb.util.Iterators.Direction.PREV;
 
-import java.io.Closeable;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
-import static org.iq80.leveldb.util.TwoStageIterator.CurrentOrigin.*;
+import org.iq80.leveldb.AsynchronousCloseable;
+import org.iq80.leveldb.SeekingAsynchronousIterator;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.util.Iterators.Direction;
 
-public abstract class TwoStageIterator<I extends ReverseSeekingIterator<InternalKey, V> & Closeable,
-                                       D extends ReverseSeekingIterator<InternalKey, ByteBuffer> & Closeable,
-                                       V>
-        extends AbstractReverseSeekingIterator<InternalKey, ByteBuffer>
-        implements InternalIterator
-{
-    private final I index;
-    private Closeable last;
-    private D current;
-    private CurrentOrigin currentOrigin = NONE;
-    private boolean closed;
+public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<InternalKey, V>, DataT extends SeekingAsynchronousIterator<InternalKey, ByteBuffer> & AsynchronousCloseable, V>
+    implements SeekingAsynchronousIterator<InternalKey, ByteBuffer>, AsynchronousCloseable {
+  private final IndexT index;
+  private DataT current;
+  private Direction currentOrigin;
 
-    static enum CurrentOrigin
-    {
-        /*
-         * reversable iterators don't have a consistent concept of a "current" item instead they exist in a position "between" next and prev. in order to make the BlockIterator 'current' work, we need
-         * to track from which direction it was initialized so that calls to advance the encompassing 'blockIterator' are consistent
-         */
-        PREV, NEXT, NONE
-        // a state of NONE should be interchangeable with current==NULL
+  public TwoStageIterator(final IndexT indexIterator) {
+    this.index = indexIterator;
+  }
+
+  @Override
+  public CompletionStage<Void> seekToFirst() {
+    final CompletionStage<Void> close = Closeables.asyncClose(current);
+    index.seekToFirst();
+    current = null;
+    return close;
+  }
+
+  @Override
+  public CompletionStage<Void> seekToEnd() {
+    final CompletionStage<Void> close = Closeables.asyncClose(current);
+    index.seekToEnd();
+    current = null;
+    return close;
+  }
+
+  @Override
+  public CompletionStage<Void> seek(final InternalKey targetKey) {
+    final CompletionStage<Void> close = Closeables.asyncClose(current);
+
+    index.seek(targetKey);
+    if (index.hasNext()) {
+      // seek the current iterator to the key
+      return getData(index.next().getValue()).thenCompose(newCurrent -> {
+        current = newCurrent;
+        currentOrigin = NEXT;
+        return newCurrent.seek(targetKey);
+      }).<Void, Void>thenCombine(close, (seeked, closed) -> null);
+    } else {
+      current = null;
+      return close;
     }
+  }
 
-    public TwoStageIterator(I indexIterator)
-    {
-        this.index = indexIterator;
+  @Override
+  public CompletionStage<Void> asyncClose() {
+    return Closeables.asyncClose(current);
+  }
+
+  @Override
+  public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
+    return current == null ? advanceIndex(NEXT) : advanceData(NEXT);
+  }
+
+  @Override
+  public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
+    return current == null ? advanceIndex(PREV) : advanceData(PREV);
+  }
+
+  private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> advanceData(
+      final Direction direction) {
+    assert current != null;
+    final CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> init =
+        direction.asyncAdvance(current);
+    return init.<Optional<Entry<InternalKey, ByteBuffer>>>thenCompose(entry -> {
+      if (entry.isPresent()) {
+        return init;
+      }
+      if (currentOrigin == opposite(direction)) {
+        direction.advance(index);
+      }
+      return current.asyncClose().thenCombine(advanceIndex(direction),
+          (closed, advanced) -> advanced);
+    });
+  }
+
+  private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> advanceIndex(
+      final Direction direction) {
+    return direction.hasMore(index)
+        ? getData(direction.advance(index).getValue()).thenCompose(newCurrent -> {
+          current = newCurrent;
+          currentOrigin = direction;
+          return direction.seekToEdge(current).thenCompose(voided -> advanceData(direction));
+        }) : CompletableFuture.completedFuture(Optional.empty());
+  }
+
+  private static Direction opposite(final Direction direction) {
+    switch (direction) {
+      case NEXT:
+        return PREV;
+      case PREV:
+        return NEXT;
+      default:
+        throw new IllegalArgumentException("Not a valid direction:" + direction);
     }
+  }
 
-    @Override
-    public void close()
-            throws IOException
-    {
-        if (!closed) {
-            closed = true;
-            Closeables.closeIO(last, current, index);
-        }
-    }
+  protected abstract CompletionStage<DataT> getData(V indexValue);
 
-    @Override
-    protected final void seekToFirstInternal()
-            throws IOException
-    {
-        // reset index to before first and clear the data iterator
-        index.seekToFirst();
-        Closeables.closeIO(last, current);
-        last = null;
-        current = null;
-        currentOrigin = NONE;
-    }
-
-    @Override
-    public final void seekToEndInternal()
-            throws IOException
-    {
-        index.seekToEnd();
-        Closeables.closeIO(last, current);
-        last = null;
-        current = null;
-        currentOrigin = NONE;
-    }
-
-    @Override
-    protected final void seekInternal(InternalKey targetKey)
-            throws IOException
-    {
-        // seek the index to the block containing the key
-        index.seek(targetKey);
-
-        Closeables.closeIO(last, current);
-        last = null;
-        // if indexIterator does not have a next, it mean the key does not exist in this iterator
-        if (index.hasNext()) {
-            // seek the current iterator to the key
-            current = getData(index.next().getValue());
-            currentOrigin = NEXT;
-            current.seek(targetKey);
-        }
-        else {
-            current = null;
-            currentOrigin = NONE;
-        }
-    }
-
-    @Override
-    protected final boolean hasNextInternal()
-            throws IOException
-    {
-        return currentHasNext();
-    }
-
-    @Override
-    protected final boolean hasPrevInternal()
-            throws IOException
-    {
-        return currentHasPrev();
-    }
-
-    @Override
-    protected final Entry<InternalKey, ByteBuffer> getNextElement()
-            throws IOException
-    {
-        if (current != null) {
-            Closeables.closeIO(last);
-            last = null;
-        }
-        // note: it must be here & not where 'current' is assigned,
-        // because otherwise we'll have called inputs.next() before throwing
-        // the first NPE, and the next time around we'll call inputs.next()
-        // again, incorrectly moving beyond the error.
-        return currentHasNext() ? current.next() : null;
-    }
-
-    @Override
-    protected final Entry<InternalKey, ByteBuffer> getPrevElement()
-            throws IOException
-    {
-        if (current != null) {
-            Closeables.closeIO(last);
-            last = null;
-        }
-        return currentHasPrev() ? current.prev() : null;
-    }
-
-    @Override
-    protected final Entry<InternalKey, ByteBuffer> peekInternal()
-            throws IOException
-    {
-        return currentHasNext() ? current.peek() : null;
-    }
-
-    @Override
-    protected final Entry<InternalKey, ByteBuffer> peekPrevInternal()
-            throws IOException
-    {
-        return currentHasPrev() ? current.peekPrev() : null;
-    }
-
-    private boolean currentHasNext()
-            throws IOException
-    {
-        boolean currentHasNext = false;
-        while (true) {
-            if (current != null) {
-                currentHasNext = current.hasNext();
-            }
-            if (!currentHasNext) {
-                if (currentOrigin == PREV) {
-                    // current came from PREV, so advancing indexIterator to next() must be safe
-                    // indeed, because alternating calls to prev() and next() must return the same item
-                    // current can be retrieved from next() when the origin is PREV
-                    index.next();
-                    // but of course we want to go beyond current to the next block
-                    // so we pass into the next if
-                }
-                if (index.hasNext()) {
-                    Closeables.closeIO(last);
-                    last = current;
-                    current = getData(index.next().getValue());
-                    currentOrigin = NEXT;
-                    current.seekToFirst();
-                }
-                else {
-                    if (current != null) {
-                        Closeables.closeIO(last);
-                        last = current;
-                        current = null;
-                        currentOrigin = NONE;
-                    }
-                    return false;
-                }
-            }
-            else {
-                return true;
-            }
-        }
-    }
-
-    private boolean currentHasPrev()
-            throws IOException
-    {
-        boolean currentHasPrev = false;
-        while (true) {
-            if (current != null) {
-                currentHasPrev = current.hasPrev();
-            }
-            if (!(currentHasPrev)) {
-                if (currentOrigin == NEXT) {
-                    index.prev();
-                }
-                if (index.hasPrev()) {
-                    Closeables.closeIO(last);
-                    last = current;
-                    current = getData(index.prev().getValue());
-                    currentOrigin = PREV;
-                    current.seekToEnd();
-                }
-                else {
-                    if (current != null) {
-                        Closeables.closeIO(last);
-                        last = current;
-                        current = null;
-                        currentOrigin = NONE;
-                    }
-                    return false;
-                }
-            }
-            else {
-                return true;
-            }
-        }
-    }
-    
-    protected abstract D getData(V indexValue);
-
-    @Override
-    public String toString()
-    {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("TwoStageIterator");
-        sb.append("{index=").append(index);
-        sb.append(", current=").append(current);
-        sb.append('}');
-        return sb.toString();
-    }
+  @Override
+  public String toString() {
+    final StringBuilder sb = new StringBuilder();
+    sb.append("TwoStageIterator");
+    sb.append("{index=").append(index);
+    sb.append(", current=").append(current);
+    sb.append('}');
+    return sb.toString();
+  }
 }

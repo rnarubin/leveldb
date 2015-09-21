@@ -114,7 +114,11 @@ public interface Env {
   /**
    * Returns an {@link AsynchronousIterator} over the files owned by the given database
    */
-  CompletionStage<? extends AsynchronousIterator<FileInfo>> getOwnedFiles(DBHandle handle);
+  CompletionStage<? extends AsynchronousCloseableIterator<FileInfo>> getOwnedFiles(DBHandle handle);
+
+  public interface AsynchronousCloseableIterator<T>
+      extends AsynchronousIterator<T>, AsynchronousCloseable {
+  }
 
   /**
    * Returns an executor which will be used by the application to run background and some
@@ -342,7 +346,7 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<? extends AsynchronousIterator<FileInfo>> getOwnedFiles(
+    public CompletionStage<? extends AsynchronousCloseableIterator<FileInfo>> getOwnedFiles(
         final DBHandle handle) {
       return delegate.getOwnedFiles(handle);
     }

@@ -24,7 +24,6 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
-import org.iq80.leveldb.AsynchronousIterator;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.util.CompletableFutures;
@@ -124,7 +123,7 @@ public abstract class PathEnv implements Env {
   }
 
   @Override
-  public CompletionStage<? extends AsynchronousIterator<FileInfo>> getOwnedFiles(
+  public CompletionStage<? extends AsynchronousCloseableIterator<FileInfo>> getOwnedFiles(
       final DBHandle handle) {
     return getOwnedFiles(pathFromHandle(handle).path, FILE_FILTER,
         path -> parseFileInfo(handle, path));
@@ -158,7 +157,7 @@ public abstract class PathEnv implements Env {
 
   protected abstract CompletionStage<Void> deleteDB(Path path, Predicate<Path> fileNameFilter);
 
-  protected abstract CompletionStage<? extends AsynchronousIterator<FileInfo>> getOwnedFiles(
+  protected abstract CompletionStage<? extends AsynchronousCloseableIterator<FileInfo>> getOwnedFiles(
       Path dir, Predicate<Path> fileNameFilter, Function<Path, FileInfo> parser);
 
 

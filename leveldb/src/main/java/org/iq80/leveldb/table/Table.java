@@ -26,7 +26,6 @@ import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.SeekingIterable;
 import org.iq80.leveldb.util.ByteBufferCrc32;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
@@ -35,8 +34,7 @@ import org.iq80.leveldb.util.Snappy;
 
 import com.google.common.base.Preconditions;
 
-public final class Table extends ReferenceCounted<Table>
-    implements SeekingIterable<InternalKey, ByteBuffer> {
+public final class Table extends ReferenceCounted<Table> {
 
   private final RandomReadFile file;
   private final Comparator<InternalKey> comparator;
@@ -79,7 +77,6 @@ public final class Table extends ReferenceCounted<Table>
     });
   }
 
-  @Override
   public TableIterator iterator() {
     return new TableIterator(this, indexBlock.iterator());
   }

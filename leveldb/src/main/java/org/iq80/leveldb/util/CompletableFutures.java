@@ -16,6 +16,7 @@
 package org.iq80.leveldb.util;
 
 import java.util.Collection;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -23,24 +24,45 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.AsynchronousIterator;
+import org.iq80.leveldb.ReverseAsynchronousIterator;
+import org.iq80.leveldb.util.Iterators.Direction;
 
 public final class CompletableFutures {
   private CompletableFutures() {}
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
       final AsynchronousIterator<T> iter, final Function<T, U> mapper) {
-    return iteratorStep(iter, new ConcurrentLinkedQueue<U>(), mapper);
+    return iteratorStep(new ReverseAsynchronousIterator<T>() {
+      @Override
+      public CompletionStage<Optional<T>> next() {
+        return iter.next();
+      }
+
+      @Override
+      public CompletionStage<Optional<T>> prev() {
+        throw new UnsupportedOperationException();
+      }
+
+    }, Direction.NEXT, new ConcurrentLinkedQueue<U>(), mapper);
   }
 
-  @SuppressWarnings("unchecked")
-  private static <T, U> CompletionStage<Stream<U>> iteratorStep(final AsynchronousIterator<T> iter,
-      final Collection<U> c, final Function<T, U> mapper) {
-    return iter.next().thenCompose(next -> {
+  public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
+      final ReverseAsynchronousIterator<T> iter, final Direction direction,
+      final Function<T, U> mapper) {
+    return iteratorStep(iter, direction, new ConcurrentLinkedQueue<U>(), mapper);
+  }
+
+  private static <T, U> CompletionStage<Stream<U>> iteratorStep(
+      final ReverseAsynchronousIterator<T> iter, final Direction direction, final Collection<U> c,
+      final Function<T, U> mapper) {
+    return direction.asyncAdvance(iter).thenCompose(next -> {
       if (next.isPresent()) {
         c.add(mapper.apply(next.get()));
-        return iteratorStep(iter, c, mapper);
+        return iteratorStep(iter, direction, c, mapper);
       } else {
-        return CompletableFuture.completedFuture(Stream.of((U[]) c.toArray()));
+        @SuppressWarnings("unchecked")
+        final U[] arr = (U[]) c.toArray();
+        return CompletableFuture.completedFuture(Stream.of(arr));
       }
     });
   }

@@ -80,7 +80,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 public class DbImpl implements DB {
   @Override
   public String toString() {
-    return "DbImpl [handle=" + dbHandle + "]";
+    return "DbImpl [" + dbHandle + "]";
   }
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DbImpl.class);

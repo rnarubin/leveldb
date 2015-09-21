@@ -15,15 +15,16 @@
 
 package org.iq80.leveldb;
 
-import java.io.Closeable;
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
-public interface AsynchronousCloseable {
-
+public interface ReverseAsynchronousIterator<T> extends AsynchronousIterator<T> {
   /**
-   * Closes any resources held by this object in the same manner as {@link Closeable} but in an
-   * asynchronous fashion. Implementations are <i>not</i> required to be idempotent; the effects of
-   * calling this method more than once on a given object are undefined
+   * advance the iterator in reverse, returning an {@link Optional} containing the previous element,
+   * or {@link Optional#empty()} if there are no more preceding elements
    */
-  CompletionStage<Void> asyncClose();
+  public CompletionStage<Optional<T>> prev();
+
 }
+
+

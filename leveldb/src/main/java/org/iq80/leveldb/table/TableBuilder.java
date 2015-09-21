@@ -93,11 +93,17 @@ public class TableBuilder implements Closeable {
     dataBlockBuilder.add(key, value);
 
     final int estimatedBlockSize = dataBlockBuilder.currentSizeEstimate();
-    return estimatedBlockSize >= blockSize
+    return nextState(state, key, estimatedBlockSize >= blockSize);
+  }
+
+  private CompletionStage<BuilderState> nextState(final BuilderState previousState,
+      final InternalKey previousKey, final boolean flushData) {
+    return flushData
         ? writeBlock(dataBlockBuilder).thenApply(
-            handle -> new BuilderState(Optional.of(handle), handle.getEndPosition(), key))
-        : CompletableFuture
-            .completedFuture(new BuilderState(Optional.empty(), state.position, key));
+            handle -> new BuilderState(Optional.of(handle), handle.getEndPosition(), previousKey))
+        : CompletableFuture.completedFuture(
+            new BuilderState(Optional.empty(), previousState.position, previousKey));
+
   }
 
   private CompletionStage<PositionedHandle> writeBlock(final BlockBuilder blockBuilder) {
@@ -153,10 +159,17 @@ public class TableBuilder implements Closeable {
    * @return final file size
    */
   public CompletionStage<Long> finish(final BuilderState state) {
+    assert dataBlockBuilder.isEmpty() == state.pendingHandle.isPresent();
 
     // flush current data block
-    final CompletionStage<?> flush = dataBlockBuilder.isEmpty()
-        ? CompletableFuture.completedFuture(null) : writeBlock(dataBlockBuilder);
+    final CompletionStage<?> flush =
+        nextState(state, state.lastKey, !dataBlockBuilder.isEmpty()).thenAccept(postFlushState -> {
+          // add last handle to index block
+          if (postFlushState.pendingHandle.isPresent()) {
+            indexBlockBuilder.addHandle(postFlushState.lastKey, null,
+                postFlushState.pendingHandle.get());
+          }
+        });
 
     // TODO filters in meta block
     // TODO(postrelease): Add stats and other meta blocks
@@ -165,11 +178,6 @@ public class TableBuilder implements Closeable {
     final CompletionStage<? extends BlockHandle> metaIndexWrite =
         flush.thenCompose(voided -> writeBlock(metaIndexBlockBuilder)
             .whenComplete((h, e) -> metaIndexBlockBuilder.close()));
-
-    // add last handle to index block
-    if (state.pendingHandle.isPresent()) {
-      indexBlockBuilder.addHandle(state.lastKey, null, state.pendingHandle.get());
-    }
 
     return metaIndexWrite
         .thenCompose(metaIndexBlockHandle -> writeBlock(indexBlockBuilder)

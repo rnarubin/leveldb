@@ -42,7 +42,6 @@ import java.util.function.LongToIntFunction;
 import java.util.function.Predicate;
 
 import org.iq80.leveldb.AsynchronousCloseable;
-import org.iq80.leveldb.AsynchronousIterator;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.util.CompletableFutures;
 
@@ -187,8 +186,7 @@ public class FileEnv extends PathEnv {
     }
   }
 
-  private final class DirectoryIterator<T>
-      implements AsynchronousIterator<T>, AsynchronousCloseable {
+  private final class DirectoryIterator<T> implements AsynchronousCloseableIterator<T> {
 
     private final DirectoryStream<Path> dirStream;
     private final Iterator<Path> iter;
