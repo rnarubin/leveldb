@@ -26,7 +26,7 @@ import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBufferCrc32C;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.ReferenceCounted;
@@ -102,7 +102,7 @@ public final class Table extends ReferenceCounted<Table> {
           // only verify check sums if explicitly asked by the user
           if (verifyChecksums) {
             // checksum data and the compression type in the trailer
-            final ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            final ByteBufferCrc32C checksum = ByteBuffers.crc32c();
             checksum.update(readBuffer, dataStart, blockHandle.getDataSize() + 1);
             final int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
 

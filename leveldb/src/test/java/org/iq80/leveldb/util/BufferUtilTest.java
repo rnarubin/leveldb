@@ -207,7 +207,7 @@ public abstract class BufferUtilTest
         ByteBuffer[] c = heapAndDirect("hello world".getBytes("ASCII"));
 
         {
-            ByteBufferCrc32 crc = util.crc32();
+            ByteBufferCrc32C crc = util.crc32c();
             crc.update(a[0], 0, 6);
             crc.update(b[0], 0, 5);
 
@@ -215,7 +215,7 @@ public abstract class BufferUtilTest
         }
 
         {
-            ByteBufferCrc32 crc = util.crc32();
+            ByteBufferCrc32C crc = util.crc32c();
             crc.update(a[1], 0, 6);
             crc.update(b[1], 0, 5);
 
@@ -225,7 +225,7 @@ public abstract class BufferUtilTest
 
     private int computeCrc(ByteBuffer data)
     {
-        ByteBufferCrc32 crc = util.crc32();
+        ByteBufferCrc32C crc = util.crc32c();
         crc.update(data, data.position(), data.remaining());
         return crc.getIntValue();
     }
@@ -349,9 +349,9 @@ public abstract class BufferUtilTest
             }
 
             @Override
-            public ByteBufferCrc32 crc32()
+            public ByteBufferCrc32C crc32c()
             {
-                return ByteBuffers.crc32();
+                return ByteBuffers.crc32c();
             }
         };
 

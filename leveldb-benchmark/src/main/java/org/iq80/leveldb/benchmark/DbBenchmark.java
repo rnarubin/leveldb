@@ -30,7 +30,7 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.impl.DbImpl;
-import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBufferCrc32C;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.MemoryManagers;
@@ -624,7 +624,7 @@ public class DbBenchmark
         long bytes = 0;
         int crc = 0;
         while (bytes < 1000 * 1048576) {
-            ByteBufferCrc32 checksum = ByteBuffers.crc32();
+            ByteBufferCrc32C checksum = ByteBuffers.crc32c();
             checksum.update(data, 0, blockSize);
             crc = ByteBuffers.maskChecksum(checksum.getIntValue());
             finishedSingleOp();

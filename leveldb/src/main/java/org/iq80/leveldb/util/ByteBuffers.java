@@ -41,7 +41,7 @@ public final class ByteBuffers {
     int compare(ByteBuffer buffer1, int offset1, int length1, ByteBuffer buffer2, int offset2,
         int length2);
 
-    ByteBufferCrc32 crc32();
+    ByteBufferCrc32C crc32c();
   }
 
   private static final BufferUtil UTIL = getBestUtil();
@@ -96,7 +96,7 @@ public final class ByteBuffers {
     }
 
     @Override
-    public ByteBufferCrc32 crc32() {
+    public ByteBufferCrc32C crc32c() {
       return new PureJavaCrc32C();
     }
   }
@@ -423,11 +423,11 @@ public final class ByteBuffers {
     }
 
     @Override
-    public ByteBufferCrc32 crc32() {
+    public ByteBufferCrc32C crc32c() {
       return new UnsafeCrc32c();
     }
 
-    private static class UnsafeCrc32c implements ByteBufferCrc32 {
+    private static class UnsafeCrc32c implements ByteBufferCrc32C {
       private int crc;
 
       public UnsafeCrc32c() {
@@ -757,8 +757,8 @@ public final class ByteBuffers {
     return dst;
   }
 
-  public static ByteBufferCrc32 crc32() {
-    return UTIL.crc32();
+  public static ByteBufferCrc32C crc32c() {
+    return UTIL.crc32c();
   }
 
   private static final int MASK_DELTA = 0xa282ead8;

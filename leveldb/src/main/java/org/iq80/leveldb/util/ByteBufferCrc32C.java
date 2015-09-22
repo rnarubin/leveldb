@@ -21,7 +21,7 @@ package org.iq80.leveldb.util;
 import java.nio.ByteBuffer;
 import java.util.zip.Checksum;
 
-public interface ByteBufferCrc32
+public interface ByteBufferCrc32C
         extends Checksum
 {
     public void update(ByteBuffer b, int off, int len);

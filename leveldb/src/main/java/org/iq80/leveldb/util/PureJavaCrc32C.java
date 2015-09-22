@@ -34,7 +34,7 @@ import java.nio.ByteBuffer;
  * (The initial patch added PureJavaCrc32 was HADOOP-6148)
  */
 public class PureJavaCrc32C
-        implements ByteBufferCrc32
+        implements ByteBufferCrc32C
 {
 
   /** the current CRC value, bit-flipped */

@@ -43,7 +43,13 @@ import java.util.function.Predicate;
 
 import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.CompletableFutures;
+import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.util.ObjectPool.PooledObject;
+import org.iq80.leveldb.util.ObjectPools;
+import org.iq80.leveldb.util.ObjectPools.DirectBufferPool;
 
 import com.google.common.base.Throwables;
 
@@ -380,15 +386,12 @@ public class FileEnv extends PathEnv {
   }
 
   private static final int REGION_SCRATCH_SIZE = 4096;
-  private static final ThreadLocal<ByteBuffer> REGION_SCRATCH = new ThreadLocal<ByteBuffer>() {
-    @Override
-    public ByteBuffer initialValue() {
-      return ByteBuffer.allocateDirect(REGION_SCRATCH_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-    }
-  };
 
   private final class ConcurrentWriteFileImpl extends AsyncFile implements ConcurrentWriteFile {
     private final AtomicLong filePosition = new AtomicLong(0);
+    private final DirectBufferPool bufferPool =
+        ObjectPools.directBufferPool(Runtime.getRuntime().availableProcessors() * 2,
+            REGION_SCRATCH_SIZE, MemoryManagers.direct());
 
     public ConcurrentWriteFileImpl(final Path path) throws IOException {
       super(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
@@ -409,11 +412,18 @@ public class FileEnv extends PathEnv {
     private final class WriteRegionImpl implements WriteRegion {
       private final long regionPosition;
       private final ByteBuffer buffer;
+      private final AutoCloseable cleanup;
 
       protected WriteRegionImpl(final long regionPosition, final int length) {
         this.regionPosition = regionPosition;
-        this.buffer = length <= REGION_SCRATCH_SIZE ? REGION_SCRATCH.get()
-            : ByteBuffer.allocateDirect(length);
+        if (length <= REGION_SCRATCH_SIZE) {
+          final PooledObject<ByteBuffer> b = bufferPool.tryAcquire();
+          this.buffer = b != null ? b.get() : ByteBuffer.allocate(length);
+          this.cleanup = b;
+        } else {
+          this.buffer = ByteBuffer.allocateDirect(length);
+          this.cleanup = () -> ByteBuffers.freeDirect(buffer);
+        }
       }
 
       @Override
@@ -464,7 +474,7 @@ public class FileEnv extends PathEnv {
 
       @Override
       public final CompletionStage<Void> asyncClose() {
-        return flush();
+        return flush().whenComplete((flushed, exception) -> Closeables.closeQuietly(cleanup));
       }
     }
   }

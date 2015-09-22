@@ -15,7 +15,7 @@ import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
-import org.iq80.leveldb.util.ByteBufferCrc32;
+import org.iq80.leveldb.util.ByteBufferCrc32C;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.MemoryManagers;
@@ -191,7 +191,7 @@ public class TableBuilder implements Closeable {
   public void abandon() {}
 
   public static int crc32c(final ByteBuffer data, final byte compressionId) {
-    final ByteBufferCrc32 crc32 = ByteBuffers.crc32();
+    final ByteBufferCrc32C crc32 = ByteBuffers.crc32c();
     crc32.update(data, data.position(), data.remaining());
     crc32.update(compressionId & 0xFF);
     return ByteBuffers.maskChecksum(crc32.getIntValue());
