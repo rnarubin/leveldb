@@ -7,7 +7,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -84,26 +83,19 @@ public class TableBuilder implements Closeable {
     // "the r" as the key for the index block entry since it is >= all
     // entries in the first block and < all entries in subsequent
     // blocks.
-    if (state.pendingHandle.isPresent()) {
+    if (state.pendingHandle != null) {
       assert dataBlockBuilder
           .isEmpty() : "Table has a pending index entry but data block builder is empty";
-      indexBlockBuilder.addHandle(state.lastKey, key, state.pendingHandle.get());
+      indexBlockBuilder.addHandle(state.lastKey, key, state.pendingHandle);
     }
 
     dataBlockBuilder.add(key, value);
 
     final int estimatedBlockSize = dataBlockBuilder.currentSizeEstimate();
-    return nextState(state, key, estimatedBlockSize >= blockSize);
-  }
-
-  private CompletionStage<BuilderState> nextState(final BuilderState previousState,
-      final InternalKey previousKey, final boolean flushData) {
-    return flushData
-        ? writeBlock(dataBlockBuilder).thenApply(
-            handle -> new BuilderState(Optional.of(handle), handle.getEndPosition(), previousKey))
-        : CompletableFuture.completedFuture(
-            new BuilderState(Optional.empty(), previousState.position, previousKey));
-
+    return estimatedBlockSize >= blockSize
+        ? writeBlock(dataBlockBuilder)
+            .thenApply(handle -> new BuilderState(handle, handle.getEndPosition(), key))
+        : CompletableFuture.completedFuture(new BuilderState(null, state.position, key));
   }
 
   private CompletionStage<PositionedHandle> writeBlock(final BlockBuilder blockBuilder) {
@@ -159,17 +151,20 @@ public class TableBuilder implements Closeable {
    * @return final file size
    */
   public CompletionStage<Long> finish(final BuilderState state) {
-    assert dataBlockBuilder.isEmpty() == state.pendingHandle.isPresent();
+    final CompletionStage<?> flush;
 
-    // flush current data block
-    final CompletionStage<?> flush =
-        nextState(state, state.lastKey, !dataBlockBuilder.isEmpty()).thenAccept(postFlushState -> {
-          // add last handle to index block
-          if (postFlushState.pendingHandle.isPresent()) {
-            indexBlockBuilder.addHandle(postFlushState.lastKey, null,
-                postFlushState.pendingHandle.get());
-          }
-        });
+    if (dataBlockBuilder.isEmpty()) {
+      if (state.pendingHandle != null) {
+        indexBlockBuilder.addHandle(state.lastKey, null, state.pendingHandle);
+      }
+      flush = CompletableFuture.completedFuture(null);
+    } else {
+      assert state.pendingHandle == null;
+      // flush current data block
+      flush = writeBlock(dataBlockBuilder).thenAccept(handle -> {
+        indexBlockBuilder.addHandle(state.lastKey, null, handle);
+      });
+    }
 
     // TODO filters in meta block
     // TODO(postrelease): Add stats and other meta blocks
@@ -208,19 +203,19 @@ public class TableBuilder implements Closeable {
   }
 
   public final class BuilderState {
-    private final Optional<BlockHandle> pendingHandle;
+    private final BlockHandle pendingHandle;
     private final long position;
     private final boolean isEmpty;
     private final InternalKey lastKey;
 
     private BuilderState() {
-      this.pendingHandle = Optional.empty();
+      this.pendingHandle = null;
       this.position = 0;
       this.isEmpty = true;
       this.lastKey = null;
     }
 
-    private BuilderState(final Optional<BlockHandle> pendingHandle, final long position,
+    private BuilderState(final BlockHandle pendingHandle, final long position,
         final InternalKey lastKey) {
       this.pendingHandle = pendingHandle;
       this.position = position;

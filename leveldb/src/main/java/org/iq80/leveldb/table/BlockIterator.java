@@ -31,6 +31,7 @@ import org.iq80.leveldb.util.VariableLengthQuantity;
 
 import com.google.common.base.Preconditions;
 
+// TODO rewrite as spliterator
 public final class BlockIterator<T> implements ReverseSeekingIterator<T, ByteBuffer> {
   private final ByteBuffer data;
   private final ByteBuffer restartPositions;

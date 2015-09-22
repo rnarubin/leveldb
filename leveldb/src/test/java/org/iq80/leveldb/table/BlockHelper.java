@@ -117,11 +117,11 @@ public final class BlockHelper {
     return CompletableFutures.flatMapIterator(iter, direction, entry -> {
       assertTrue(expected.hasNext(), "more entries in iterator than expected");
       assertEntryEquals(entry, expected.next());
-      return null;
+      return entry;
     }).thenApply(stream -> {
       assertFalse(expected.hasNext());
       try {
-        assertFalse(iter.next().toCompletableFuture().get().isPresent());
+        assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());
       } catch (final Exception e) {
         throw new AssertionError(e);
       }

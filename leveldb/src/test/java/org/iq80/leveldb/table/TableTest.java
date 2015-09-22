@@ -32,6 +32,8 @@ import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.TransientInternalKey;
+import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.TableBuilder.BuilderState;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
@@ -39,6 +41,7 @@ import org.iq80.leveldb.util.EnvDependentTest;
 import org.iq80.leveldb.util.FileEnvTestProvider;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -153,9 +156,9 @@ public abstract class TableTest extends EnvDependentTest {
         getEnv().openSequentialWriteFile(fileInfo).toCompletableFuture().get();
 
     try (
-        TableBuilder builder = new TableBuilder(options, writeFile,
+        final TableBuilder builder = new TableBuilder(options, writeFile,
             new InternalKeyComparator(options.bufferComparator()));
-        AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
+        final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
 
       final Iterator<Entry<InternalKey, ByteBuffer>> iter = entries.iterator();
       CompletionStage<BuilderState> last = CompletableFuture.completedFuture(builder.init());
@@ -176,11 +179,9 @@ public abstract class TableTest extends EnvDependentTest {
     final TableIterator iter = table.retain().iterator();
 
     iter.seekToFirst()
-        .thenCompose(voided ->
-        BlockHelper.assertReverseSequence(iter,
+        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter,
             Collections.<Entry<InternalKey, ByteBuffer>>emptyList()))
-        .thenCompose(voided ->
-        BlockHelper.assertSequence(iter, entries))
+        .thenCompose(voided -> BlockHelper.assertSequence(iter, entries))
         .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
         .thenCompose(voided -> iter.seekToEnd())
         .thenCompose(voided -> BlockHelper.assertSequence(iter,
@@ -189,34 +190,35 @@ public abstract class TableTest extends EnvDependentTest {
         .thenCompose(voided -> BlockHelper.assertSequence(iter, entries)).toCompletableFuture()
         .get();
 
-    // long lastApproximateOffset = 0;
-    // for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-    // final List<Entry<InternalKey, ByteBuffer>> nextEntries =
-    // entries.subList(entries.indexOf(entry), entries.size());
-    // seekingIterator.seek(entry.getKey());
-    // BlockHelper.assertSequence(seekingIterator, nextEntries);
-    //
-    // seekingIterator.seek(BlockHelper.beforeInternalKey(entry));
-    // BlockHelper.assertSequence(seekingIterator, nextEntries);
-    //
-    // seekingIterator.seek(BlockHelper.afterInternalKey(entry));
-    // BlockHelper.assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
-    //
-    // final long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
-    // Assert.assertTrue(approximateOffset >= lastApproximateOffset);
-    // lastApproximateOffset = approximateOffset;
-    // }
-    //
-    // final InternalKey endKey = new TransientInternalKey(
-    // ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
-    // ValueType.VALUE);
-    // seekingIterator.seek(endKey);
-    // BlockHelper.assertSequence(seekingIterator,
-    // Collections.<BlockEntry<InternalKey>>emptyList());
-    // BlockHelper.assertReverseSequence(seekingIterator, reverseEntries);
-    //
-    // final long approximateOffset = table.getApproximateOffsetOf(endKey);
-    // Assert.assertTrue(approximateOffset >= lastApproximateOffset);
+    long lastApproximateOffset = 0;
+    for (final Entry<InternalKey, ByteBuffer> entry : entries) {
+      final List<Entry<InternalKey, ByteBuffer>> nextEntries =
+          entries.subList(entries.indexOf(entry), entries.size());
+
+      iter.seek(entry.getKey()).thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
+          .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
+          .thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
+          .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
+          .thenCompose(voided -> BlockHelper.assertSequence(iter,
+              nextEntries.subList(1, nextEntries.size())))
+          .toCompletableFuture().get();
+
+      final long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
+      Assert.assertTrue(approximateOffset >= lastApproximateOffset);
+      lastApproximateOffset = approximateOffset;
+    }
+
+    final InternalKey endKey = new TransientInternalKey(
+        ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
+        ValueType.VALUE);
+    iter.seek(endKey)
+        .thenCompose(voided -> BlockHelper.assertSequence(iter,
+            Collections.<BlockEntry<InternalKey>>emptyList()))
+        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
+        .toCompletableFuture().get();
+
+    final long approximateOffset = table.getApproximateOffsetOf(endKey);
+    Assert.assertTrue(approximateOffset >= lastApproximateOffset);
 
     iter.asyncClose().toCompletableFuture().get();
 

@@ -15,11 +15,9 @@
 
 package org.iq80.leveldb.util;
 
-import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -32,7 +30,7 @@ public final class CompletableFutures {
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
       final AsynchronousIterator<T> iter, final Function<T, U> mapper) {
-    return iteratorStep(new ReverseAsynchronousIterator<T>() {
+    return flatMapIterator(new ReverseAsynchronousIterator<T>() {
       @Override
       public CompletionStage<Optional<T>> next() {
         return iter.next();
@@ -43,26 +41,24 @@ public final class CompletableFutures {
         throw new UnsupportedOperationException();
       }
 
-    }, Direction.NEXT, new ConcurrentLinkedQueue<U>(), mapper);
+    }, Direction.NEXT, mapper);
   }
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
       final ReverseAsynchronousIterator<T> iter, final Direction direction,
       final Function<T, U> mapper) {
-    return iteratorStep(iter, direction, new ConcurrentLinkedQueue<U>(), mapper);
+    return iteratorStep(iter, direction, Stream.builder(), mapper);
   }
 
   private static <T, U> CompletionStage<Stream<U>> iteratorStep(
-      final ReverseAsynchronousIterator<T> iter, final Direction direction, final Collection<U> c,
-      final Function<T, U> mapper) {
+      final ReverseAsynchronousIterator<T> iter, final Direction direction,
+      final Stream.Builder<U> builder, final Function<T, U> mapper) {
     return direction.asyncAdvance(iter).thenCompose(next -> {
       if (next.isPresent()) {
-        c.add(mapper.apply(next.get()));
-        return iteratorStep(iter, direction, c, mapper);
+        builder.add(mapper.apply(next.get()));
+        return iteratorStep(iter, direction, builder, mapper);
       } else {
-        @SuppressWarnings("unchecked")
-        final U[] arr = (U[]) c.toArray();
-        return CompletableFuture.completedFuture(Stream.of(arr));
+        return CompletableFuture.completedFuture(builder.build());
       }
     });
   }
