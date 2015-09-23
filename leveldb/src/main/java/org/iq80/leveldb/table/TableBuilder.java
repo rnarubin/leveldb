@@ -43,6 +43,10 @@ public class TableBuilder implements Closeable {
   private final BlockBuilder indexBlockBuilder;
   private final InternalKeyComparator internalKeyComparator;
 
+  private BlockHandle pendingHandle;
+  private long position;
+  private InternalKey lastKey;
+
   public TableBuilder(final Options options, final SequentialWriteFile file,
       final InternalKeyComparator internalKeyComparator) {
     Preconditions.checkNotNull(options, "options is null");
@@ -51,29 +55,33 @@ public class TableBuilder implements Closeable {
     this.file = file;
     this.internalKeyComparator = internalKeyComparator;
 
-    blockRestartInterval = options.blockRestartInterval();
-    blockSize = options.blockSize();
-    compression = options.compression();
+    this.blockRestartInterval = options.blockRestartInterval();
+    this.blockSize = options.blockSize();
+    this.compression = options.compression();
 
-    dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE),
+    this.dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE),
         blockRestartInterval, internalKeyComparator.getUserComparator(), MemoryManagers.direct());
 
     // with expected 50% compression
     final int expectedNumberOfBlocks = 1024;
-    indexBlockBuilder = new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1,
-        internalKeyComparator.getUserComparator(), MemoryManagers.direct());
+    this.indexBlockBuilder =
+        new BlockBuilder(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks, 1,
+            internalKeyComparator.getUserComparator(), MemoryManagers.direct());
+
+    this.pendingHandle = null;
+    this.position = 0;
+    this.lastKey = null;
   }
 
-  public BuilderState init() {
-    return new BuilderState();
+  public long getFileSizeEstimate() {
+    return position + dataBlockBuilder.currentSizeEstimate();
   }
 
-  public CompletionStage<BuilderState> add(final InternalKey key, final ByteBuffer value,
-      final BuilderState state) {
+  public CompletionStage<Void> add(final InternalKey key, final ByteBuffer value) {
     assert key != null;
     assert value != null;
-    assert state.isEmpty() || internalKeyComparator.compare(key,
-        state.lastKey) > 0 : "key must be greater than last key";
+    assert lastKey == null
+        || internalKeyComparator.compare(key, lastKey) > 0 : "key must be greater than last key";
 
     // If we just wrote a block, we can now add the handle to index block
     // We do not emit the index entry for a block until we have seen the
@@ -83,19 +91,21 @@ public class TableBuilder implements Closeable {
     // "the r" as the key for the index block entry since it is >= all
     // entries in the first block and < all entries in subsequent
     // blocks.
-    if (state.pendingHandle != null) {
+    if (pendingHandle != null) {
       assert dataBlockBuilder
-          .isEmpty() : "Table has a pending index entry but data block builder is empty";
-      indexBlockBuilder.addHandle(state.lastKey, key, state.pendingHandle);
+          .isEmpty() : "Table has a pending index entry but data block builder is not empty";
+      indexBlockBuilder.addHandle(lastKey, key, pendingHandle);
+      pendingHandle = null;
     }
 
     dataBlockBuilder.add(key, value);
+    lastKey = key;
 
     final int estimatedBlockSize = dataBlockBuilder.currentSizeEstimate();
-    return estimatedBlockSize >= blockSize
-        ? writeBlock(dataBlockBuilder)
-            .thenApply(handle -> new BuilderState(handle, handle.getEndPosition(), key))
-        : CompletableFuture.completedFuture(new BuilderState(null, state.position, key));
+    return estimatedBlockSize >= blockSize ? writeBlock(dataBlockBuilder).thenAccept(handle -> {
+      pendingHandle = handle;
+      position = handle.getEndPosition();
+    }) : CompletableFuture.completedFuture(null);
   }
 
   private CompletionStage<PositionedHandle> writeBlock(final BlockBuilder blockBuilder) {
@@ -150,19 +160,19 @@ public class TableBuilder implements Closeable {
   /**
    * @return final file size
    */
-  public CompletionStage<Long> finish(final BuilderState state) {
+  public CompletionStage<Long> finish() {
     final CompletionStage<?> flush;
 
     if (dataBlockBuilder.isEmpty()) {
-      if (state.pendingHandle != null) {
-        indexBlockBuilder.addHandle(state.lastKey, null, state.pendingHandle);
+      if (pendingHandle != null) {
+        indexBlockBuilder.addHandle(lastKey, null, pendingHandle);
       }
       flush = CompletableFuture.completedFuture(null);
     } else {
-      assert state.pendingHandle == null;
+      assert pendingHandle == null;
       // flush current data block
       flush = writeBlock(dataBlockBuilder).thenAccept(handle -> {
-        indexBlockBuilder.addHandle(state.lastKey, null, handle);
+        indexBlockBuilder.addHandle(lastKey, null, handle);
       });
     }
 
@@ -200,36 +210,6 @@ public class TableBuilder implements Closeable {
   @Override
   public void close() throws IOException {
     Closeables.closeIO(dataBlockBuilder, indexBlockBuilder);
-  }
-
-  public final class BuilderState {
-    private final BlockHandle pendingHandle;
-    private final long position;
-    private final boolean isEmpty;
-    private final InternalKey lastKey;
-
-    private BuilderState() {
-      this.pendingHandle = null;
-      this.position = 0;
-      this.isEmpty = true;
-      this.lastKey = null;
-    }
-
-    private BuilderState(final BlockHandle pendingHandle, final long position,
-        final InternalKey lastKey) {
-      this.pendingHandle = pendingHandle;
-      this.position = position;
-      this.lastKey = lastKey;
-      this.isEmpty = false;
-    }
-
-    public long getFileSizeEstimate() {
-      return position + dataBlockBuilder.currentSizeEstimate();
-    }
-
-    public boolean isEmpty() {
-      return isEmpty;
-    }
   }
 
   private static final class PositionedHandle extends BlockHandle {

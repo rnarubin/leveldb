@@ -31,7 +31,6 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
-import org.iq80.leveldb.table.TableBuilder.BuilderState;
 import org.iq80.leveldb.util.EnvDependentTest;
 import org.iq80.leveldb.util.FileEnvTestProvider;
 import org.iq80.leveldb.util.SizeOf;
@@ -61,29 +60,25 @@ public abstract class TableBuilderTest extends EnvDependentTest {
     try (final TableBuilder builder = new TableBuilder(Options.make().compression(null)
         .blockRestartInterval(blockRestartInterval).blockSize(blockSize), file, comparator)) {
 
-      BuilderState initstate = builder.init();
-      Assert.assertTrue(initstate.isEmpty());
-      Assert.assertEquals(initstate.getFileSizeEstimate(), SizeOf.SIZE_OF_INT);
+      Assert.assertEquals(builder.getFileSizeEstimate(), SizeOf.SIZE_OF_INT);
 
       final Entry<InternalKey, ByteBuffer> firstEntry = entries.poll();
-      CompletionStage<BuilderState> chain =
-          builder.add(firstEntry.getKey(), firstEntry.getValue(), initstate);
-      initstate = chain.toCompletableFuture().get();
-      Assert.assertFalse(initstate.isEmpty());
+      CompletionStage<Void> chain = builder.add(firstEntry.getKey(), firstEntry.getValue());
+      chain.toCompletableFuture().get();
       final int firstSize = 200 // key + value
           + SizeOf.SIZE_OF_BYTE * 3 // varint shared, nonshared, value
           + SizeOf.SIZE_OF_LONG // seq + type
           + SizeOf.SIZE_OF_INT // 1 restart position
           + SizeOf.SIZE_OF_INT; // restart count
 
-      Assert.assertEquals(initstate.getFileSizeEstimate(), firstSize);
+      Assert.assertEquals(builder.getFileSizeEstimate(), firstSize);
       for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-        chain = chain.thenCompose(state -> builder.add(entry.getKey(), entry.getValue(), state));
+        chain = chain.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
       }
-      final BuilderState lastState = chain.toCompletableFuture().get();
-      Assert.assertEquals(lastState.getFileSizeEstimate(), 54228);
-      final long fileSize = builder.finish(lastState).toCompletableFuture().get();
-      Assert.assertEquals(fileSize, 55734);
+      chain.toCompletableFuture().get();
+      Assert.assertEquals(builder.getFileSizeEstimate(), 54228);
+      final long fileSize = builder.finish().toCompletableFuture().get();
+      Assert.assertEquals(fileSize, 55756);
     }
   }
 

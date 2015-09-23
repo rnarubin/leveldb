@@ -34,7 +34,6 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
-import org.iq80.leveldb.table.TableBuilder.BuilderState;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.EnvDependentTest;
@@ -161,14 +160,14 @@ public abstract class TableTest extends EnvDependentTest {
         final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
 
       final Iterator<Entry<InternalKey, ByteBuffer>> iter = entries.iterator();
-      CompletionStage<BuilderState> last = CompletableFuture.completedFuture(builder.init());
+      CompletionStage<Void> last = CompletableFuture.completedFuture(null);
 
       while (iter.hasNext()) {
         final Entry<InternalKey, ByteBuffer> entry = iter.next();
-        last = last.thenCompose(state -> builder.add(entry.getKey(), entry.getValue(), state));
+        last = last.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
       }
 
-      last.thenCompose(builder::finish).toCompletableFuture().get();
+      last.thenCompose(voided -> builder.finish()).toCompletableFuture().get();
     }
 
     final Table table =
