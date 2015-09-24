@@ -238,7 +238,7 @@ public interface Env {
   public interface TemporaryWriteFile extends SequentialWriteFile {
 
     /**
-     * Save the data written to the temporary file to the given target file name (in addition to
+     * Save the data written in the temporary file to the given target file name (in addition to
      * releasing associated resources as required by {@link Closeable#close() close})
      */
     @Override
@@ -251,7 +251,8 @@ public interface Env {
   public interface SequentialReadFile extends AsynchronousCloseable {
 
     /**
-     * Reads a sequence of bytes from this channel into the given buffer.
+     * Reads a sequence of bytes from this channel into the given buffer. The value returned is the
+     * number of bytes read, or -1 if end of file has been reached
      */
     CompletionStage<Integer> read(ByteBuffer dst);
 

@@ -22,7 +22,6 @@ import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.TableIterator;
-import org.iq80.leveldb.util.CompletableFutures;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -66,7 +65,7 @@ public final class TableCache implements AutoCloseable {
 
   public CompletionStage<Long> getApproximateOffsetOf(final FileMetaData file,
       final InternalKey key) {
-    return CompletableFutures.composeUnconditionally(getTable(file.getNumber()), table -> {
+    return getTable(file.getNumber()).thenCompose(table -> {
       final long offset = table.getApproximateOffsetOf(key);
       return table.release().thenApply(voided -> offset);
     });

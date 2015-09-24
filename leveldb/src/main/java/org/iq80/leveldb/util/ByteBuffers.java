@@ -719,6 +719,12 @@ public final class ByteBuffers {
   public static ByteBuffer copy(ByteBuffer src, MemoryManager memory) {
     return copy(src, src.remaining(), memory);
   }
+  
+  public static ByteBuffer copyOwned(ByteBuffer src){
+    ByteBuffer ret = ByteBuffer.allocate(src.remaining()).order(src.order());
+    ret.put(src).flip();
+    return ret;
+  }
 
   public static ByteBuffer heapCopy(ByteBuffer src) {
     return copy(src, MemoryManagers.heap());

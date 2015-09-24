@@ -15,7 +15,6 @@
 package org.iq80.leveldb.impl;
 
 import static com.google.common.base.Charsets.UTF_8;
-import static org.testng.FileAssert.fail;
 
 import java.nio.ByteBuffer;
 import java.util.Random;
@@ -35,19 +34,7 @@ import org.testng.annotations.Test;
 
 public abstract class LogTest extends EnvDependentTest {
 
-  private static final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor() {
-    @Override
-    public void corruption(final long bytes, final String reason) {
-      fail(String.format("corruption of %s bytes: %s", bytes, reason));
-    }
-
-    @Override
-    public void corruption(final long bytes, final Throwable reason) {
-      throw new RuntimeException(String.format("corruption of %s bytes: %s", bytes, reason),
-          reason);
-    }
-  };
-
+  private static final LogMonitor NO_CORRUPTION_MONITOR = LogMonitors.throwExceptionMonitor();
   private LogWriter writer;
   private FileInfo fileInfo;
   private Options options;

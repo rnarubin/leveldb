@@ -46,6 +46,11 @@ public final class ObjectPools {
     return new FixedAllocatingPool<>(objects, allocator);
   }
 
+  public static <T> ObjectPool<T> fixedAllocatingPool(final Iterable<T> objects,
+      final Supplier<T> allocator, final int bitsPerSegment) {
+    return new FixedAllocatingPool<>(objects, allocator, bitsPerSegment);
+  }
+
   /**
    * Returns a fixed-size, concurrent object pool containing the given group of objects. If an
    * object is requested when none are available (based on a strong consistency view enforced by
@@ -67,7 +72,7 @@ public final class ObjectPools {
    * @param size the size of each buffer in bytes
    */
   public static DirectBufferPool directBufferPool(final int num, final int size,
-      final MemoryManager memory) {
+      final MemoryManager memory, final int bitsPerSegment) {
     final ByteBuffer cache = memory.allocate(num * size);
     final ArrayList<ByteBuffer> bufs = new ArrayList<>(num);
     for (int i = 0, pos = 0; i < num; i++, pos += size) {
@@ -76,14 +81,20 @@ public final class ObjectPools {
       final ByteBuffer subset = cache.slice();
       bufs.add(subset);
     }
-    return new DirectBufferPool(cache, memory, bufs, () -> ByteBuffer.allocate(size));
+    return new DirectBufferPool(cache, memory, bufs, () -> ByteBuffer.allocate(size),
+        bitsPerSegment);
   }
 
   private static class FixedAllocatingPool<T> extends FixedBitSetPool<T> {
     private final Supplier<T> allocator;
 
     public FixedAllocatingPool(final Iterable<T> objects, final Supplier<T> allocator) {
-      super(objects);
+      this(objects, allocator, Integer.SIZE);
+    }
+
+    public FixedAllocatingPool(final Iterable<T> objects, final Supplier<T> allocator,
+        final int bitsPerSegment) {
+      super(objects, bitsPerSegment);
       this.allocator = allocator;
     }
 
@@ -140,8 +151,9 @@ public final class ObjectPools {
     private final Deallocator deallocator;
 
     private DirectBufferPool(final ByteBuffer backingBuf, final Deallocator deallocator,
-        final Iterable<ByteBuffer> objects, final Supplier<ByteBuffer> allocator) {
-      super(objects, allocator);
+        final Iterable<ByteBuffer> objects, final Supplier<ByteBuffer> allocator,
+        final int bitsPerSegment) {
+      super(objects, allocator, bitsPerSegment);
       this.backingBuf = backingBuf;
       this.deallocator = deallocator;
     }
@@ -161,10 +173,14 @@ public final class ObjectPools {
   private abstract static class FixedBitSetPool<T> implements ObjectPool<T> {
     private final AtomicIntegerArray bitSet;
     private final IndexedPooledObject pool[];
-    private final int bitsPerSegment = Integer.SIZE;
+    private final int bitsPerSegment;
+
+    private FixedBitSetPool(final Iterable<T> objects) {
+      this(objects, Integer.SIZE);
+    }
 
     @SuppressWarnings("unchecked")
-    private FixedBitSetPool(final Iterable<T> objects) {
+    private FixedBitSetPool(final Iterable<T> objects, final int bitsPerSegment) {
       int i = 0;
       final ArrayList<IndexedPooledObject> poolAsList = new ArrayList<>();
       for (final T o : objects) {
@@ -184,6 +200,7 @@ public final class ObjectPools {
         backing[backing.length - 1] = (int) ((1L << (pool.length % bitsPerSegment)) - 1);
       }
       this.bitSet = new AtomicIntegerArray(backing);
+      this.bitsPerSegment = bitsPerSegment;
     }
 
     public int size() {

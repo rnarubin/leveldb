@@ -307,6 +307,19 @@ public class FileEnv extends PathEnv {
     }
   }
 
+  private static final CompletionHandler<Integer, CompletableFuture<Integer>> READ_HANDLER =
+      new CompletionHandler<Integer, CompletableFuture<Integer>>() {
+        @Override
+        public void completed(final Integer result, final CompletableFuture<Integer> future) {
+          future.complete(result);
+        }
+
+        @Override
+        public void failed(final Throwable exc, final CompletableFuture<Integer> future) {
+          future.completeExceptionally(exc);
+        }
+      };
+
   private final class SequentialReadFileImpl extends AsyncFile implements SequentialReadFile {
     private final AtomicLong position = new AtomicLong(0);
 
@@ -317,18 +330,7 @@ public class FileEnv extends PathEnv {
     @Override
     public CompletionStage<Integer> read(final ByteBuffer dst) {
       final CompletableFuture<Integer> f = new CompletableFuture<>();
-      channel.read(dst, position.getAndAdd(dst.remaining()), null,
-          new CompletionHandler<Integer, Void>() {
-            @Override
-            public void completed(final Integer length, final Void attachment) {
-              f.complete(length);
-            }
-
-            @Override
-            public void failed(final Throwable exc, final Void attachment) {
-              f.completeExceptionally(exc);
-            }
-          });
+      channel.read(dst, position.getAndAdd(dst.remaining()), f, READ_HANDLER);
       return f;
     }
 
@@ -385,13 +387,26 @@ public class FileEnv extends PathEnv {
     }
   }
 
+  private static final CompletionHandler<Integer, CompletableFuture<Void>> REGION_WRITE_HANDLER =
+      new CompletionHandler<Integer, CompletableFuture<Void>>() {
+        @Override
+        public void completed(final Integer result, final CompletableFuture<Void> future) {
+          future.complete(null);
+        }
+
+        @Override
+        public void failed(final Throwable exc, final CompletableFuture<Void> future) {
+          future.completeExceptionally(exc);
+        }
+      };
+
   private static final int REGION_SCRATCH_SIZE = 4096;
 
   private final class ConcurrentWriteFileImpl extends AsyncFile implements ConcurrentWriteFile {
     private final AtomicLong filePosition = new AtomicLong(0);
     private final DirectBufferPool bufferPool =
         ObjectPools.directBufferPool(Runtime.getRuntime().availableProcessors() * 2,
-            REGION_SCRATCH_SIZE, MemoryManagers.direct());
+            REGION_SCRATCH_SIZE, MemoryManagers.direct(), 4);
 
     public ConcurrentWriteFileImpl(final Path path) throws IOException {
       super(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
@@ -407,6 +422,13 @@ public class FileEnv extends PathEnv {
           regionPosition + (length = getSize.applyAsInt(regionPosition))));
 
       return CompletableFuture.completedFuture(new WriteRegionImpl(regionPosition, length));
+    }
+
+    @Override
+    public CompletionStage<Void> asyncClose() {
+      final CompletionStage<Void> f = super.asyncClose();
+      bufferPool.close();
+      return f;
     }
 
     private final class WriteRegionImpl implements WriteRegion {
@@ -453,17 +475,7 @@ public class FileEnv extends PathEnv {
 
       private CompletionStage<Void> asyncWrite() {
         final CompletableFuture<Void> f = new CompletableFuture<>();
-        channel.write(buffer, regionPosition, null, new CompletionHandler<Integer, Void>() {
-          @Override
-          public void completed(final Integer result, final Void attachment) {
-            f.complete(null);
-          }
-
-          @Override
-          public void failed(final Throwable exc, final Void attachment) {
-            f.completeExceptionally(exc);
-          }
-        });
+        channel.write(buffer, regionPosition, f, REGION_WRITE_HANDLER);
         return f;
       }
 

@@ -72,22 +72,76 @@ public final class CompletableFutures {
         .thenApply(voided -> Stream.of(futures).map(CompletableFuture::join));
   }
 
+  public static <T, U> CompletionStage<U> handleExceptionally(final CompletionStage<T> first,
+      final ExceptionalBiFunction<? super T, Throwable, ? extends U> handler) {
+    final CompletableFuture<U> f = new CompletableFuture<>();
+    first.whenComplete((t, throwable) -> {
+      try {
+        f.complete(handler.apply(t, throwable));
+      } catch (final Exception e) {
+        f.completeExceptionally(e);
+      }
+    });
+    return f;
+  }
+
+  public static <T, U> CompletionStage<U> applyExceptionally(final CompletionStage<T> first,
+      final ExceptionalFunction<? super T, ? extends U> applier) {
+    final CompletableFuture<U> f = new CompletableFuture<>();
+    first.whenComplete((t, throwable) -> {
+      if (throwable != null) {
+        f.completeExceptionally(throwable);
+      } else {
+        try {
+          f.complete(applier.apply(t));
+        } catch (final Exception e) {
+          f.completeExceptionally(e);
+        }
+      }
+    });
+    return f;
+  }
+
+  public static <T, U> CompletionStage<U> composeExceptionally(final CompletionStage<T> first,
+      final ExceptionalFunction<? super T, ? extends CompletionStage<U>> composer) {
+    final CompletableFuture<U> f = new CompletableFuture<>();
+    first.whenComplete((t, tException) -> {
+      if (tException != null) {
+        f.completeExceptionally(tException);
+      } else {
+        try {
+          composer.apply(t).whenComplete((u, uException) -> {
+            if (uException != null) {
+              f.completeExceptionally(uException);
+            } else {
+              f.complete(u);
+            }
+          });
+        } catch (final Exception e) {
+          f.completeExceptionally(e);
+        }
+      }
+    });
+    return f;
+  }
+
   /**
    * Like {@link CompletionStage#thenCompose(Function)} except that the second stage is always
    * executed on the completion of the first stage (normal or exceptional). If the first stage
-   * completes with an exception, the second stage will be run, but the returned stage will fail
-   * upon the second's completion with the first stage's exception. If both the first and the second
-   * stage complete with exceptions, the returned stage will fail with the first stage's exception
-   * and the second stage's exception added as a suppressed exception
+   * completes with an exception, the second stage will be run (with an {@link Optional#empty()
+   * empty} argument), but the returned stage will fail upon the second's completion with the first
+   * stage's exception. If both the first and the second stage complete with exceptions, the
+   * returned stage will fail with the first stage's exception and the second stage's exception
+   * added as a suppressed exception
    * <p>
    * Think of this as an async "try/finally" where the first stage is within the "try" block and the
    * second stage is within the "finally"
    */
   public static <T, U> CompletionStage<U> composeUnconditionally(final CompletionStage<T> first,
-      final Function<? super T, ? extends CompletionStage<U>> then) {
+      final Function<Optional<T>, ? extends CompletionStage<U>> then) {
     final CompletableFuture<U> f = new CompletableFuture<U>();
     first.whenComplete((t, tException) -> {
-      then.apply(t).whenComplete((u, uException) -> {
+      then.apply(Optional.ofNullable(t)).whenComplete((u, uException) -> {
         if (tException != null) {
           if (uException != null) {
             tException.addSuppressed(uException);
@@ -107,6 +161,16 @@ public final class CompletableFutures {
     final CompletableFuture<T> f = new CompletableFuture<>();
     f.completeExceptionally(ex);
     return f;
+  }
+
+  @FunctionalInterface
+  public interface ExceptionalBiFunction<T, U, R> {
+    R apply(final T t, final U u) throws Exception;
+  }
+
+  @FunctionalInterface
+  public interface ExceptionalFunction<T, R> {
+    R apply(final T t) throws Exception;
   }
 
 }
