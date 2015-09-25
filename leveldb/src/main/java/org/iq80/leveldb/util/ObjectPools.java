@@ -78,7 +78,7 @@ public final class ObjectPools {
     for (int i = 0, pos = 0; i < num; i++, pos += size) {
       cache.position(pos);
       cache.limit(pos + size);
-      final ByteBuffer subset = cache.slice();
+      final ByteBuffer subset = ByteBuffers.slice(cache);
       bufs.add(subset);
     }
     return new DirectBufferPool(cache, memory, bufs, () -> ByteBuffer.allocate(size),

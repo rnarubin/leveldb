@@ -18,6 +18,7 @@ package org.iq80.leveldb.util;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -29,7 +30,7 @@ public final class CompletableFutures {
   private CompletableFutures() {}
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
-      final AsynchronousIterator<T> iter, final Function<T, U> mapper) {
+      final AsynchronousIterator<T> iter, final Function<T, U> mapper, final Executor asyncExec) {
     return flatMapIterator(new ReverseAsynchronousIterator<T>() {
       @Override
       public CompletionStage<Optional<T>> next() {
@@ -41,26 +42,26 @@ public final class CompletableFutures {
         throw new UnsupportedOperationException();
       }
 
-    }, Direction.NEXT, mapper);
+    }, Direction.NEXT, mapper, asyncExec);
   }
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(
       final ReverseAsynchronousIterator<T> iter, final Direction direction,
-      final Function<T, U> mapper) {
-    return iteratorStep(iter, direction, Stream.builder(), mapper);
+      final Function<T, U> mapper, final Executor asyncExec) {
+    return iteratorStep(iter, direction, Stream.builder(), mapper, asyncExec);
   }
 
   private static <T, U> CompletionStage<Stream<U>> iteratorStep(
       final ReverseAsynchronousIterator<T> iter, final Direction direction,
-      final Stream.Builder<U> builder, final Function<T, U> mapper) {
-    return direction.asyncAdvance(iter).thenCompose(next -> {
+      final Stream.Builder<U> builder, final Function<T, U> mapper, final Executor asyncExec) {
+    return direction.asyncAdvance(iter).thenComposeAsync(next -> {
       if (next.isPresent()) {
         builder.add(mapper.apply(next.get()));
-        return iteratorStep(iter, direction, builder, mapper);
+        return iteratorStep(iter, direction, builder, mapper, asyncExec);
       } else {
         return CompletableFuture.completedFuture(builder.build());
       }
-    });
+    } , asyncExec);
   }
 
   public static <T> CompletionStage<Stream<T>> allOf(final Stream<CompletionStage<T>> stages) {

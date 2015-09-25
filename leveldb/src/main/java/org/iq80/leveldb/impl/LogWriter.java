@@ -154,7 +154,7 @@ public final class LogWriter implements AsynchronousCloseable {
    * @param newData slice with new data to be written
    * @return this write's size in bytes
    */
-  public static int calculateWriteSize(final long previousWrite, final ByteBuffer newData) {
+  private static int calculateWriteSize(final long previousWrite, final ByteBuffer newData) {
     int firstBlockWrite;
     int dataRemaining = newData.remaining();
     int remainingInBlock = BLOCK_SIZE - (int) (previousWrite % BLOCK_SIZE);

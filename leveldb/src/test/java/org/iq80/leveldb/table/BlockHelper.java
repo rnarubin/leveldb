@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ForkJoinPool;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.InternalKey;
@@ -118,7 +119,7 @@ public final class BlockHelper {
       assertTrue(expected.hasNext(), "more entries in iterator than expected");
       assertEntryEquals(entry, expected.next());
       return entry;
-    }).thenApply(stream -> {
+    } , ForkJoinPool.commonPool()).thenApply(stream -> {
       assertFalse(expected.hasNext());
       try {
         assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());

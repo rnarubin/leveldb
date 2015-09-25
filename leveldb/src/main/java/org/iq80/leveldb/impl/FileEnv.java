@@ -122,7 +122,7 @@ public class FileEnv extends PathEnv {
     // dir is empty after those deletions, delete the dir
     return submit(() -> new DirectoryIterator<Path>(path, fileNameFilter, Function.identity()))
         .thenCompose(iter -> CompletableFutures.composeUnconditionally(
-            CompletableFutures.flatMapIterator(iter, this::deleteFile).thenCompose(
+            CompletableFutures.flatMapIterator(iter, this::deleteFile, getExecutor()).thenCompose(
                 deletions -> CompletableFutures.allOf(deletions).thenApply(voided -> null)),
             voided -> iter.asyncClose()))
         .thenCompose(voided -> submit(() -> !Files.list(path).findAny().isPresent())).thenCompose(
@@ -257,12 +257,12 @@ public class FileEnv extends PathEnv {
       channel.write(src, pos, null, new CompletionHandler<Integer, Void>() {
         @Override
         public void completed(final Integer result, final Void attachment) {
-          f.complete(pos);
+          getExecutor().execute(() -> f.complete(pos));
         }
 
         @Override
         public void failed(final Throwable exc, final Void attachment) {
-          f.completeExceptionally(exc);
+          getExecutor().execute(() -> f.completeExceptionally(exc));
         }
       });
       return f;
@@ -289,13 +289,16 @@ public class FileEnv extends PathEnv {
       channel.read(dst, position, null, new CompletionHandler<Integer, Void>() {
         @Override
         public void completed(final Integer length, final Void attachment) {
-          dst.flip();
-          f.complete(dst);
+          getExecutor().execute(() -> {
+            // TODO unify with readHandler maybe, probably requires dst reworking
+            dst.flip();
+            f.complete(dst);
+          });
         }
 
         @Override
         public void failed(final Throwable exc, final Void attachment) {
-          f.completeExceptionally(exc);
+          getExecutor().execute(() -> f.completeExceptionally(exc));
         }
       });
       return f;
@@ -307,16 +310,16 @@ public class FileEnv extends PathEnv {
     }
   }
 
-  private static final CompletionHandler<Integer, CompletableFuture<Integer>> READ_HANDLER =
+  private final CompletionHandler<Integer, CompletableFuture<Integer>> readHandler =
       new CompletionHandler<Integer, CompletableFuture<Integer>>() {
         @Override
         public void completed(final Integer result, final CompletableFuture<Integer> future) {
-          future.complete(result);
+          getExecutor().execute(() -> future.complete(result));
         }
 
         @Override
         public void failed(final Throwable exc, final CompletableFuture<Integer> future) {
-          future.completeExceptionally(exc);
+          getExecutor().execute(() -> future.completeExceptionally(exc));
         }
       };
 
@@ -330,7 +333,7 @@ public class FileEnv extends PathEnv {
     @Override
     public CompletionStage<Integer> read(final ByteBuffer dst) {
       final CompletableFuture<Integer> f = new CompletableFuture<>();
-      channel.read(dst, position.getAndAdd(dst.remaining()), f, READ_HANDLER);
+      channel.read(dst, position.getAndAdd(dst.remaining()), f, readHandler);
       return f;
     }
 
@@ -387,16 +390,16 @@ public class FileEnv extends PathEnv {
     }
   }
 
-  private static final CompletionHandler<Integer, CompletableFuture<Void>> REGION_WRITE_HANDLER =
+  private final CompletionHandler<Integer, CompletableFuture<Void>> regionWriteHandler =
       new CompletionHandler<Integer, CompletableFuture<Void>>() {
         @Override
         public void completed(final Integer result, final CompletableFuture<Void> future) {
-          future.complete(null);
+          getExecutor().execute(() -> future.complete(null));
         }
 
         @Override
         public void failed(final Throwable exc, final CompletableFuture<Void> future) {
-          future.completeExceptionally(exc);
+          getExecutor().execute(() -> future.completeExceptionally(exc));
         }
       };
 
@@ -440,10 +443,11 @@ public class FileEnv extends PathEnv {
         this.regionPosition = regionPosition;
         if (length <= REGION_SCRATCH_SIZE) {
           final PooledObject<ByteBuffer> b = bufferPool.tryAcquire();
-          this.buffer = b != null ? b.get() : ByteBuffer.allocate(length);
+          this.buffer =
+              b != null ? b.get() : ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
           this.cleanup = b;
         } else {
-          this.buffer = ByteBuffer.allocateDirect(length);
+          this.buffer = ByteBuffer.allocateDirect(length).order(ByteOrder.LITTLE_ENDIAN);
           this.cleanup = () -> ByteBuffers.freeDirect(buffer);
         }
       }
@@ -475,7 +479,7 @@ public class FileEnv extends PathEnv {
 
       private CompletionStage<Void> asyncWrite() {
         final CompletableFuture<Void> f = new CompletableFuture<>();
-        channel.write(buffer, regionPosition, f, REGION_WRITE_HANDLER);
+        channel.write(buffer, regionPosition, f, regionWriteHandler);
         return f;
       }
 

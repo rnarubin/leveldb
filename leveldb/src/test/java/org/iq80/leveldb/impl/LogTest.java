@@ -17,9 +17,14 @@ package org.iq80.leveldb.impl;
 import static com.google.common.base.Charsets.UTF_8;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.FileInfo;
@@ -28,13 +33,16 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.EnvDependentTest;
 import org.iq80.leveldb.util.FileEnvTestProvider;
+import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.AtomicLongMap;
+
 public abstract class LogTest extends EnvDependentTest {
 
-  private static final LogMonitor NO_CORRUPTION_MONITOR = LogMonitors.throwExceptionMonitor();
   private LogWriter writer;
   private FileInfo fileInfo;
   private Options options;
@@ -87,7 +95,7 @@ public abstract class LogTest extends EnvDependentTest {
   @Test
   public void testManySmallRecords() {
     final Random rand = new Random(0);
-    final Stream.Builder<ByteBuffer> records = Stream.builder();
+    final ImmutableList.Builder<ByteBuffer> records = ImmutableList.builder();
     for (int i = 0; i < 1_000_000; i++) {
       final byte[] b = new byte[rand.nextInt(20) + 5];
       rand.nextBytes(b);
@@ -99,7 +107,7 @@ public abstract class LogTest extends EnvDependentTest {
   @Test
   public void testManyLargeRecords() {
     final Random rand = new Random(0);
-    final Stream.Builder<ByteBuffer> records = Stream.builder();
+    final ImmutableList.Builder<ByteBuffer> records = ImmutableList.builder();
     for (int i = 0; i < 10_000; i++) {
       final byte[] b = new byte[rand.nextInt(20) + 5];
       rand.nextBytes(b);
@@ -114,7 +122,7 @@ public abstract class LogTest extends EnvDependentTest {
     final byte[] b = new byte[2 * 1024 * 1024];
     final ByteBuffer buf = ByteBuffer.wrap(b);
 
-    final Stream.Builder<ByteBuffer> records = Stream.builder();
+    final ImmutableList.Builder<ByteBuffer> records = ImmutableList.builder();
     for (int i = 0; i < 1000; i++) {
       records.add(ByteBuffers.duplicateByLength(buf, 0, rand.nextInt(1_000_000) + 1_000_000));
     }
@@ -123,20 +131,20 @@ public abstract class LogTest extends EnvDependentTest {
 
   @Test
   public void testReadWithoutProperClose() {
-    testLog(Stream.of(toByteBuffer("something"), toByteBuffer("something else")), false);
+    testLog(Arrays.asList(toByteBuffer("something"), toByteBuffer("something else")), false);
   }
 
   private void testLog(final ByteBuffer... entries) {
-    testLog(Stream.of(entries));
+    testLog(Arrays.asList(entries));
   }
 
-  private void testLog(final Stream<ByteBuffer> records) {
+  private void testLog(final List<ByteBuffer> records) {
     testLog(records, true);
   }
 
-  private void testLog(final Stream<ByteBuffer> records, final boolean closeWriter) {
+  private void testLog(final List<ByteBuffer> records, final boolean closeWriter) {
     try {
-      CompletableFutures.allOf(records.map(buffer -> writer.addRecord(buffer, false)))
+      CompletableFutures.allOf(records.stream().map(buffer -> writer.addRecord(buffer, false)))
           .toCompletableFuture().get();
 
       if (closeWriter) {
@@ -146,50 +154,43 @@ public abstract class LogTest extends EnvDependentTest {
       throw new AssertionError(e);
     }
 
-    // getEnv().openSequentialReadFile(fileInfo)
-    //
-    // try (SequentialReadFile fileInput = getEnv().openSequentialReadFile(fileInfo);
-    // StrictMemoryManager strictMemory = new StrictMemoryManager();
-    // LogReader reader = new LogReader(fileInput, NO_CORRUPTION_MONITOR, true, 0, strictMemory)) {
-    //
-    // for (final ByteBuffer expected : records) {
-    // final ByteBuffer actual = reader.readRecord();
-    // assertEquals(actual, expected);
-    // strictMemory.free(actual);
-    // }
-    // assertNull(reader.readRecord());
-    // }
+    final AtomicLongMap<ByteBuffer> recordCounts = AtomicLongMap.create(records.stream()
+        .collect(Collectors.toMap(buffer -> buffer, buffer -> 1L, (x, y) -> x + y)));
+    Assert.assertEquals(recordCounts.sum(), records.size());
+
+    try {
+      LogReader.newLogReader(getEnv(), fileInfo, LogMonitors.throwExceptionMonitor(), true, 0)
+          .thenCompose(logReader -> CompletableFutures.<Stream<Long>, Void>composeUnconditionally(
+              CompletableFutures.flatMapIterator(logReader,
+                  record -> recordCounts.decrementAndGet(record), getEnv().getExecutor()),
+              ignored -> logReader.asyncClose()))
+          .toCompletableFuture().get(30, TimeUnit.SECONDS);
+    } catch (InterruptedException | ExecutionException | TimeoutException e) {
+      throw new AssertionError(e);
+    }
+
+    Assert.assertEquals(recordCounts.sum(), 0L);
   }
 
-  // @Test
-  // public void testLogRecordBounds() throws Exception {
-  // try {
-  // final int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
-  // final ByteBuffer record = ByteBuffer.allocate(recordSize);
-  //
-  // final LogWriter writer = Logs.createLogWriter(fileInfo, 10, getOptions());
-  // writer.addRecord(record, true);
-  // writer.close();
-  //
-  // final LogMonitor logMonitor = new AssertNoCorruptionLogMonitor();
-  //
-  // try (StrictMemoryManager strictMemory = new StrictMemoryManager();
-  // SequentialReadFile fileInput = getEnv().openSequentialReadFile(fileInfo);
-  // LogReader logReader = new LogReader(fileInput, logMonitor, true, 0, strictMemory)) {
-  //
-  // int count = 0;
-  // for (ByteBuffer slice = logReader.readRecord(); slice != null; slice =
-  // logReader.readRecord()) {
-  // assertEquals(slice.remaining(), recordSize);
-  // count++;
-  // strictMemory.free(slice);
-  // }
-  // assertEquals(count, 1);
-  // }
-  // } finally {
-  // getEnv().deleteFile(fileInfo);
-  // }
-  // }
+  @Test
+  public void testLogRecordBounds() throws Exception {
+    final int recordSize = LogConstants.BLOCK_SIZE - LogConstants.HEADER_SIZE;
+    final ByteBuffer record = ByteBuffer.allocate(recordSize);
+
+    writer.addRecord(record, true).thenCompose(voided -> writer.asyncClose()).toCompletableFuture()
+        .get();
+    record.rewind();
+
+    LogReader.newLogReader(getEnv(), fileInfo, LogMonitors.throwExceptionMonitor(), true, 0)
+        .thenCompose(logReader -> logReader.next().thenCompose(optRecord -> {
+          Assert.assertTrue(optRecord.isPresent());
+          Assert.assertTrue(optRecord.get().equals(record));
+          return logReader.next();
+        }).thenCompose(optRecord -> {
+          Assert.assertFalse(optRecord.isPresent());
+          return logReader.asyncClose();
+        })).toCompletableFuture().get();
+  }
 
   static ByteBuffer toByteBuffer(final String value) {
     return toByteBuffer(value, 1);
