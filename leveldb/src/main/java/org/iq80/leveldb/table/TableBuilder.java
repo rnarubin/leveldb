@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -195,7 +195,7 @@ public class TableBuilder
         BlockHandle blockHandle = new BlockHandle(position, blockContents.length());
 
         // write data and trailer
-        position += fileChannel.write(new ByteBuffer[]{blockContents.toByteBuffer(), trailer.toByteBuffer()});
+        position += fileChannel.write(new ByteBuffer[] {blockContents.toByteBuffer(), trailer.toByteBuffer()});
 
         // clean up state
         blockBuilder.reset();
@@ -203,7 +203,7 @@ public class TableBuilder
         return blockHandle;
     }
 
-    private int maxCompressedLength(int length)
+    private static int maxCompressedLength(int length)
     {
         // Compressed data can be defined as:
         //    compressed := item* literal*

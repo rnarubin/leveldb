@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,13 +22,18 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Finalizer<T>
 {
     public static final FinalizerMonitor IGNORE_FINALIZER_MONITOR = new FinalizerMonitor()
     {
+        @Override
         public void unexpectedException(Throwable throwable)
         {
         }
@@ -37,9 +42,9 @@ public class Finalizer<T>
     private final int threads;
     private final FinalizerMonitor monitor;
 
-    private final ConcurrentHashMap<FinalizerPhantomReference<T>, Object> references = new ConcurrentHashMap<FinalizerPhantomReference<T>, Object>();
-    private final ReferenceQueue<T> referenceQueue = new ReferenceQueue<T>();
-    private boolean destroyed;
+    private final ConcurrentHashMap<FinalizerPhantomReference<T>, Object> references = new ConcurrentHashMap<>();
+    private final ReferenceQueue<T> referenceQueue = new ReferenceQueue<>();
+    private final AtomicBoolean destroyed = new AtomicBoolean();
     private ExecutorService executor;
 
     public Finalizer()
@@ -63,7 +68,7 @@ public class Finalizer<T>
     {
         Preconditions.checkNotNull(item, "item is null");
         Preconditions.checkNotNull(cleanup, "cleanup is null");
-        Preconditions.checkState(!destroyed, "%s is destroyed", getClass().getName());
+        Preconditions.checkState(!destroyed.get(), "%s is destroyed", getClass().getName());
 
         if (executor == null) {
             // create executor
@@ -80,23 +85,24 @@ public class Finalizer<T>
         }
 
         // create a reference to the item so we are notified when it is garbage collected
-        FinalizerPhantomReference<T> reference = new FinalizerPhantomReference<T>(item, referenceQueue, cleanup);
+        FinalizerPhantomReference<T> reference = new FinalizerPhantomReference<>(item, referenceQueue, cleanup);
 
         // we must keep a strong reference to the reference object so we are notified when the item
         // is no longer reachable (if the reference object is garbage collected we are never notified)
         references.put(reference, Boolean.TRUE);
     }
-    
+
     public synchronized void destroy()
     {
-        destroyed = true;
-        if( executor!=null ) {
+        destroyed.set(true);
+        if (executor != null) {
             executor.shutdownNow();
         }
-        for(FinalizerPhantomReference<T> r: references.keySet() ) {
+        for (FinalizerPhantomReference<T> r : references.keySet()) {
             try {
                 r.cleanup();
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
             }
         }
     }
@@ -106,7 +112,8 @@ public class Finalizer<T>
         void unexpectedException(Throwable throwable);
     }
 
-    private static class FinalizerPhantomReference<T> extends PhantomReference<T>
+    private static class FinalizerPhantomReference<T>
+            extends PhantomReference<T>
     {
         private final AtomicBoolean cleaned = new AtomicBoolean(false);
         private final Callable<?> cleanup;
@@ -117,19 +124,22 @@ public class Finalizer<T>
             this.cleanup = cleanup;
         }
 
-        private void cleanup() throws Exception {
-            if(cleaned.compareAndSet(false, true)) {
+        private void cleanup()
+                throws Exception
+        {
+            if (cleaned.compareAndSet(false, true)) {
                 cleanup.call();
             }
         }
     }
 
-    private class FinalizerQueueProcessor implements Runnable
+    private class FinalizerQueueProcessor
+            implements Runnable
     {
         @Override
         public void run()
         {
-            while (!destroyed) {
+            while (!destroyed.get()) {
                 // get the next reference to cleanup
                 FinalizerPhantomReference<T> reference;
                 try {
@@ -167,7 +177,7 @@ public class Finalizer<T>
 
                 if (rescheduleAndReturn) {
                     synchronized (Finalizer.this) {
-                        if (!destroyed) {
+                        if (!destroyed.get()) {
                             executor.submit(new FinalizerQueueProcessor());
                         }
                     }

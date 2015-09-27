@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -21,7 +21,6 @@ import org.iq80.leveldb.util.Slice;
 import org.iq80.leveldb.util.Slices;
 import org.testng.annotations.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -56,7 +55,6 @@ public class BlockTest
     public void testMultipleEntriesWithNonSharedKey()
             throws Exception
     {
-
         blockTest(Integer.MAX_VALUE,
                 BlockHelper.createBlockEntry("beer", "Lagunitas IPA"),
                 BlockHelper.createBlockEntry("scotch", "Highland Park"));
@@ -76,7 +74,7 @@ public class BlockTest
     public void testMultipleEntriesWithNonSharedKeyAndRestartPositions()
             throws Exception
     {
-        List<BlockEntry> entries = Arrays.asList(
+        List<BlockEntry> entries = asList(
                 BlockHelper.createBlockEntry("ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 BlockHelper.createBlockEntry("ipa", "Lagunitas IPA"),
                 BlockHelper.createBlockEntry("stout", "Lagunitas Imperial Stout"),
@@ -91,7 +89,7 @@ public class BlockTest
     public void testMultipleEntriesWithSharedKeyAndRestartPositions()
             throws Exception
     {
-        List<BlockEntry> entries = Arrays.asList(
+        List<BlockEntry> entries = asList(
                 BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
                 BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -104,12 +102,12 @@ public class BlockTest
         }
     }
 
-    private void blockTest(int blockRestartInterval, BlockEntry... entries)
+    private static void blockTest(int blockRestartInterval, BlockEntry... entries)
     {
         blockTest(blockRestartInterval, asList(entries));
     }
 
-    private void blockTest(int blockRestartInterval, List<BlockEntry> entries)
+    private static void blockTest(int blockRestartInterval, List<BlockEntry> entries)
     {
         BlockBuilder builder = new BlockBuilder(256, blockRestartInterval, new BytewiseComparator());
 
@@ -142,8 +140,7 @@ public class BlockTest
             BlockHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
         }
 
-        blockIterator.seek(Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
+        blockIterator.seek(Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
         BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry>emptyList());
-
     }
 }

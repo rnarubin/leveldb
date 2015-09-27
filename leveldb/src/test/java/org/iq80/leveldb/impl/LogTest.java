@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -30,7 +30,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
-import java.util.Arrays;
 import java.util.List;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -41,7 +40,7 @@ import static org.testng.FileAssert.fail;
 
 public class LogTest
 {
-    private final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
+    private static final LogMonitor NO_CORRUPTION_MONITOR = new LogMonitor()
     {
         @Override
         public void corruption(long bytes, String reason)
@@ -72,12 +71,11 @@ public class LogTest
         testLog(toSlice("dain sundstrom"));
     }
 
-
     @Test
     public void testMultipleSmallRecords()
             throws Exception
     {
-        List<Slice> records = Arrays.asList(
+        List<Slice> records = asList(
                 toSlice("Lagunitas  Little Sumpin’ Sumpin’"),
                 toSlice("Lagunitas IPA"),
                 toSlice("Lagunitas Imperial Stout"),
@@ -99,7 +97,7 @@ public class LogTest
     public void testMultipleLargeRecords()
             throws Exception
     {
-        List<Slice> records = Arrays.asList(
+        List<Slice> records = asList(
                 toSlice("Lagunitas  Little Sumpin’ Sumpin’", 4000),
                 toSlice("Lagunitas IPA", 4000),
                 toSlice("Lagunitas Imperial Stout", 4000),

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,7 +19,7 @@ package org.iq80.leveldb;
 
 public class ReadOptions
 {
-    private boolean verifyChecksums = false;
+    private boolean verifyChecksums;
     private boolean fillCache = true;
     private Snapshot snapshot;
 
@@ -34,20 +34,24 @@ public class ReadOptions
         return this;
     }
 
-    public boolean fillCache() {
+    public boolean fillCache()
+    {
         return fillCache;
     }
 
-    public ReadOptions fillCache(boolean fillCache) {
+    public ReadOptions fillCache(boolean fillCache)
+    {
         this.fillCache = fillCache;
         return this;
     }
 
-    public boolean verifyChecksums() {
+    public boolean verifyChecksums()
+    {
         return verifyChecksums;
     }
 
-    public ReadOptions verifyChecksums(boolean verifyChecksums) {
+    public ReadOptions verifyChecksums(boolean verifyChecksums)
+    {
         this.verifyChecksums = verifyChecksums;
         return this;
     }

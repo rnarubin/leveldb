@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -35,7 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
 import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 
-public class FileChannelLogWriter implements LogWriter
+public class FileChannelLogWriter
+        implements LogWriter
 {
     private final File file;
     private final long fileNumber;

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -29,14 +29,15 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 
-public class MemTable implements SeekingIterable<InternalKey, Slice>
+public class MemTable
+        implements SeekingIterable<InternalKey, Slice>
 {
     private final ConcurrentSkipListMap<InternalKey, Slice> table;
     private final AtomicLong approximateMemoryUsage = new AtomicLong();
 
     public MemTable(InternalKeyComparator internalKeyComparator)
     {
-        table = new ConcurrentSkipListMap<InternalKey, Slice>(internalKeyComparator);
+        table = new ConcurrentSkipListMap<>(internalKeyComparator);
     }
 
     public boolean isEmpty()
@@ -75,7 +76,8 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
         if (entryKey.getUserKey().equals(key.getUserKey())) {
             if (entryKey.getValueType() == ValueType.DELETION) {
                 return LookupResult.deleted(key);
-            } else {
+            }
+            else {
                 return LookupResult.ok(key, entry.getValue());
             }
         }
@@ -88,9 +90,9 @@ public class MemTable implements SeekingIterable<InternalKey, Slice>
         return new MemTableIterator();
     }
 
-    public class MemTableIterator implements InternalIterator
+    public class MemTableIterator
+            implements InternalIterator
     {
-
         private PeekingIterator<Entry<InternalKey, Slice>> iterator;
 
         public MemTableIterator()

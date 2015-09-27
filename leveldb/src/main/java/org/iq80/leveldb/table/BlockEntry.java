@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -17,11 +17,9 @@
  */
 package org.iq80.leveldb.table;
 
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import org.iq80.leveldb.util.Slice;
 
-import java.util.Arrays;
 import java.util.Map.Entry;
 
 import static com.google.common.base.Charsets.UTF_8;
@@ -72,17 +70,9 @@ import static com.google.common.base.Charsets.UTF_8;
  * </tbody>
  * </table>
  */
-public class BlockEntry implements Entry<Slice, Slice>
+public class BlockEntry
+        implements Entry<Slice, Slice>
 {
-    public static final Function<BlockEntry, Slice> GET_KEY = new Function<BlockEntry, Slice>()
-    {
-        @Override
-        public Slice apply(BlockEntry blockEntry)
-        {
-            return blockEntry.getKey();
-        }
-    };
-
     private final Slice key;
     private final Slice value;
 
@@ -94,16 +84,17 @@ public class BlockEntry implements Entry<Slice, Slice>
         this.value = value;
     }
 
+    @Override
     public Slice getKey()
     {
         return key;
     }
 
+    @Override
     public Slice getValue()
     {
         return value;
     }
-
 
     /**
      * @throws UnsupportedOperationException always
@@ -147,7 +138,7 @@ public class BlockEntry implements Entry<Slice, Slice>
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("BlockEntry");
         sb.append("{key=").append(key.toString(UTF_8));      // todo don't print the real value
         sb.append(", value=").append(value.toString(UTF_8));

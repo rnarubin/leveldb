@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -20,19 +20,25 @@ package org.iq80.leveldb;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public class DBException extends RuntimeException {
-    public DBException() {
+public class DBException
+        extends RuntimeException
+{
+    public DBException()
+    {
     }
 
-    public DBException(String s) {
+    public DBException(String s)
+    {
         super(s);
     }
 
-    public DBException(String s, Throwable throwable) {
+    public DBException(String s, Throwable throwable)
+    {
         super(s, throwable);
     }
 
-    public DBException(Throwable throwable) {
+    public DBException(Throwable throwable)
+    {
         super(throwable);
     }
 }

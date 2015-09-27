@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -26,8 +26,12 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
-public class Filename
+public final class Filename
 {
+    private Filename()
+    {
+    }
+
     public enum FileType
     {
         LOG,
@@ -153,6 +157,7 @@ public class Filename
     /**
      * Make the CURRENT file point to the descriptor file with the
      * specified number.
+     *
      * @return true if successful; false otherwise
      */
     public static boolean setCurrentFile(File databaseDir, long descriptorNumber)
@@ -200,8 +205,8 @@ public class Filename
 
     public static class FileInfo
     {
-        private FileType fileType;
-        private long fileNumber;
+        private final FileType fileType;
+        private final long fileNumber;
 
         public FileInfo(FileType fileType)
         {
@@ -258,7 +263,7 @@ public class Filename
         @Override
         public String toString()
         {
-            final StringBuilder sb = new StringBuilder();
+            StringBuilder sb = new StringBuilder();
             sb.append("FileInfo");
             sb.append("{fileType=").append(fileType);
             sb.append(", fileNumber=").append(fileNumber);

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,7 +22,8 @@ public enum CompressionType
     NONE(0x00),
     SNAPPY(0x01);
 
-    public static CompressionType getCompressionTypeByPersistentId(int persistentId) {
+    public static CompressionType getCompressionTypeByPersistentId(int persistentId)
+    {
         for (CompressionType compressionType : CompressionType.values()) {
             if (compressionType.persistentId == persistentId) {
                 return compressionType;

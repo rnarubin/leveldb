@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -31,7 +31,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -39,14 +38,15 @@ import java.util.List;
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertTrue;
 
-abstract public class TableTest
+public abstract class TableTest
 {
     private File file;
     private RandomAccessFile randomAccessFile;
     private FileChannel fileChannel;
 
-    abstract protected Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums) throws IOException;
-    
+    protected abstract Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+            throws IOException;
+
     @Test(expectedExceptions = IllegalArgumentException.class)
     public void testEmptyFile()
             throws Exception
@@ -61,7 +61,6 @@ abstract public class TableTest
         tableTest(Integer.MAX_VALUE, Integer.MAX_VALUE);
     }
 
-
     @Test
     public void testSingleEntrySingleBlock()
             throws Exception
@@ -74,7 +73,7 @@ abstract public class TableTest
     public void testMultipleEntriesWithSingleBlock()
             throws Exception
     {
-        List<BlockEntry> entries = Arrays.asList(
+        List<BlockEntry> entries = asList(
                 BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
                 BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -91,7 +90,7 @@ abstract public class TableTest
     public void testMultipleEntriesWithMultipleBlock()
             throws Exception
     {
-        List<BlockEntry> entries = Arrays.asList(
+        List<BlockEntry> entries = asList(
                 BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
                 BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -149,7 +148,7 @@ abstract public class TableTest
             lastApproximateOffset = approximateOffset;
         }
 
-        Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
+        Slice endKey = Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
         seekingIterator.seek(endKey);
         BlockHelper.assertSequence(seekingIterator, Collections.<BlockEntry>emptyList());
 

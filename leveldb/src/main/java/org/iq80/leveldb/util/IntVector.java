@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -56,7 +56,6 @@ public class IntVector
             return;
         }
 
-
         int newLength = values.length;
         if (newLength == 0) {
             newLength = 1;
@@ -73,7 +72,8 @@ public class IntVector
         return Arrays.copyOf(values, size);
     }
 
-    public void write(SliceOutput sliceOutput) {
+    public void write(SliceOutput sliceOutput)
+    {
         for (int index = 0; index < size; index++) {
             sliceOutput.writeInt(values[index]);
         }
@@ -82,7 +82,7 @@ public class IntVector
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("IntVector");
         sb.append("{size=").append(size);
         sb.append(", values=").append(Arrays.toString(values));

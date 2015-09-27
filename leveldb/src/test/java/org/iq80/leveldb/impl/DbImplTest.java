@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -17,9 +17,7 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.UnsignedBytes;
 import org.iq80.leveldb.DB;
@@ -82,12 +80,11 @@ public class DbImplTest
         options.createIfMissing(true);
         DbImpl db = new DbImpl(options, this.databaseDir);
         Random random = new Random(301);
-        for(int i=0; i < 200000*STRESS_FACTOR; i++)
-        {
-            db.put(randomString(random, 64).getBytes(), new byte[]{0x01}, new WriteOptions().sync(false));
+        for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+            db.put(randomString(random, 64).getBytes(), new byte[] {0x01}, new WriteOptions().sync(false));
             db.get(randomString(random, 64).getBytes());
-            if ((i%50000)==0 && i!=0 ) {
-                System.out.println(i+" rows written");
+            if ((i % 50000) == 0 && i != 0) {
+                System.out.println(i + " rows written");
             }
         }
     }
@@ -437,7 +434,7 @@ public class DbImplTest
         Random random = new Random(301);
         List<String> values = newArrayList();
         for (int i = 0; i < 80; i++) {
-            String value = randomString(random, 100*1024);
+            String value = randomString(random, 100 * 1024);
             db.put(key(i), value);
             values.add(value);
         }
@@ -779,7 +776,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 immutableEntry("beer/ipa", "Lagunitas IPA"),
                 immutableEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -796,7 +793,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options(), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
                 immutableEntry("beer/ipa", "Lagunitas IPA"),
                 immutableEntry("beer/stout", "Lagunitas Imperial Stout"),
@@ -809,16 +806,16 @@ public class DbImplTest
         }
     }
 
-    @Test (expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory '" + DOES_NOT_EXIST_FILENAME_PATTERN + "'.*")
     public void testCantCreateDirectoryReturnMessage()
-        throws Exception
+            throws Exception
     {
         new DbStringWrapper(new Options(), new File(DOES_NOT_EXIST_FILENAME));
     }
 
-    @Test (expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Database directory.*is not a directory")
     public void testDBDirectoryIsFileRetrunMessage()
-        throws Exception
+            throws Exception
     {
         File databaseFile = new File(databaseDir + "/imafile");
         assertTrue(databaseFile.createNewFile());
@@ -843,7 +840,7 @@ public class DbImplTest
     {
         DbStringWrapper db = new DbStringWrapper(new Options().comparator(new ReverseDBComparator()), databaseDir);
 
-        List<Entry<String, String>> entries = Arrays.asList(
+        List<Entry<String, String>> entries = asList(
                 immutableEntry("scotch/strong", "Lagavulin"),
                 immutableEntry("scotch/medium", "Highland Park"),
                 immutableEntry("scotch/light", "Oban 14"),
@@ -866,7 +863,8 @@ public class DbImplTest
         assertFalse(seekingIterator.hasNext());
     }
 
-    private void testDb(DbStringWrapper db, Entry<String, String>... entries)
+    @SafeVarargs
+    private final void testDb(DbStringWrapper db, Entry<String, String>... entries)
             throws IOException
     {
         testDb(db, asList(entries));
@@ -875,7 +873,6 @@ public class DbImplTest
     private void testDb(DbStringWrapper db, List<Entry<String, String>> entries)
             throws IOException
     {
-
         for (Entry<String, String> entry : entries) {
             db.put(entry.getKey(), entry.getValue());
         }
@@ -903,8 +900,8 @@ public class DbImplTest
             assertSequence(seekingIterator, nextEntries.subList(1, nextEntries.size()));
         }
 
-        Slice endKey = Slices.wrappedBuffer(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
-        seekingIterator.seek(endKey.toString(Charsets.UTF_8));
+        Slice endKey = Slices.wrappedBuffer(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
+        seekingIterator.seek(endKey.toString(UTF_8));
         assertSequence(seekingIterator, Collections.<Entry<String, String>>emptyList());
     }
 
@@ -955,12 +952,11 @@ public class DbImplTest
         return value.getBytes(UTF_8);
     }
 
-
     private static String randomString(Random random, int length)
     {
         char[] chars = new char[length];
         for (int i = 0; i < chars.length; i++) {
-            chars[i] = (char) (' ' + random.nextInt(95));
+            chars[i] = (char) ((int) ' ' + random.nextInt(95));
         }
         return new String(chars);
 
@@ -992,7 +988,7 @@ public class DbImplTest
         }
     }
 
-    ArrayList<DbStringWrapper> opened = new ArrayList<DbStringWrapper>();
+    private final ArrayList<DbStringWrapper> opened = new ArrayList<>();
 
     private static class ReverseDBComparator
             implements DBComparator
@@ -1093,7 +1089,7 @@ public class DbImplTest
             if (slice == null) {
                 return null;
             }
-            return new String(slice, Charsets.UTF_8);
+            return new String(slice, UTF_8);
         }
 
         public void put(String key, String value)
@@ -1202,9 +1198,10 @@ public class DbImplTest
 
     }
 
-    private static class StringDbIterator implements SeekingIterator<String, String>
+    private static class StringDbIterator
+            implements SeekingIterator<String, String>
     {
-        private DBIterator iterator;
+        private final DBIterator iterator;
 
         private StringDbIterator(DBIterator iterator)
         {
@@ -1249,7 +1246,7 @@ public class DbImplTest
 
         private Entry<String, String> adapt(Entry<byte[], byte[]> next)
         {
-            return Maps.immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
+            return immutableEntry(new String(next.getKey(), UTF_8), new String(next.getValue(), UTF_8));
         }
     }
 }

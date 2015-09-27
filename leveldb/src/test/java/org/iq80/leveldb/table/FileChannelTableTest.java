@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -23,9 +23,13 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.Comparator;
 
-public class FileChannelTableTest extends TableTest
+public class FileChannelTableTest
+        extends TableTest
 {
-    protected Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums) throws IOException {
+    @Override
+    protected Table createTable(String name, FileChannel fileChannel, Comparator<Slice> comparator, boolean verifyChecksums)
+            throws IOException
+    {
         return new FileChannelTable(name, fileChannel, comparator, verifyChecksums);
     }
 }

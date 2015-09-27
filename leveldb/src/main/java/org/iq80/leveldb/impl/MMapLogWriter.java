@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -37,9 +37,10 @@ import static org.iq80.leveldb.impl.LogConstants.BLOCK_SIZE;
 import static org.iq80.leveldb.impl.LogConstants.HEADER_SIZE;
 import static org.iq80.leveldb.impl.Logs.getChunkChecksum;
 
-public class MMapLogWriter implements LogWriter
+public class MMapLogWriter
+        implements LogWriter
 {
-    private static final int PAGE_SIZE  = 1024 * 1024;
+    private static final int PAGE_SIZE = 1024 * 1024;
 
     private final File file;
     private final long fileNumber;
@@ -63,11 +64,13 @@ public class MMapLogWriter implements LogWriter
         mappedByteBuffer = fileChannel.map(MapMode.READ_WRITE, 0, PAGE_SIZE);
     }
 
+    @Override
     public boolean isClosed()
     {
         return closed.get();
     }
 
+    @Override
     public synchronized void close()
             throws IOException
     {
@@ -83,6 +86,7 @@ public class MMapLogWriter implements LogWriter
         Closeables.closeQuietly(fileChannel);
     }
 
+    @Override
     public synchronized void delete()
             throws IOException
     {
@@ -101,17 +105,20 @@ public class MMapLogWriter implements LogWriter
         mappedByteBuffer = null;
     }
 
+    @Override
     public File getFile()
     {
         return file;
     }
 
+    @Override
     public long getFileNumber()
     {
         return fileNumber;
     }
 
     // Writes a stream of chunks such that no chunk is split across a block boundary
+    @Override
     public synchronized void addRecord(Slice record, boolean force)
             throws IOException
     {
@@ -219,7 +226,7 @@ public class MMapLogWriter implements LogWriter
         ByteBufferSupport.unmap(mappedByteBuffer);
     }
 
-    private Slice newLogRecordHeader(LogChunkType type, Slice slice)
+    private static Slice newLogRecordHeader(LogChunkType type, Slice slice)
     {
         int crc = getChunkChecksum(type.getPersistentId(), slice.getRawArray(), slice.getRawOffset(), slice.length());
 

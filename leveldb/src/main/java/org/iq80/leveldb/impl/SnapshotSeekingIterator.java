@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -25,7 +25,8 @@ import org.iq80.leveldb.util.Slice;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
-public final class SnapshotSeekingIterator extends AbstractSeekingIterator<Slice, Slice>
+public final class SnapshotSeekingIterator
+        extends AbstractSeekingIterator<Slice, Slice>
 {
     private final DbIterator iterator;
     private final SnapshotImpl snapshot;
@@ -39,7 +40,8 @@ public final class SnapshotSeekingIterator extends AbstractSeekingIterator<Slice
         this.snapshot.getVersion().retain();
     }
 
-    public void close() {
+    public void close()
+    {
         this.snapshot.getVersion().release();
     }
 
@@ -113,5 +115,4 @@ public final class SnapshotSeekingIterator extends AbstractSeekingIterator<Slice
         sb.append('}');
         return sb.toString();
     }
-
 }

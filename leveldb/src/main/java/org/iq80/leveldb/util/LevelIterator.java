@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2011 the original author or authors.
+ * See the notice.md file distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.iq80.leveldb.util;
 
 import org.iq80.leveldb.impl.FileMetaData;
@@ -8,7 +25,9 @@ import org.iq80.leveldb.impl.TableCache;
 import java.util.List;
 import java.util.Map.Entry;
 
-public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public final class LevelIterator
+        extends AbstractSeekingIterator<InternalKey, Slice>
+        implements InternalIterator
 {
     private final TableCache tableCache;
     private final List<FileMetaData> files;
@@ -35,7 +54,7 @@ public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Sl
     protected void seekInternal(InternalKey targetKey)
     {
         // seek the index to the block containing the key
-        if (files.size() == 0) {
+        if (files.isEmpty()) {
             return;
         }
 
@@ -121,7 +140,7 @@ public final class LevelIterator extends AbstractSeekingIterator<InternalKey, Sl
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("ConcatenatingIterator");
         sb.append("{index=").append(index);
         sb.append(", files=").append(files);

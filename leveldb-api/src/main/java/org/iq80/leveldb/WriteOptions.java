@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,7 +22,6 @@ public class WriteOptions
     private boolean sync;
     private boolean snapshot;
 
-
     public boolean sync()
     {
         return sync;
@@ -34,13 +33,14 @@ public class WriteOptions
         return this;
     }
 
-    public boolean snapshot() {
+    public boolean snapshot()
+    {
         return snapshot;
     }
 
-    public WriteOptions snapshot(boolean snapshot) {
+    public WriteOptions snapshot(boolean snapshot)
+    {
         this.snapshot = snapshot;
         return this;
     }
-
 }

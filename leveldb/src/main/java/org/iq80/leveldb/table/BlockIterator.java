@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -19,18 +19,19 @@ package org.iq80.leveldb.table;
 
 import com.google.common.base.Preconditions;
 import org.iq80.leveldb.impl.SeekingIterator;
-import org.iq80.leveldb.util.SliceInput;
 import org.iq80.leveldb.util.Slice;
+import org.iq80.leveldb.util.SliceInput;
+import org.iq80.leveldb.util.SliceOutput;
 import org.iq80.leveldb.util.Slices;
 import org.iq80.leveldb.util.VariableLengthQuantity;
-import org.iq80.leveldb.util.SliceOutput;
 
 import java.util.Comparator;
 import java.util.NoSuchElementException;
 
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 
-public class BlockIterator implements SeekingIterator<Slice, Slice>
+public class BlockIterator
+        implements SeekingIterator<Slice, Slice>
 {
     private final SliceInput data;
     private final Slice restartPositions;

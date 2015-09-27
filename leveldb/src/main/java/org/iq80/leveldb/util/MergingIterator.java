@@ -1,12 +1,34 @@
+/*
+ * Copyright (C) 2011 the original author or authors.
+ * See the notice.md file distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.iq80.leveldb.util;
 
 import com.google.common.primitives.Ints;
 import org.iq80.leveldb.impl.InternalKey;
 
-import java.util.*;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
+import java.util.PriorityQueue;
 
-public final class MergingIterator extends AbstractSeekingIterator<InternalKey, Slice>
+public final class MergingIterator
+        extends AbstractSeekingIterator<InternalKey, Slice>
 {
     private final List<? extends InternalIterator> levels;
     private final PriorityQueue<ComparableIterator> priorityQueue;
@@ -17,7 +39,7 @@ public final class MergingIterator extends AbstractSeekingIterator<InternalKey, 
         this.levels = levels;
         this.comparator = comparator;
 
-        this.priorityQueue = new PriorityQueue<ComparableIterator>(levels.size() + 1);
+        this.priorityQueue = new PriorityQueue<>(levels.size() + 1);
         resetPriorityQueue(comparator);
     }
 
@@ -66,7 +88,7 @@ public final class MergingIterator extends AbstractSeekingIterator<InternalKey, 
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("MergingIterator");
         sb.append("{levels=").append(levels);
         sb.append(", comparator=").append(comparator);
@@ -74,7 +96,8 @@ public final class MergingIterator extends AbstractSeekingIterator<InternalKey, 
         return sb.toString();
     }
 
-    private static class ComparableIterator implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
+    private static class ComparableIterator
+            implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
     {
         private final InternalIterator iterator;
         private final Comparator<InternalKey> comparator;
@@ -95,6 +118,7 @@ public final class MergingIterator extends AbstractSeekingIterator<InternalKey, 
             return nextElement != null;
         }
 
+        @Override
         public Entry<InternalKey, Slice> next()
         {
             if (nextElement == null) {

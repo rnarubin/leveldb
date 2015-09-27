@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2011 the original author or authors.
+ * See the notice.md file distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.iq80.leveldb.util;
 
 import com.google.common.base.Preconditions;
@@ -12,9 +29,10 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 
-public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice> implements InternalIterator
+public final class DbIterator
+        extends AbstractSeekingIterator<InternalKey, Slice>
+        implements InternalIterator
 {
-
     /*
      * NOTE: This code has been specifically tuned for performance of the DB
      * iterator methods.  Before committing changes to this code, make sure
@@ -31,7 +49,6 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
      * polymorphic call-sites, this code can be made much simpler.
      */
 
-
     private final MemTableIterator memTableIterator;
     private final MemTableIterator immutableMemTableIterator;
     private final List<InternalTableIterator> level0Files;
@@ -40,7 +57,7 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
     private final Comparator<InternalKey> comparator;
 
     private final ComparableIterator[] heap;
-    private int heapSize = 0;
+    private int heapSize;
 
     public DbIterator(MemTableIterator memTableIterator,
             MemTableIterator immutableMemTableIterator,
@@ -192,7 +209,7 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("DbIterator");
         sb.append("{memTableIterator=").append(memTableIterator);
         sb.append(", immutableMemTableIterator=").append(immutableMemTableIterator);
@@ -203,7 +220,8 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
         return sb.toString();
     }
 
-    private static class ComparableIterator implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
+    private static class ComparableIterator
+            implements Iterator<Entry<InternalKey, Slice>>, Comparable<ComparableIterator>
     {
         private final SeekingIterator<InternalKey, Slice> iterator;
         private final Comparator<InternalKey> comparator;
@@ -224,6 +242,7 @@ public final class DbIterator extends AbstractSeekingIterator<InternalKey, Slice
             return nextElement != null;
         }
 
+        @Override
         public Entry<InternalKey, Slice> next()
         {
             if (nextElement == null) {

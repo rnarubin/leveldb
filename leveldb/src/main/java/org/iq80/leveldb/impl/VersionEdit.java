@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -47,7 +47,7 @@ public class VersionEdit
     public VersionEdit(Slice slice)
     {
         SliceInput sliceInput = slice.input();
-        while(sliceInput.isReadable()) {
+        while (sliceInput.isReadable()) {
             int i = VariableLengthQuantity.readVariableLengthInt(sliceInput);
             VersionEditTag tag = VersionEditTag.getValueTypeByPersistentId(i);
             tag.readValue(sliceInput, this);
@@ -132,7 +132,6 @@ public class VersionEdit
             InternalKey smallest,
             InternalKey largest)
     {
-
         FileMetaData fileMetaData = new FileMetaData(fileNumber, fileSize, smallest, largest);
         addFile(level, fileMetaData);
     }
@@ -146,7 +145,6 @@ public class VersionEdit
     {
         newFiles.putAll(files);
     }
-
 
     public Multimap<Integer, Long> getDeletedFiles()
     {
@@ -171,7 +169,7 @@ public class VersionEdit
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("VersionEdit");
         sb.append("{comparatorName='").append(comparatorName).append('\'');
         sb.append(", logNumber=").append(logNumber);

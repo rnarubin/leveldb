@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class FileMetaData
 {
-    public static Function<FileMetaData, InternalKey> GET_LARGEST_USER_KEY = new Function<FileMetaData, InternalKey>()
+    public static final Function<FileMetaData, InternalKey> GET_LARGEST_USER_KEY = new Function<FileMetaData, InternalKey>()
     {
         @Override
         public InternalKey apply(FileMetaData fileMetaData)
@@ -101,7 +101,7 @@ public class FileMetaData
     @Override
     public String toString()
     {
-        final StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         sb.append("FileMetaData");
         sb.append("{number=").append(number);
         sb.append(", fileSize=").append(fileSize);

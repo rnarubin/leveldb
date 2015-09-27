@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -22,8 +22,10 @@ import java.io.Closeable;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public interface WriteBatch extends Closeable {
+public interface WriteBatch
+        extends Closeable
+{
+    WriteBatch put(byte[] key, byte[] value);
 
-    public WriteBatch put(byte[] key, byte[] value);
-    public WriteBatch delete(byte[] key);
+    WriteBatch delete(byte[] key);
 }

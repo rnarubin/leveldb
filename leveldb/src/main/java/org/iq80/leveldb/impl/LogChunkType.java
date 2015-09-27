@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -18,7 +18,6 @@
 package org.iq80.leveldb.impl;
 
 import com.google.common.base.Preconditions;
-import org.iq80.leveldb.util.PureJavaCrc32C;
 
 public enum LogChunkType
 {
@@ -31,7 +30,8 @@ public enum LogChunkType
     BAD_CHUNK,
     UNKNOWN;
 
-    public static LogChunkType getLogChunkTypeByPersistentId(int persistentId) {
+    public static LogChunkType getLogChunkTypeByPersistentId(int persistentId)
+    {
         for (LogChunkType logChunkType : LogChunkType.values()) {
             if (logChunkType.persistentId != null && logChunkType.persistentId == persistentId) {
                 return logChunkType;

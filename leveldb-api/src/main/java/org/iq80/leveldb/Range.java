@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -20,24 +20,26 @@ package org.iq80.leveldb;
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-public class Range {
+public class Range
+{
+    private final byte[] start;
+    private final byte[] limit;
 
-    final private byte[] start;
-    final private byte[] limit;
-
-    public byte[] limit() {
+    public byte[] limit()
+    {
         return limit;
     }
 
-    public byte[] start() {
+    public byte[] start()
+    {
         return start;
     }
 
-    public Range(byte[] start, byte[] limit) {
+    public Range(byte[] start, byte[] limit)
+    {
         Options.checkArgNotNull(start, "start");
         Options.checkArgNotNull(limit, "limit");
         this.limit = limit;
         this.start = start;
     }
-
 }

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
  * information regarding copyright ownership.
@@ -24,6 +24,10 @@ public final class SequenceNumber
     // We leave eight bits empty at the bottom so a type and sequence#
     // can be packed together into 64-bits.
     public static final long MAX_SEQUENCE_NUMBER = ((0x1L << 56) - 1);
+
+    private SequenceNumber()
+    {
+    }
 
     public static long packSequenceAndValueType(long sequence, ValueType valueType)
     {
