@@ -73,6 +73,14 @@ public final class CompletableFutures {
         .thenApply(voided -> Stream.of(futures).map(CompletableFuture::join));
   }
 
+  public static <T> CompletionStage<Void> allOfVoid(final Stream<CompletionStage<T>> stages) {
+    @SuppressWarnings("unchecked")
+    final CompletableFuture<T>[] futures =
+        stages.map(CompletionStage::toCompletableFuture).toArray(CompletableFuture[]::new);
+
+    return CompletableFuture.allOf(futures);
+  }
+
   public static <T, U> CompletionStage<U> handleExceptionally(final CompletionStage<T> first,
       final ExceptionalBiFunction<? super T, Throwable, ? extends U> handler) {
     final CompletableFuture<U> f = new CompletableFuture<>();

@@ -15,10 +15,8 @@
 package org.iq80.leveldb.table;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.table.TableIterator.WrappedBlockIterator;
@@ -41,18 +39,10 @@ public final class TableIterator extends
         .thenApply(block -> new WrappedBlockIterator<>(block.iterator()));
   }
 
-  static class WrappedBlockIterator<T> extends AsyncWrappedSeekingIterator<T, ByteBuffer>
-      implements AsynchronousCloseable {
-
+  static class WrappedBlockIterator<T> extends AsyncWrappedSeekingIterator<T, ByteBuffer> {
     public WrappedBlockIterator(final ReverseSeekingIterator<T, ByteBuffer> iter) {
       super(iter);
     }
-
-    @Override
-    public CompletionStage<Void> asyncClose() {
-      return CompletableFuture.completedFuture(null);
-    }
-
   }
 
   @Override

@@ -327,13 +327,18 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<Void> deleteFile(final FileInfo info) {
-      return delegate.deleteFile(info);
+    public CompletionStage<? extends LockFile> lockFile(final FileInfo info) {
+      return delegate.lockFile(info);
     }
 
     @Override
     public CompletionStage<Boolean> fileExists(final FileInfo info) {
       return delegate.fileExists(info);
+    }
+
+    @Override
+    public CompletionStage<Void> deleteFile(final FileInfo info) {
+      return delegate.deleteFile(info);
     }
 
     @Override
@@ -353,8 +358,8 @@ public interface Env {
     }
 
     @Override
-    public CompletionStage<? extends LockFile> lockFile(final FileInfo info) {
-      return delegate.lockFile(info);
+    public Executor getExecutor() {
+      return delegate.getExecutor();
     }
   }
 

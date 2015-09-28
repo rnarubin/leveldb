@@ -45,6 +45,8 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import com.google.common.collect.Iterables;
+
 public abstract class TableTest extends EnvDependentTest {
 
   private static final DBBufferComparator byteCompare = new BytewiseComparator();
@@ -178,21 +180,21 @@ public abstract class TableTest extends EnvDependentTest {
     final TableIterator iter = table.retain().iterator();
 
     iter.seekToFirst()
-        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter,
-            Collections.<Entry<InternalKey, ByteBuffer>>emptyList()))
+        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, Collections.emptyList()))
         .thenCompose(voided -> BlockHelper.assertSequence(iter, entries))
         .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
         .thenCompose(voided -> iter.seekToEnd())
-        .thenCompose(voided -> BlockHelper.assertSequence(iter,
-            Collections.<Entry<InternalKey, ByteBuffer>>emptyList()))
+        .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList()))
         .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
         .thenCompose(voided -> BlockHelper.assertSequence(iter, entries)).toCompletableFuture()
         .get();
 
     long lastApproximateOffset = 0;
+    int i = 0;
     for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-      final List<Entry<InternalKey, ByteBuffer>> nextEntries =
-          entries.subList(entries.indexOf(entry), entries.size());
+      final List<Entry<InternalKey, ByteBuffer>> nextEntries = entries.subList(i, entries.size());
+      final List<Entry<InternalKey, ByteBuffer>> prevEntries =
+          reverseEntries.subList(entries.size() - i, entries.size());
 
       iter.seek(entry.getKey()).thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
           .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
@@ -202,17 +204,27 @@ public abstract class TableTest extends EnvDependentTest {
               nextEntries.subList(1, nextEntries.size())))
           .toCompletableFuture().get();
 
+      iter.seek(entry.getKey())
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
+          .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
+          .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter,
+              Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries)))
+          .toCompletableFuture().get();
+
       final long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
       Assert.assertTrue(approximateOffset >= lastApproximateOffset);
       lastApproximateOffset = approximateOffset;
+
+      i++;
     }
 
     final InternalKey endKey = new TransientInternalKey(
         ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
         ValueType.VALUE);
     iter.seek(endKey)
-        .thenCompose(voided -> BlockHelper.assertSequence(iter,
-            Collections.<BlockEntry<InternalKey>>emptyList()))
+        .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList()))
         .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
         .toCompletableFuture().get();
 
@@ -228,4 +240,5 @@ public abstract class TableTest extends EnvDependentTest {
 
   public static class FileTableTest extends TableTest implements FileEnvTestProvider {
   }
+
 }

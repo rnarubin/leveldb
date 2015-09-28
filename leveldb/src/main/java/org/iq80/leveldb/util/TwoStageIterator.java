@@ -23,14 +23,13 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.util.Iterators.Direction;
 
-public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<InternalKey, V>, DataT extends SeekingAsynchronousIterator<InternalKey, ByteBuffer> & AsynchronousCloseable, V>
-    implements SeekingAsynchronousIterator<InternalKey, ByteBuffer>, AsynchronousCloseable {
+public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<InternalKey, V>, DataT extends SeekingAsynchronousIterator<InternalKey, ByteBuffer>, V>
+    implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
   private final IndexT index;
   private DataT current;
   private Direction currentOrigin;
@@ -66,7 +65,7 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
         current = newCurrent;
         currentOrigin = NEXT;
         return newCurrent.seek(targetKey);
-      }).<Void, Void>thenCombine(close, (seeked, closed) -> null);
+      }).thenCombine(close, (seeked, closed) -> null);
     } else {
       current = null;
       return close;

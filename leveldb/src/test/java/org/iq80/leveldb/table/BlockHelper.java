@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
@@ -102,24 +103,36 @@ public final class BlockHelper {
 
   public static <K, V> CompletionStage<?> assertSequence(
       final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries) {
-    return assertSequence(iter, Direction.NEXT, entries);
+    return assertSequence(iter, entries, ForkJoinPool.commonPool());
+  }
+
+  public static <K, V> CompletionStage<?> assertSequence(
+      final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries,
+      final Executor asyncExec) {
+    return assertSequence(iter, Direction.NEXT, entries, asyncExec);
   }
 
   public static <K, V> CompletionStage<?> assertReverseSequence(
       final SeekingAsynchronousIterator<K, V> iter,
       final Iterable<? extends Entry<K, V>> reversedEntries) {
-    return assertSequence(iter, Direction.PREV, reversedEntries);
+    return assertReverseSequence(iter, reversedEntries, ForkJoinPool.commonPool());
+  }
+
+  public static <K, V> CompletionStage<?> assertReverseSequence(
+      final SeekingAsynchronousIterator<K, V> iter,
+      final Iterable<? extends Entry<K, V>> reversedEntries, final Executor asyncExec) {
+    return assertSequence(iter, Direction.PREV, reversedEntries, asyncExec);
   }
 
   public static <K, V> CompletionStage<?> assertSequence(
       final SeekingAsynchronousIterator<K, V> iter, final Direction direction,
-      final Iterable<? extends Entry<K, V>> entries) {
+      final Iterable<? extends Entry<K, V>> entries, final Executor asyncExec) {
     final Iterator<? extends Entry<K, V>> expected = entries.iterator();
     return CompletableFutures.flatMapIterator(iter, direction, entry -> {
       assertTrue(expected.hasNext(), "more entries in iterator than expected");
       assertEntryEquals(entry, expected.next());
       return entry;
-    } , ForkJoinPool.commonPool()).thenApply(stream -> {
+    } , asyncExec).thenApply(stream -> {
       assertFalse(expected.hasNext());
       try {
         assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());
@@ -179,8 +192,8 @@ public final class BlockHelper {
   }
 
   public static InternalKey beforeInternalKey(final Entry<InternalKey, ?> expectedEntry) {
-    return new TransientInternalKey(before(expectedEntry.getKey().getUserKey()),
-        SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+    return new TransientInternalKey(before(expectedEntry.getKey().getUserKey()), 0,
+        ValueType.DELETION);
   }
 
   public static ByteBuffer before(final Entry<ByteBuffer, ?> expectedEntry) {
@@ -232,13 +245,13 @@ public final class BlockHelper {
     return size;
   }
 
-  static BlockEntry<ByteBuffer> createBlockEntry(final String key, final String value) {
+  public static BlockEntry<ByteBuffer> createBlockEntry(final String key, final String value) {
     return BlockEntry.of(ByteBuffer.wrap(key.getBytes(UTF_8)),
         ByteBuffer.wrap(value.getBytes(UTF_8)));
   }
 
-  static Entry<InternalKey, ByteBuffer> createInternalEntry(final String key, final String value,
-      final long sequenceNumber) {
+  public static Entry<InternalKey, ByteBuffer> createInternalEntry(final String key,
+      final String value, final long sequenceNumber) {
     return Maps.<InternalKey, ByteBuffer>immutableEntry(
         new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), sequenceNumber,
             ValueType.VALUE),

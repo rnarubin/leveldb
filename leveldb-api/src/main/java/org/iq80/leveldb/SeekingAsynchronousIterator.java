@@ -19,7 +19,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.CompletionStage;
 
 public interface SeekingAsynchronousIterator<K, V>
-    extends ReverseAsynchronousIterator<Entry<K, V>> {
+    extends ReverseAsynchronousIterator<Entry<K, V>>, AsynchronousCloseable {
 
   /**
    * positions the iterator such that the next element's key will be greater than or equal to the
