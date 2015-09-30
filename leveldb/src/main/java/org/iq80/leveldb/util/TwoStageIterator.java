@@ -98,7 +98,7 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
       }
 
       final CompletionStage<Void> close = current.asyncClose();
-      if (currentOrigin == opposite(direction)) {
+      if (currentOrigin == Direction.opposite(direction)) {
         if (!direction.hasMore(index)) {
           return close.thenApply(voided -> Optional.empty());
         }
@@ -116,17 +116,6 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
           currentOrigin = direction;
           return direction.seekToEdge(current).thenCompose(voided -> advanceData(direction));
         }) : CompletableFuture.completedFuture(Optional.empty());
-  }
-
-  private static Direction opposite(final Direction direction) {
-    switch (direction) {
-      case NEXT:
-        return PREV;
-      case PREV:
-        return NEXT;
-      default:
-        throw new IllegalArgumentException("Not a valid direction:" + direction);
-    }
   }
 
   protected abstract CompletionStage<DataT> getData(V indexValue);

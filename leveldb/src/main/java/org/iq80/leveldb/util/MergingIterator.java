@@ -15,6 +15,9 @@
 
 package org.iq80.leveldb.util;
 
+import static org.iq80.leveldb.util.Iterators.Direction.NEXT;
+import static org.iq80.leveldb.util.Iterators.Direction.PREV;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -26,11 +29,11 @@ import java.util.stream.Stream;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.util.Iterators.Direction;
 
 public final class MergingIterator implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
   private final OrdinalIterator[] iters;
   private final Comparator<OrdinalIterator> smallerNext, largerPrev;
-  private final Comparator<InternalKey> internalKeyComparator;
 
   private MergingIterator(
       final List<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
@@ -45,7 +48,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
     this.smallerNext = OrdinalIterator.smallerNext(internalKeyComparator);
     this.largerPrev = OrdinalIterator.largerPrev(internalKeyComparator);
-    this.internalKeyComparator = internalKeyComparator;
   }
 
   public static SeekingAsynchronousIterator<InternalKey, ByteBuffer> newMergingIterator(
@@ -64,18 +66,17 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
     return CompletableFutures
-        .allOfVoid(Stream.of(iters).filter(iter -> iter.peekedNext == null)
+        .allOfVoid(Stream.of(iters).filter(iter -> iter.cachedNext == null)
             .map(OrdinalIterator::advanceNext))
-        // all iterators will now have a peek
         .thenApply(voided -> Stream.of(iters).min(smallerNext).flatMap(OrdinalIterator::pollNext));
   }
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
     return CompletableFutures
-        .allOfVoid(Stream.of(iters).filter(iter -> iter.peekedPrev == null)
+        .allOfVoid(Stream.of(iters).filter(iter -> iter.cachedPrev == null)
             .map(OrdinalIterator::advancePrev))
-        .thenApply(voided -> Stream.of(iters).min(largerPrev).flatMap(OrdinalIterator::pollPrev));
+        .thenApply(voided -> Stream.of(iters).max(largerPrev).flatMap(OrdinalIterator::pollPrev));
   }
 
   @Override
@@ -102,7 +103,8 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   private static final class OrdinalIterator {
     private final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator;
     private final int ordinal;
-    private Optional<Entry<InternalKey, ByteBuffer>> peekedNext, peekedPrev;
+    private Optional<Entry<InternalKey, ByteBuffer>> cachedNext, cachedPrev;
+    private Direction direction;
 
     public OrdinalIterator(final int ordinal,
         final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator) {
@@ -112,18 +114,26 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
     public CompletionStage<Void> seekToFirst() {
       // nullable optional, i know, it feels so wrong
-      peekedNext = peekedPrev = null;
+      cachedNext = null;
+      direction = null;
+      cachedPrev = Optional.empty();
       return iterator.seekToFirst();
     }
 
     public CompletionStage<Void> seekToEnd() {
-      peekedNext = peekedPrev = null;
+      cachedPrev = null;
+      direction = null;
+      cachedNext = Optional.empty();
       return iterator.seekToEnd();
     }
 
     public CompletionStage<Void> seek(final InternalKey key) {
-      peekedNext = peekedPrev = null;
-      return iterator.seek(key);
+      // favors forward iteration, but reverse iteration isn't meant to be performant anyway
+      return iterator.seek(key).thenCompose(voided -> iterator.next()).thenAccept(optNext -> {
+        cachedPrev = null;
+        cachedNext = optNext;
+        direction = optNext.isPresent() ? NEXT : null;
+      });
     }
 
     public CompletionStage<Void> asyncClose() {
@@ -131,44 +141,62 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     }
 
     public CompletionStage<Void> advanceNext() {
-      assert peekedNext == null;
-      return iterator.next().thenAccept(optNext -> peekedNext = optNext);
-    }
-
-    public Optional<Entry<InternalKey, ByteBuffer>> pollNext() {
-      final Optional<Entry<InternalKey, ByteBuffer>> next = peekedNext;
-      peekedPrev = next;
-      peekedNext = null;
-      return next;
+      assert cachedNext == null;
+      return (direction == PREV ? iterator.next().thenCompose(optPrev -> {
+        cachedPrev = optPrev;
+        return iterator.next();
+      }) : iterator.next()).thenAccept(optNext -> {
+        cachedNext = optNext;
+        direction = NEXT;
+      });
     }
 
     public CompletionStage<Void> advancePrev() {
-      assert peekedPrev == null;
-      return iterator.prev().thenAccept(optPrev -> peekedPrev = optPrev);
+      assert cachedPrev == null;
+      return (direction == NEXT ? iterator.prev().thenCompose(optNext -> {
+        cachedNext = optNext;
+        return iterator.prev();
+      }) : iterator.prev()).thenAccept(optPrev -> {
+        cachedPrev = optPrev;
+        direction = PREV;
+      });
+    }
+
+    public Optional<Entry<InternalKey, ByteBuffer>> pollNext() {
+      assert cachedNext != null;
+      final Optional<Entry<InternalKey, ByteBuffer>> next = cachedNext;
+      if (next.isPresent()) {
+        cachedPrev = next;
+        cachedNext = null;
+      }
+      return next;
     }
 
     public Optional<Entry<InternalKey, ByteBuffer>> pollPrev() {
-      final Optional<Entry<InternalKey, ByteBuffer>> prev = peekedPrev;
-      peekedNext = prev;
-      peekedPrev = null;
+      assert cachedPrev != null;
+      final Optional<Entry<InternalKey, ByteBuffer>> prev = cachedPrev;
+      if (prev.isPresent()) {
+        cachedNext = prev;
+        cachedPrev = null;
+      }
       return prev;
     }
 
     public static Comparator<OrdinalIterator> smallerNext(
         final Comparator<InternalKey> keyComparator) {
       return (o1, o2) -> {
-        assert o1.peekedNext != null;
-        assert o2.peekedNext != null;
+        assert o1.cachedNext != null;
+        assert o2.cachedNext != null;
 
-        if (o1.peekedNext.isPresent()) {
-          if (o2.peekedNext.isPresent()) {
+        if (o1.cachedNext.isPresent()) {
+          if (o2.cachedNext.isPresent()) {
             final int result =
-                keyComparator.compare(o1.peekedNext.get().getKey(), o2.peekedNext.get().getKey());
+                keyComparator.compare(o1.cachedNext.get().getKey(), o2.cachedNext.get().getKey());
             return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
           }
           return -1; // o2 does not have a next element, consider o1 smaller than the empty o2
         }
-        if (o2.peekedNext.isPresent()) {
+        if (o2.cachedNext.isPresent()) {
           return 1;// o1 does not have a next element, consider o2 smaller than the empty o1
         }
         return 0;// neither o1 nor o2 have a next element, consider them equals as empty iterators
@@ -179,28 +207,32 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     public static Comparator<OrdinalIterator> largerPrev(
         final Comparator<InternalKey> keyComparator) {
       return (o1, o2) -> {
-        assert o1.peekedPrev != null;
-        assert o2.peekedPrev != null;
+        assert o1.cachedPrev != null;
+        assert o2.cachedPrev != null;
 
-        if (o1.peekedPrev.isPresent()) {
-          if (o2.peekedPrev.isPresent()) {
+        if (o1.cachedPrev.isPresent()) {
+          if (o2.cachedPrev.isPresent()) {
             final int result =
-                keyComparator.compare(o1.peekedPrev.get().getKey(), o2.peekedPrev.get().getKey());
+                keyComparator.compare(o1.cachedPrev.get().getKey(), o2.cachedPrev.get().getKey());
             return result == 0 ? Integer.compare(o1.ordinal, o2.ordinal) : result;
           }
           return 1;
         }
-        if (o2.peekedPrev.isPresent()) {
+        if (o2.cachedPrev.isPresent()) {
           return -1;
         }
         return 0;
       };
     }
+
+    @Override
+    public String toString() {
+      return "Ord" + ordinal + " [" + iterator.toString() + "]";
+    }
   }
 
   @Override
   public String toString() {
-    return "MergingIterator [iterators=" + Arrays.toString(iters) + ", comparator="
-        + internalKeyComparator + "]";
+    return "MergingIterator [" + Arrays.toString(iters) + "]";
   }
 }

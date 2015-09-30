@@ -230,45 +230,45 @@ public final class Iterators {
      */
     NEXT {
       @Override
-      public boolean hasMore(final ReverseIterator<?> iter) {
+      public final boolean hasMore(final ReverseIterator<?> iter) {
         return iter.hasNext();
       }
 
       @Override
-      public <T> T advance(final ReverseIterator<T> iter) {
+      public final <T> T advance(final ReverseIterator<T> iter) {
         return iter.next();
       }
 
       @Override
-      public <T> CompletionStage<Optional<T>> asyncAdvance(
+      public final <T> CompletionStage<Optional<T>> asyncAdvance(
           final ReverseAsynchronousIterator<T> iter) {
         return iter.next();
       }
 
       @Override
-      public CompletionStage<Void> seekToEdge(final SeekingAsynchronousIterator<?, ?> iter) {
+      public final CompletionStage<Void> seekToEdge(final SeekingAsynchronousIterator<?, ?> iter) {
         return iter.seekToFirst();
       }
     },
     PREV {
       @Override
-      public boolean hasMore(final ReverseIterator<?> iter) {
+      public final boolean hasMore(final ReverseIterator<?> iter) {
         return iter.hasPrev();
       }
 
       @Override
-      public <T> T advance(final ReverseIterator<T> iter) {
+      public final <T> T advance(final ReverseIterator<T> iter) {
         return iter.prev();
       }
 
       @Override
-      public <T> CompletionStage<Optional<T>> asyncAdvance(
+      public final <T> CompletionStage<Optional<T>> asyncAdvance(
           final ReverseAsynchronousIterator<T> iter) {
         return iter.prev();
       }
 
       @Override
-      public CompletionStage<Void> seekToEdge(final SeekingAsynchronousIterator<?, ?> iter) {
+      public final CompletionStage<Void> seekToEdge(final SeekingAsynchronousIterator<?, ?> iter) {
         return iter.seekToEnd();
       }
     };
@@ -281,6 +281,17 @@ public final class Iterators {
         ReverseAsynchronousIterator<T> iter);
 
     public abstract CompletionStage<Void> seekToEdge(SeekingAsynchronousIterator<?, ?> iter);
+
+    public static Direction opposite(final Direction direction) {
+      switch (direction) {
+        case NEXT:
+          return PREV;
+        case PREV:
+          return NEXT;
+        default:
+          throw new IllegalArgumentException("Not a valid direction:" + direction);
+      }
+    }
   }
 
   public static class AsyncWrappedSeekingIterator<K, V>
@@ -325,6 +336,11 @@ public final class Iterators {
     @Override
     public CompletionStage<Void> asyncClose() {
       return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public String toString() {
+      return "AsyncWrapped [" + iter + "]";
     }
   }
 

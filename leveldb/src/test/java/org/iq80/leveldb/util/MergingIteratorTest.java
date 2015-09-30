@@ -95,6 +95,10 @@ public class MergingIteratorTest {
           .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList(), local))
           .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
           .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
+          .thenCompose(voided -> iter.seekToFirst())
+          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
+          .thenCompose(voided -> iter.seekToEnd())
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
           .toCompletableFuture().get();
 
       int i = 0;
@@ -125,12 +129,24 @@ public class MergingIteratorTest {
         i++;
       }
 
+      final InternalKey startKey = new TransientInternalKey(ByteBuffer.wrap(new byte[] {0}),
+          Long.MAX_VALUE, ValueType.VALUE);
+      iter.seek(startKey)
+          .thenCompose(
+              voided -> BlockHelper.assertReverseSequence(iter, Collections.emptyList(), local))
+          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
+          .thenCompose(voided -> iter.seek(startKey))
+          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
+          .toCompletableFuture().get();
+
       final InternalKey endKey = new TransientInternalKey(
           ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
           ValueType.VALUE);
       iter.seek(endKey)
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList()))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
+          .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList(), local))
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
+          .thenCompose(voided -> iter.seek(endKey))
+          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
           .toCompletableFuture().get();
 
       iter.asyncClose().toCompletableFuture().get();

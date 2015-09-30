@@ -129,11 +129,11 @@ public final class BlockHelper {
       final Iterable<? extends Entry<K, V>> entries, final Executor asyncExec) {
     final Iterator<? extends Entry<K, V>> expected = entries.iterator();
     return CompletableFutures.flatMapIterator(iter, direction, entry -> {
-      assertTrue(expected.hasNext(), "more entries in iterator than expected");
+      assertTrue(expected.hasNext(), "iterator contained more entries than expected");
       assertEntryEquals(entry, expected.next());
       return entry;
     } , asyncExec).thenApply(stream -> {
-      assertFalse(expected.hasNext());
+      assertFalse(expected.hasNext(), "iterator did not contain all expected entries");
       try {
         assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());
       } catch (final Exception e) {
@@ -176,7 +176,7 @@ public final class BlockHelper {
   }
 
   public static void assertByteBufferEquals(final ByteBuffer actual, final ByteBuffer expected) {
-    assertTrue(ByteBuffers.compare(actual, expected) == 0);
+    assertTrue(actual.compareTo(expected) == 0);
   }
 
   public static String beforeString(final Entry<String, ?> expectedEntry) {
