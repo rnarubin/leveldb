@@ -18,13 +18,11 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CompletionStage;
 
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.table.TableIterator.WrappedBlockIterator;
 import org.iq80.leveldb.util.Iterators.AsyncWrappedSeekingIterator;
 import org.iq80.leveldb.util.TwoStageIterator;
 
 public final class TableIterator extends
-    TwoStageIterator<BlockIterator<InternalKey>, WrappedBlockIterator<InternalKey>, ByteBuffer> {
+    TwoStageIterator<BlockIterator<InternalKey>, AsyncWrappedSeekingIterator<InternalKey, ByteBuffer>, ByteBuffer> {
   private final Table table;
 
   public TableIterator(final Table table, final BlockIterator<InternalKey> indexIterator) {
@@ -33,16 +31,10 @@ public final class TableIterator extends
   }
 
   @Override
-  protected CompletionStage<WrappedBlockIterator<InternalKey>> getData(
+  protected CompletionStage<AsyncWrappedSeekingIterator<InternalKey, ByteBuffer>> getData(
       final ByteBuffer blockHandle) {
     return table.openBlock(blockHandle)
-        .thenApply(block -> new WrappedBlockIterator<>(block.iterator()));
-  }
-
-  static class WrappedBlockIterator<T> extends AsyncWrappedSeekingIterator<T, ByteBuffer> {
-    public WrappedBlockIterator(final ReverseSeekingIterator<T, ByteBuffer> iter) {
-      super(iter);
-    }
+        .thenApply(block -> new AsyncWrappedSeekingIterator<>(block.iterator()));
   }
 
   @Override

@@ -42,7 +42,7 @@ public final class CompletableFutures {
         throw new UnsupportedOperationException();
       }
 
-    }, Direction.NEXT, mapper, asyncExec);
+    }, Direction.FORWARD, mapper, asyncExec);
   }
 
   public static <T, U> CompletionStage<Stream<U>> flatMapIterator(

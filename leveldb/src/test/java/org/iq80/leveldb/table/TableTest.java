@@ -45,8 +45,6 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.Iterables;
-
 public abstract class TableTest extends EnvDependentTest {
 
   private static final DBBufferComparator byteCompare = new BytewiseComparator();
@@ -99,19 +97,19 @@ public abstract class TableTest extends EnvDependentTest {
   @Test
   public void testSingleEntrySingleBlock() throws Exception {
     tableTest(Integer.MAX_VALUE, Integer.MAX_VALUE,
-        BlockHelper.createInternalEntry("name", "dain sundstrom", 0));
+        TestHelper.createInternalEntry("name", "dain sundstrom", 0));
   }
 
   @Test
   public void testMultipleEntriesWithSingleBlock() throws Exception {
     long seq = 0;
     final List<Entry<InternalKey, ByteBuffer>> entries = asList(
-        BlockHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
-        BlockHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
-        BlockHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
-        BlockHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
-        BlockHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
-        BlockHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
+        TestHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+        TestHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+        TestHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+        TestHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
+        TestHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
+        TestHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
     for (int i = 1; i < entries.size(); i++) {
       tableTest(Integer.MAX_VALUE, i, entries);
@@ -122,18 +120,18 @@ public abstract class TableTest extends EnvDependentTest {
   public void testMultipleEntriesWithMultipleBlock() throws Exception {
     long seq = 0;
     final List<Entry<InternalKey, ByteBuffer>> entries = asList(
-        BlockHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
-        BlockHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
-        BlockHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
-        BlockHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
-        BlockHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
-        BlockHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
+        TestHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+        TestHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+        TestHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+        TestHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
+        TestHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
+        TestHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
     // one entry per block
     tableTest(1, Integer.MAX_VALUE, entries);
 
     // about 3 blocks
-    tableTest(BlockHelper.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3,
+    tableTest(TestHelper.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3,
         Integer.MAX_VALUE, entries);
   }
 
@@ -178,60 +176,20 @@ public abstract class TableTest extends EnvDependentTest {
 
 
     final TableIterator iter = table.retain().iterator();
-
-    iter.seekToFirst()
-        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, Collections.emptyList()))
-        .thenCompose(voided -> BlockHelper.assertSequence(iter, entries))
-        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
-        .thenCompose(voided -> iter.seekToEnd())
-        .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList()))
-        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
-        .thenCompose(voided -> BlockHelper.assertSequence(iter, entries)).toCompletableFuture()
-        .get();
+    TestHelper.testInternalKeyIterator(iter, entries);
 
     long lastApproximateOffset = 0;
-    int i = 0;
     for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-      final List<Entry<InternalKey, ByteBuffer>> nextEntries = entries.subList(i, entries.size());
-      final List<Entry<InternalKey, ByteBuffer>> prevEntries =
-          reverseEntries.subList(entries.size() - i, entries.size());
-
-      iter.seek(entry.getKey()).thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
-          .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
-          .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter,
-              nextEntries.subList(1, nextEntries.size())))
-          .toCompletableFuture().get();
-
-      iter.seek(entry.getKey())
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
-          .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
-          .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter,
-              Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries)))
-          .toCompletableFuture().get();
-
       final long approximateOffset = table.getApproximateOffsetOf(entry.getKey());
       Assert.assertTrue(approximateOffset >= lastApproximateOffset);
       lastApproximateOffset = approximateOffset;
-
-      i++;
     }
 
     final InternalKey endKey = new TransientInternalKey(
         ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
         ValueType.VALUE);
-    iter.seek(endKey)
-        .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList()))
-        .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries))
-        .toCompletableFuture().get();
-
     final long approximateOffset = table.getApproximateOffsetOf(endKey);
     Assert.assertTrue(approximateOffset >= lastApproximateOffset);
-
-    iter.asyncClose().toCompletableFuture().get();
 
     table.release().toCompletableFuture().get();
 

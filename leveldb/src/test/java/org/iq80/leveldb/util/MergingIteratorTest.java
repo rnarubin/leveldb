@@ -22,8 +22,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -32,12 +30,11 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
-import org.iq80.leveldb.table.BlockHelper;
 import org.iq80.leveldb.table.BytewiseComparator;
+import org.iq80.leveldb.table.TestHelper;
 import org.iq80.leveldb.util.Iterators.AsyncWrappedSeekingIterator;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 
 public class MergingIteratorTest {
@@ -51,9 +48,8 @@ public class MergingIteratorTest {
 
   @Test
   public void testSingle() {
-    iterTest(Collections.singletonList(
-        Stream.of(1, 2, 3, 4).map(i -> BlockHelper.createInternalEntry("" + i, "" + i, i))
-            .collect(Collectors.toList())));
+    iterTest(Collections.singletonList(Stream.of(1, 2, 3, 4, 5, 6, 7)
+        .map(i -> TestHelper.createInternalEntry("" + i, "" + i, i)).collect(Collectors.toList())));
   }
 
   @Test
@@ -81,78 +77,8 @@ public class MergingIteratorTest {
           return x;
         });
     entries.sort((o1, o2) -> comparator.compare(o1.getKey(), o2.getKey()));
-    final List<Entry<InternalKey, ByteBuffer>> reverseEntries = new ArrayList<>(entries);
-    Collections.reverse(reverseEntries);
 
-    try {
-      final Executor local = r -> r.run();
-      iter.seekToFirst()
-          .thenCompose(
-              voided -> BlockHelper.assertReverseSequence(iter, Collections.emptyList(), local))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
-          .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList(), local))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
-          .thenCompose(voided -> iter.seekToFirst())
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
-          .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
-          .toCompletableFuture().get();
-
-      int i = 0;
-      for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-        final List<Entry<InternalKey, ByteBuffer>> nextEntries =
-            entries.subList(entries.indexOf(entry), entries.size());
-        final List<Entry<InternalKey, ByteBuffer>> prevEntries =
-            reverseEntries.subList(entries.size() - i, entries.size());
-
-        iter.seek(entry.getKey())
-            .thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
-            .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
-            .thenCompose(voided -> BlockHelper.assertSequence(iter, nextEntries))
-            .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
-            .thenCompose(voided -> BlockHelper.assertSequence(iter,
-                nextEntries.subList(1, nextEntries.size())))
-            .toCompletableFuture().get();
-
-        iter.seek(entry.getKey())
-            .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
-            .thenCompose(voided -> iter.seek(BlockHelper.beforeInternalKey(entry)))
-            .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, prevEntries))
-            .thenCompose(voided -> iter.seek(BlockHelper.afterInternalKey(entry)))
-            .thenCompose(voided -> BlockHelper.assertReverseSequence(iter,
-                Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries)))
-            .toCompletableFuture().get();
-
-        i++;
-      }
-
-      final InternalKey startKey = new TransientInternalKey(ByteBuffer.wrap(new byte[] {0}),
-          Long.MAX_VALUE, ValueType.VALUE);
-      iter.seek(startKey)
-          .thenCompose(
-              voided -> BlockHelper.assertReverseSequence(iter, Collections.emptyList(), local))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
-          .thenCompose(voided -> iter.seek(startKey))
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, entries, local))
-          .toCompletableFuture().get();
-
-      final InternalKey endKey = new TransientInternalKey(
-          ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
-          ValueType.VALUE);
-      iter.seek(endKey)
-          .thenCompose(voided -> BlockHelper.assertSequence(iter, Collections.emptyList(), local))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
-          .thenCompose(voided -> iter.seek(endKey))
-          .thenCompose(voided -> BlockHelper.assertReverseSequence(iter, reverseEntries, local))
-          .toCompletableFuture().get();
-
-      iter.asyncClose().toCompletableFuture().get();
-    } catch (InterruptedException | ExecutionException e) {
-      throw new AssertionError(e);
-    }
+    TestHelper.testInternalKeyIterator(iter, entries, r -> r.run());
   }
 }
 

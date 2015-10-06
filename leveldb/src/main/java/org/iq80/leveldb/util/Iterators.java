@@ -222,13 +222,7 @@ public final class Iterators {
   }
 
   public static enum Direction {
-    /*
-     * reversable iterators don't have a consistent concept of a "current" item. instead they exist
-     * in a position "between" next and prev. in order to make the data iterator 'current' work, we
-     * need to track from which direction it was initialized so that calls to advance the
-     * encompassing index iterator are consistent
-     */
-    NEXT {
+    FORWARD {
       @Override
       public final boolean hasMore(final ReverseIterator<?> iter) {
         return iter.hasNext();
@@ -250,7 +244,7 @@ public final class Iterators {
         return iter.seekToFirst();
       }
     },
-    PREV {
+    REVERSE {
       @Override
       public final boolean hasMore(final ReverseIterator<?> iter) {
         return iter.hasPrev();
@@ -284,10 +278,10 @@ public final class Iterators {
 
     public static Direction opposite(final Direction direction) {
       switch (direction) {
-        case NEXT:
-          return PREV;
-        case PREV:
-          return NEXT;
+        case FORWARD:
+          return REVERSE;
+        case REVERSE:
+          return FORWARD;
         default:
           throw new IllegalArgumentException("Not a valid direction:" + direction);
       }

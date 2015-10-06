@@ -15,6 +15,8 @@
 package org.iq80.leveldb.table;
 
 import static com.google.common.base.Charsets.UTF_8;
+import static org.iq80.leveldb.util.Iterators.Direction.FORWARD;
+import static org.iq80.leveldb.util.Iterators.Direction.REVERSE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_BYTE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
 import static org.testng.Assert.assertEquals;
@@ -25,16 +27,21 @@ import static org.testng.Assert.fail;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.function.UnaryOperator;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.impl.SequenceNumber;
@@ -42,14 +49,16 @@ import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
+import org.iq80.leveldb.util.Iterators;
 import org.iq80.leveldb.util.Iterators.Direction;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.testng.Assert;
 
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 
-public final class BlockHelper {
-  private BlockHelper() {}
+public final class TestHelper {
+  private TestHelper() {}
 
   public static int estimateBlockSizeInternalKey(final int blockRestartInterval,
       final List<Entry<InternalKey, ByteBuffer>> entries) {
@@ -102,26 +111,15 @@ public final class BlockHelper {
   }
 
   public static <K, V> CompletionStage<?> assertSequence(
-      final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries) {
-    return assertSequence(iter, entries, ForkJoinPool.commonPool());
-  }
-
-  public static <K, V> CompletionStage<?> assertSequence(
       final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries,
       final Executor asyncExec) {
-    return assertSequence(iter, Direction.NEXT, entries, asyncExec);
-  }
-
-  public static <K, V> CompletionStage<?> assertReverseSequence(
-      final SeekingAsynchronousIterator<K, V> iter,
-      final Iterable<? extends Entry<K, V>> reversedEntries) {
-    return assertReverseSequence(iter, reversedEntries, ForkJoinPool.commonPool());
+    return assertSequence(iter, Direction.FORWARD, entries, asyncExec);
   }
 
   public static <K, V> CompletionStage<?> assertReverseSequence(
       final SeekingAsynchronousIterator<K, V> iter,
       final Iterable<? extends Entry<K, V>> reversedEntries, final Executor asyncExec) {
-    return assertSequence(iter, Direction.PREV, reversedEntries, asyncExec);
+    return assertSequence(iter, Direction.REVERSE, reversedEntries, asyncExec);
   }
 
   public static <K, V> CompletionStage<?> assertSequence(
@@ -191,34 +189,25 @@ public final class BlockHelper {
     return key.substring(0, key.length() - 1) + ((char) (lastByte + 1));
   }
 
-  public static InternalKey beforeInternalKey(final Entry<InternalKey, ?> expectedEntry) {
-    return new TransientInternalKey(before(expectedEntry.getKey().getUserKey()), 0,
-        ValueType.DELETION);
-  }
-
-  public static ByteBuffer before(final Entry<ByteBuffer, ?> expectedEntry) {
-    return before(expectedEntry.getKey());
-  }
-
   public static ByteBuffer before(final ByteBuffer b) {
     final ByteBuffer slice = ByteBuffers.heapCopy(b);
     final int lastByte = slice.limit() - 1;
     return slice.put(lastByte, (byte) (slice.get(lastByte) - 1));
   }
 
-  public static InternalKey afterInternalKey(final Entry<InternalKey, ?> expectedEntry) {
-    return new TransientInternalKey(after(expectedEntry.getKey().getUserKey()),
-        SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-  }
-
-  public static ByteBuffer after(final Entry<ByteBuffer, ?> expectedEntry) {
-    return after(expectedEntry.getKey());
-  }
-
   public static ByteBuffer after(final ByteBuffer b) {
     final ByteBuffer slice = ByteBuffers.heapCopy(b);
     final int lastByte = slice.limit() - 1;
     return slice.put(lastByte, (byte) (slice.get(lastByte) + 1));
+  }
+
+  public static InternalKey before(final InternalKey key) {
+    return new TransientInternalKey(before(key.getUserKey()), 0, ValueType.DELETION);
+  }
+
+  public static InternalKey after(final InternalKey key) {
+    return new TransientInternalKey(after(key.getUserKey()), SequenceNumber.MAX_SEQUENCE_NUMBER,
+        ValueType.VALUE);
   }
 
   public static int estimateEntriesSize(final int blockRestartInterval,
@@ -256,5 +245,122 @@ public final class BlockHelper {
         new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), sequenceNumber,
             ValueType.VALUE),
         ByteBuffer.wrap(value.getBytes(UTF_8)));
+  }
+
+  public static void testInternalKeyIterator(
+      final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter,
+      final List<Entry<InternalKey, ByteBuffer>> entries, final Executor... asyncExec) {
+    testIterator(iter, entries,
+        new TransientInternalKey(ByteBuffer.wrap(new byte[] {0}), Long.MAX_VALUE, ValueType.VALUE),
+        new TransientInternalKey(
+            ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
+            ValueType.VALUE),
+        TestHelper::before, TestHelper::after,
+        asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
+  }
+
+  private static <K, V> void testIterator(final SeekingAsynchronousIterator<K, V> iter,
+      final List<Entry<K, V>> entries, final K first, final K end, final UnaryOperator<K> before,
+      final UnaryOperator<K> after, final Executor asyncExec) {
+    final List<Entry<K, V>> reverseEntries = new ArrayList<>(entries);
+    Collections.reverse(reverseEntries);
+
+    try {
+      iter.seekToFirst()
+          .thenCompose(
+              voided -> TestHelper.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> iter.seekToEnd())
+          .thenCompose(
+              voided -> TestHelper.assertSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> iter.seekToFirst())
+          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> iter.seekToEnd())
+          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .toCompletableFuture().get();
+
+      {
+        int i = 0;
+        for (final Entry<K, V> entry : entries) {
+          final List<Entry<K, V>> nextEntries =
+              entries.subList(entries.indexOf(entry), entries.size());
+          final List<Entry<K, V>> prevEntries =
+              reverseEntries.subList(entries.size() - i, entries.size());
+
+          iter.seek(entry.getKey())
+              .thenCompose(voided -> TestHelper.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
+              .thenCompose(voided -> TestHelper.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
+              .thenCompose(voided -> TestHelper.assertSequence(iter,
+                  nextEntries.subList(1, nextEntries.size()), asyncExec))
+              .toCompletableFuture().get();
+
+          iter.seek(entry.getKey())
+              .thenCompose(voided -> TestHelper.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
+              .thenCompose(voided -> TestHelper.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
+              .thenCompose(voided -> TestHelper.assertReverseSequence(iter,
+                  Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries),
+                  asyncExec))
+              .toCompletableFuture().get();
+
+          i++;
+        }
+      }
+
+      {
+        for (int i = 1; i <= entries.size(); i++) {
+          for (int j = 1; j <= i; j++) {
+            for (int k = 1; k <= entries.size() - i + j; k++) {
+              // i steps forward, j steps back, k steps forward
+              final ReverseIterator<Entry<K, V>> expected = Iterators.listReverseIterator(entries);
+              final int fi = i, fj = j, fk = k;
+              iter.seekToFirst().thenCompose(voided -> step(FORWARD, iter, expected, fi))
+                  .thenCompose(voided -> step(REVERSE, iter, expected, fj))
+                  .thenCompose(voided -> step(FORWARD, iter, expected, fk)).toCompletableFuture()
+                  .get();
+            }
+          }
+        }
+      }
+
+      iter.seek(first)
+          .thenCompose(
+              voided -> TestHelper.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> iter.seek(first))
+          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .toCompletableFuture().get();
+
+      iter.seek(end)
+          .thenCompose(
+              voided -> TestHelper.assertSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> iter.seek(end))
+          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .toCompletableFuture().get();
+
+      iter.asyncClose().toCompletableFuture().get();
+    } catch (InterruptedException | ExecutionException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  private static <K, V> CompletionStage<Void> step(final Direction direction,
+      final SeekingAsynchronousIterator<K, V> iter, final ReverseIterator<Entry<K, V>> expected,
+      final int steps) {
+    assert steps > 0;
+    return direction.asyncAdvance(iter).thenCompose(optEntry -> {
+      Assert.assertTrue(optEntry.isPresent(), "iterator did not contain all expected entries");
+      Assert.assertTrue(direction.hasMore(expected));
+      assertEntryEquals(optEntry.get(), direction.advance(expected));
+      return steps == 1 ? CompletableFuture.completedFuture(null)
+          : step(direction, iter, expected, steps - 1);
+    });
   }
 }

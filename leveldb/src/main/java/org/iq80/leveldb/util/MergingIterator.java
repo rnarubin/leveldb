@@ -15,15 +15,17 @@
 
 package org.iq80.leveldb.util;
 
-import static org.iq80.leveldb.util.Iterators.Direction.NEXT;
-import static org.iq80.leveldb.util.Iterators.Direction.PREV;
+import static org.iq80.leveldb.util.Iterators.Direction.FORWARD;
+import static org.iq80.leveldb.util.Iterators.Direction.REVERSE;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.stream.Stream;
 
@@ -32,11 +34,16 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.Iterators.Direction;
 
 public final class MergingIterator implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
+  /*
+   * favors forward iteration by pre-loading next() after seek(key)
+   */
+
   private final OrdinalIterator[] iters;
   private final Comparator<OrdinalIterator> smallerNext, largerPrev;
+  private boolean uncleanReverse;
 
   private MergingIterator(
-      final List<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
+      final Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
       final Comparator<InternalKey> internalKeyComparator) {
     assert iterators.size() > 1;
     int ordinal = 0;
@@ -65,18 +72,16 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
-    return CompletableFutures
-        .allOfVoid(Stream.of(iters).filter(iter -> iter.cachedNext == null)
-            .map(OrdinalIterator::advanceNext))
-        .thenApply(voided -> Stream.of(iters).min(smallerNext).flatMap(OrdinalIterator::pollNext));
+    return null;
   }
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
-    return CompletableFutures
-        .allOfVoid(Stream.of(iters).filter(iter -> iter.cachedPrev == null)
-            .map(OrdinalIterator::advancePrev))
-        .thenApply(voided -> Stream.of(iters).max(largerPrev).flatMap(OrdinalIterator::pollPrev));
+    if (uncleanReverse) {
+      // do work
+      uncleanReverse = false;
+    }
+    return null;
   }
 
   @Override
@@ -96,15 +101,15 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
   @Override
   public CompletionStage<Void> seek(final InternalKey key) {
+    uncleanReverse = true;
     return CompletableFutures.allOfVoid(Stream.of(iters).map(ord -> ord.seek(key)));
   }
 
-  // TODO(optimization) heap, overlap seek and read
   private static final class OrdinalIterator {
     private final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator;
     private final int ordinal;
     private Optional<Entry<InternalKey, ByteBuffer>> cachedNext, cachedPrev;
-    private Direction direction;
+    private Direction lastAdvance;
 
     public OrdinalIterator(final int ordinal,
         final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator) {
@@ -113,74 +118,96 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     }
 
     public CompletionStage<Void> seekToFirst() {
-      // nullable optional, i know, it feels so wrong
-      cachedNext = null;
-      direction = null;
       cachedPrev = Optional.empty();
-      return iterator.seekToFirst();
+      lastAdvance = FORWARD;
+      return iterator.seekToFirst().thenCompose(voided -> iterator.next())
+          .thenAccept(optNext -> cachedNext = optNext);
     }
 
     public CompletionStage<Void> seekToEnd() {
-      cachedPrev = null;
-      direction = null;
       cachedNext = Optional.empty();
-      return iterator.seekToEnd();
+      lastAdvance = REVERSE;
+      return iterator.seekToEnd().thenCompose(voided -> iterator.prev())
+          .thenAccept(optPrev -> cachedPrev = optPrev);
     }
 
     public CompletionStage<Void> seek(final InternalKey key) {
-      // favors forward iteration, but reverse iteration isn't meant to be performant anyway
-      return iterator.seek(key).thenCompose(voided -> iterator.next()).thenAccept(optNext -> {
-        cachedPrev = null;
-        cachedNext = optNext;
-        direction = optNext.isPresent() ? NEXT : null;
-      });
+      cachedPrev = null;
+      lastAdvance = FORWARD;
+      return iterator.seek(key).thenCompose(voided -> iterator.next())
+          .thenAccept(optNext -> cachedNext = optNext);
     }
 
     public CompletionStage<Void> asyncClose() {
       return iterator.asyncClose();
     }
 
-    public CompletionStage<Void> advanceNext() {
-      assert cachedNext == null;
-      return (direction == PREV ? iterator.next().thenCompose(optPrev -> {
-        cachedPrev = optPrev;
-        return iterator.next();
-      }) : iterator.next()).thenAccept(optNext -> {
-        cachedNext = optNext;
-        direction = NEXT;
-      });
-    }
-
-    public CompletionStage<Void> advancePrev() {
-      assert cachedPrev == null;
-      return (direction == NEXT ? iterator.prev().thenCompose(optNext -> {
-        cachedNext = optNext;
-        return iterator.prev();
-      }) : iterator.prev()).thenAccept(optPrev -> {
-        cachedPrev = optPrev;
-        direction = PREV;
-      });
-    }
-
-    public Optional<Entry<InternalKey, ByteBuffer>> pollNext() {
+    public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollNext() {
+      assert lastAdvance != null;
       assert cachedNext != null;
-      final Optional<Entry<InternalKey, ByteBuffer>> next = cachedNext;
-      if (next.isPresent()) {
-        cachedPrev = next;
-        cachedNext = null;
+      if (lastAdvance == FORWARD) {
+        return iterator.next().thenApply(optNext -> {
+          cachedPrev = cachedNext;
+          cachedNext = optNext;
+          return cachedPrev;
+        });
+      } else {
+        lastAdvance = FORWARD;
+        return iterator.next().thenCompose(ignored -> iterator.next())
+            .thenCompose(optNext -> optNext.isPresent() ? pollNext()
+                : CompletableFuture.completedFuture(optNext));
       }
-      return next;
     }
 
-    public Optional<Entry<InternalKey, ByteBuffer>> pollPrev() {
-      assert cachedPrev != null;
-      final Optional<Entry<InternalKey, ByteBuffer>> prev = cachedPrev;
-      if (prev.isPresent()) {
-        cachedNext = prev;
-        cachedPrev = null;
-      }
-      return prev;
-    }
+    // public CompletionStage<Void> advanceNext() {
+    // assert cachedNext == null;
+    // return (lastAdvance == REVERSE ? iterator.next().thenCompose(optPrev -> {
+    // cachedPrev = optPrev;
+    // return iterator.next();
+    // }) : iterator.next()).thenAccept(optNext -> {
+    // cachedNext = optNext;
+    // lastAdvance = FORWARD;
+    // });
+    // }
+    //
+    // public CompletionStage<Void> advancePrev() {
+    // assert cachedPrev == null;
+    // return (lastAdvance == FORWARD ? iterator.prev().thenCompose(optNext -> {
+    // cachedNext = optNext;
+    // return iterator.prev();
+    // }) : iterator.prev()).thenAccept(optPrev -> {
+    // cachedPrev = optPrev;
+    // lastAdvance = REVERSE;
+    // });
+    // }
+    //
+    // public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollNext() {
+    // assert cachedNext != null;
+    // final Optional<Entry<InternalKey, ByteBuffer>> next = cachedNext;
+    // if (next.isPresent()) {
+    // cachedPrev = next;
+    // cachedNext = null;
+    // }
+    // if (lastAdvance == REVERSE) {
+    // return iterator.next().thenApply(ignored -> next);
+    // } else {
+    // return CompletableFuture.completedFuture(next);
+    // }
+    // }
+    //
+    // public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollPrev() {
+    // assert cachedPrev != null;
+    // final Optional<Entry<InternalKey, ByteBuffer>> prev = cachedPrev;
+    // if (prev.isPresent()) {
+    // cachedNext = prev;
+    // cachedPrev = null;
+    // }
+    // if (lastAdvance == FORWARD) {
+    // return iterator.prev().thenApply(ignored -> prev);
+    // } else {
+    // return CompletableFuture.completedFuture(prev);
+    // }
+    // }
 
     public static Comparator<OrdinalIterator> smallerNext(
         final Comparator<InternalKey> keyComparator) {

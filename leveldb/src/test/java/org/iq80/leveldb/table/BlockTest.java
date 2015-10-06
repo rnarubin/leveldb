@@ -44,30 +44,30 @@ public class BlockTest {
 
   @Test
   public void testSingleEntry() throws Exception {
-    blockTest(Integer.MAX_VALUE, BlockHelper.createBlockEntry("name", "dain sundstrom"));
+    blockTest(Integer.MAX_VALUE, TestHelper.createBlockEntry("name", "dain sundstrom"));
   }
 
   @Test
   public void testMultipleEntriesWithNonSharedKey() throws Exception {
-    blockTest(Integer.MAX_VALUE, BlockHelper.createBlockEntry("beer", "Lagunitas IPA"),
-        BlockHelper.createBlockEntry("scotch", "Highland Park"));
+    blockTest(Integer.MAX_VALUE, TestHelper.createBlockEntry("beer", "Lagunitas IPA"),
+        TestHelper.createBlockEntry("scotch", "Highland Park"));
   }
 
   @Test
   public void testMultipleEntriesWithSharedKey() throws Exception {
     blockTest(Integer.MAX_VALUE,
-        BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
-        BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
-        BlockHelper.createBlockEntry("scotch", "Highland Park"));
+        TestHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
+        TestHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
+        TestHelper.createBlockEntry("scotch", "Highland Park"));
   }
 
   @Test
   public void testMultipleEntriesWithNonSharedKeyAndRestartPositions() throws Exception {
     final List<BlockEntry<ByteBuffer>> entries =
-        asList(BlockHelper.createBlockEntry("ale", "Lagunitas  Little Sumpin’ Sumpin’"),
-            BlockHelper.createBlockEntry("ipa", "Lagunitas IPA"),
-            BlockHelper.createBlockEntry("stout", "Lagunitas Imperial Stout"),
-            BlockHelper.createBlockEntry("strong", "Lagavulin"));
+        asList(TestHelper.createBlockEntry("ale", "Lagunitas  Little Sumpin’ Sumpin’"),
+            TestHelper.createBlockEntry("ipa", "Lagunitas IPA"),
+            TestHelper.createBlockEntry("stout", "Lagunitas Imperial Stout"),
+            TestHelper.createBlockEntry("strong", "Lagavulin"));
 
     for (int i = 1; i < entries.size(); i++) {
       blockTest(i, entries);
@@ -77,12 +77,12 @@ public class BlockTest {
   @Test
   public void testMultipleEntriesWithSharedKeyAndRestartPositions() throws Exception {
     final List<BlockEntry<ByteBuffer>> entries =
-        asList(BlockHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
-            BlockHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
-            BlockHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
-            BlockHelper.createBlockEntry("scotch/light", "Oban 14"),
-            BlockHelper.createBlockEntry("scotch/medium", "Highland Park"),
-            BlockHelper.createBlockEntry("scotch/strong", "Lagavulin"));
+        asList(TestHelper.createBlockEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’"),
+            TestHelper.createBlockEntry("beer/ipa", "Lagunitas IPA"),
+            TestHelper.createBlockEntry("beer/stout", "Lagunitas Imperial Stout"),
+            TestHelper.createBlockEntry("scotch/light", "Oban 14"),
+            TestHelper.createBlockEntry("scotch/medium", "Highland Park"),
+            TestHelper.createBlockEntry("scotch/strong", "Lagavulin"));
 
     for (int i = 1; i < entries.size(); i++) {
       blockTest(i, entries);
@@ -108,41 +108,41 @@ public class BlockTest {
       }
 
       assertEquals(builder.currentSizeEstimate(),
-          BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+          TestHelper.estimateBlockSize(blockRestartInterval, entries));
 
       blockByteBuffer = builder.finish();
 
       assertEquals(builder.currentSizeEstimate(),
-          BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+          TestHelper.estimateBlockSize(blockRestartInterval, entries));
     }
 
     final Block<ByteBuffer> block =
         new Block<ByteBuffer>(blockByteBuffer, byteCompare, noopDecoder);
-    assertEquals(block.size(), BlockHelper.estimateBlockSize(blockRestartInterval, entries));
+    assertEquals(block.size(), TestHelper.estimateBlockSize(blockRestartInterval, entries));
 
     final BlockIterator<ByteBuffer> blockIterator = block.iterator();
-    BlockHelper.assertReverseSequence(blockIterator,
+    TestHelper.assertReverseSequence(blockIterator,
         Collections.<BlockEntry<ByteBuffer>>emptyList());
-    BlockHelper.assertSequence(blockIterator, entries);
-    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+    TestHelper.assertSequence(blockIterator, entries);
+    TestHelper.assertReverseSequence(blockIterator, reverseEntries);
 
     blockIterator.seekToFirst();
-    BlockHelper.assertReverseSequence(blockIterator,
+    TestHelper.assertReverseSequence(blockIterator,
         Collections.<BlockEntry<ByteBuffer>>emptyList());
-    BlockHelper.assertSequence(blockIterator, entries);
-    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+    TestHelper.assertSequence(blockIterator, entries);
+    TestHelper.assertReverseSequence(blockIterator, reverseEntries);
 
     blockIterator.seekToLast();
     if (reverseEntries.size() > 0) {
-      BlockHelper.assertSequence(blockIterator, reverseEntries.get(0));
+      TestHelper.assertSequence(blockIterator, reverseEntries.get(0));
       blockIterator.seekToLast();
-      BlockHelper.assertReverseSequence(blockIterator,
+      TestHelper.assertReverseSequence(blockIterator,
           reverseEntries.subList(1, reverseEntries.size()));
     }
-    BlockHelper.assertSequence(blockIterator, entries);
+    TestHelper.assertSequence(blockIterator, entries);
 
     blockIterator.seekToEnd();
-    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+    TestHelper.assertReverseSequence(blockIterator, reverseEntries);
 
     for (final BlockEntry<ByteBuffer> entry : entries) {
       final List<BlockEntry<ByteBuffer>> nextEntries =
@@ -150,27 +150,27 @@ public class BlockTest {
       final List<BlockEntry<ByteBuffer>> prevEntries =
           reverseEntries.subList(reverseEntries.indexOf(entry), reverseEntries.size());
       blockIterator.seek(entry.getKey());
-      BlockHelper.assertSequence(blockIterator, nextEntries);
+      TestHelper.assertSequence(blockIterator, nextEntries);
 
-      blockIterator.seek(BlockHelper.before(entry));
-      BlockHelper.assertSequence(blockIterator, nextEntries);
+      blockIterator.seek(TestHelper.before(entry));
+      TestHelper.assertSequence(blockIterator, nextEntries);
 
-      blockIterator.seek(BlockHelper.after(entry));
-      BlockHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
+      blockIterator.seek(TestHelper.after(entry));
+      TestHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
 
-      blockIterator.seek(BlockHelper.before(entry));
-      BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+      blockIterator.seek(TestHelper.before(entry));
+      TestHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
 
       blockIterator.seek(entry.getKey());
-      BlockHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
+      TestHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
 
-      blockIterator.seek(BlockHelper.after(entry));
-      BlockHelper.assertReverseSequence(blockIterator, prevEntries);
+      blockIterator.seek(TestHelper.after(entry));
+      TestHelper.assertReverseSequence(blockIterator, prevEntries);
     }
 
     blockIterator
         .seek(ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
-    BlockHelper.assertSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>>emptyList());
-    BlockHelper.assertReverseSequence(blockIterator, reverseEntries);
+    TestHelper.assertSequence(blockIterator, Collections.<BlockEntry<ByteBuffer>>emptyList());
+    TestHelper.assertReverseSequence(blockIterator, reverseEntries);
   }
 }

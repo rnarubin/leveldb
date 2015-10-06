@@ -14,8 +14,8 @@
  */
 package org.iq80.leveldb.util;
 
-import static org.iq80.leveldb.util.Iterators.Direction.NEXT;
-import static org.iq80.leveldb.util.Iterators.Direction.PREV;
+import static org.iq80.leveldb.util.Iterators.Direction.FORWARD;
+import static org.iq80.leveldb.util.Iterators.Direction.REVERSE;
 
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
@@ -63,7 +63,7 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
       // seek the current iterator to the key
       return getData(index.next().getValue()).thenCompose(newCurrent -> {
         current = newCurrent;
-        currentOrigin = NEXT;
+        currentOrigin = FORWARD;
         return newCurrent.seek(targetKey);
       }).thenCombine(close, (seeked, closed) -> null);
     } else {
@@ -79,12 +79,12 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
-    return current == null ? advanceIndex(NEXT) : advanceData(NEXT);
+    return current == null ? advanceIndex(FORWARD) : advanceData(FORWARD);
   }
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
-    return current == null ? advanceIndex(PREV) : advanceData(PREV);
+    return current == null ? advanceIndex(REVERSE) : advanceData(REVERSE);
   }
 
   private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> advanceData(
@@ -110,23 +110,22 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
 
   private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> advanceIndex(
       final Direction direction) {
-    return direction.hasMore(index)
-        ? getData(direction.advance(index).getValue()).thenCompose(newCurrent -> {
-          current = newCurrent;
-          currentOrigin = direction;
-          return direction.seekToEdge(current).thenCompose(voided -> advanceData(direction));
-        }) : CompletableFuture.completedFuture(Optional.empty());
+    if (direction.hasMore(index)) {
+      return getData(direction.advance(index).getValue()).thenCompose(newCurrent -> {
+        current = newCurrent;
+        currentOrigin = direction;
+        return direction.seekToEdge(current).thenCompose(voided -> advanceData(direction));
+      });
+    } else {
+      current = null;
+      return CompletableFuture.completedFuture(Optional.empty());
+    }
   }
 
   protected abstract CompletionStage<DataT> getData(V indexValue);
 
   @Override
   public String toString() {
-    final StringBuilder sb = new StringBuilder();
-    sb.append("TwoStageIterator");
-    sb.append("{index=").append(index);
-    sb.append(", current=").append(current);
-    sb.append('}');
-    return sb.toString();
+    return "TwoStageIterator [index=" + index + ", current=" + current + "]";
   }
 }

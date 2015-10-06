@@ -22,6 +22,7 @@ import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.util.CompletableFutures;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -50,7 +51,17 @@ public final class TableCache implements AutoCloseable {
           @Override
           public CompletionStage<Table> load(final Long fileNumber) {
             return options.env().openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
-                .thenCompose(file -> Table.newTable(file, userComparator, options));
+                .thenCompose(file -> {
+              final CompletionStage<Table> table = Table.newTable(file, userComparator, options);
+              return CompletableFutures.composeUnconditionally(table, optTable -> {
+                if (optTable.isPresent()) {
+                  return table;
+                } else {
+                  // error in initializing table
+                  return file.asyncClose().thenApply(voided -> null);
+                }
+              });
+            });
           }
         });
   }
