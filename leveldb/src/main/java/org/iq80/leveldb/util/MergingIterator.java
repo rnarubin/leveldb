@@ -72,16 +72,21 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
-    return null;
+    return Stream.of(iters).min(smallerNext).orElseThrow(IllegalStateException::new).pollNext();
   }
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
+    final CompletionStage<Void> cleanup;
     if (uncleanReverse) {
-      // do work
+      cleanup = CompletableFutures.allOfVoid(Stream.of(iters).filter(ord -> ord.cachedPrev == null)
+          .map(OrdinalIterator::sanitizePrev));
       uncleanReverse = false;
+    } else {
+      cleanup = CompletableFuture.completedFuture(null);
     }
-    return null;
+    return cleanup.thenCompose(voided -> Stream.of(iters).max(largerPrev)
+        .orElseThrow(IllegalStateException::new).pollPrev());
   }
 
   @Override
@@ -145,69 +150,49 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollNext() {
       assert lastAdvance != null;
       assert cachedNext != null;
-      if (lastAdvance == FORWARD) {
+      if (!cachedNext.isPresent()) {
+        return CompletableFuture.completedFuture(Optional.empty());
+      } else if (lastAdvance == FORWARD) {
         return iterator.next().thenApply(optNext -> {
           cachedPrev = cachedNext;
           cachedNext = optNext;
           return cachedPrev;
         });
       } else {
+        assert cachedPrev != null;
         lastAdvance = FORWARD;
-        return iterator.next().thenCompose(ignored -> iterator.next())
-            .thenCompose(optNext -> optNext.isPresent() ? pollNext()
-                : CompletableFuture.completedFuture(optNext));
+        return (cachedPrev.isPresent() ? iterator.next().thenCompose(ignored -> iterator.next())
+            : iterator.next()).thenCompose(ignored -> pollNext());
       }
     }
 
-    // public CompletionStage<Void> advanceNext() {
-    // assert cachedNext == null;
-    // return (lastAdvance == REVERSE ? iterator.next().thenCompose(optPrev -> {
-    // cachedPrev = optPrev;
-    // return iterator.next();
-    // }) : iterator.next()).thenAccept(optNext -> {
-    // cachedNext = optNext;
-    // lastAdvance = FORWARD;
-    // });
-    // }
-    //
-    // public CompletionStage<Void> advancePrev() {
-    // assert cachedPrev == null;
-    // return (lastAdvance == FORWARD ? iterator.prev().thenCompose(optNext -> {
-    // cachedNext = optNext;
-    // return iterator.prev();
-    // }) : iterator.prev()).thenAccept(optPrev -> {
-    // cachedPrev = optPrev;
-    // lastAdvance = REVERSE;
-    // });
-    // }
-    //
-    // public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollNext() {
-    // assert cachedNext != null;
-    // final Optional<Entry<InternalKey, ByteBuffer>> next = cachedNext;
-    // if (next.isPresent()) {
-    // cachedPrev = next;
-    // cachedNext = null;
-    // }
-    // if (lastAdvance == REVERSE) {
-    // return iterator.next().thenApply(ignored -> next);
-    // } else {
-    // return CompletableFuture.completedFuture(next);
-    // }
-    // }
-    //
-    // public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollPrev() {
-    // assert cachedPrev != null;
-    // final Optional<Entry<InternalKey, ByteBuffer>> prev = cachedPrev;
-    // if (prev.isPresent()) {
-    // cachedNext = prev;
-    // cachedPrev = null;
-    // }
-    // if (lastAdvance == FORWARD) {
-    // return iterator.prev().thenApply(ignored -> prev);
-    // } else {
-    // return CompletableFuture.completedFuture(prev);
-    // }
-    // }
+    public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollPrev() {
+      assert lastAdvance != null;
+      assert cachedPrev != null;
+      if (!cachedPrev.isPresent()) {
+        return CompletableFuture.completedFuture(Optional.empty());
+      } else if (lastAdvance == REVERSE) {
+        return iterator.prev().thenApply(optPrev -> {
+          cachedNext = cachedPrev;
+          cachedPrev = optPrev;
+          return cachedNext;
+        });
+      } else {
+        assert cachedNext != null;
+        lastAdvance = REVERSE;
+        return (cachedNext.isPresent() ? iterator.prev().thenCompose(ignored -> iterator.prev())
+            : iterator.prev()).thenCompose(ignored -> pollPrev());
+      }
+    }
+
+    public CompletionStage<Void> sanitizePrev() {
+      assert lastAdvance == FORWARD;
+      assert cachedNext != null;
+      assert cachedPrev == null;
+      lastAdvance = REVERSE;
+      return (cachedNext.isPresent() ? iterator.prev().thenCompose(ignored -> iterator.prev())
+          : iterator.prev()).thenAccept(optPrev -> cachedPrev = optPrev);
+    }
 
     public static Comparator<OrdinalIterator> smallerNext(
         final Comparator<InternalKey> keyComparator) {

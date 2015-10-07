@@ -33,6 +33,7 @@ import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.TestHelper;
 import org.iq80.leveldb.util.Iterators.AsyncWrappedSeekingIterator;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.Maps;
@@ -52,10 +53,8 @@ public class MergingIteratorTest {
         .map(i -> TestHelper.createInternalEntry("" + i, "" + i, i)).collect(Collectors.toList())));
   }
 
-  @Test
-  public void testMultiple() {
-    final int[][] data =
-        {{'f', 'i', 'j', 's', 't'}, {'c', 'e', 'r', 'v'}, {'d'}, {'b', 'k', 'p', 'x', 'z'}, {}};
+  @Test(dataProvider = "getData")
+  public void testMultiple(final int[][] data) {
     iterTest(Arrays.stream(data).map(Arrays::stream)
         .map(stream -> stream.mapToObj(i -> new byte[] {(byte) i})
             .map(b -> Maps.<InternalKey, ByteBuffer>immutableEntry(
@@ -63,6 +62,14 @@ public class MergingIteratorTest {
                 ByteBuffer.wrap(b)))
             .collect(Collectors.toList()))
         .collect(Collectors.toList()));
+  }
+
+  @DataProvider
+  public Object[][] getData() {
+    return new Object[][] {
+        {new int[][] {{'f', 'i', 'j', 's', 't'}, {'c', 'e', 'r', 'v'}, {'d'},
+            {'b', 'k', 'p', 'x', 'z'}, {}, {'a', 'l', 'n'}, {'m', 'o'}}},
+        {new int[][] {{'a', 'b', 'c'}, {'d', 'e', 'f'}, {'h', 'i', 'j'}}}};
   }
 
   private void iterTest(final List<List<Entry<InternalKey, ByteBuffer>>> input) {
@@ -81,5 +88,4 @@ public class MergingIteratorTest {
     TestHelper.testInternalKeyIterator(iter, entries, r -> r.run());
   }
 }
-
 
