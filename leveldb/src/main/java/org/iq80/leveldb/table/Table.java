@@ -150,7 +150,10 @@ public final class Table
             checksum.update(readBuffer, dataStart, blockHandle.getDataSize() + 1);
             int actualCrc32c = ByteBuffers.maskChecksum(checksum.getIntValue());
 
-            Preconditions.checkState(blockTrailer.getCrc32c() == actualCrc32c, "Block corrupted: checksum mismatch");
+            if (blockTrailer.getCrc32c() != actualCrc32c) {
+                throw new IOException(String.format("Block corrupted: checksum mismatch (%d, %d)",
+                    blockTrailer.getCrc32c(), actualCrc32c));
+            }
         }
 
         ByteBuffer blockData = uncompressIfNecessary(readBuffer, blockTrailer.getCompressionId());
