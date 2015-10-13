@@ -152,19 +152,19 @@ public class BlockTest {
       blockIterator.seek(entry.getKey());
       TestHelper.assertSequence(blockIterator, nextEntries);
 
-      blockIterator.seek(TestHelper.before(entry));
+      blockIterator.seek(TestHelper.before(entry.getKey()));
       TestHelper.assertSequence(blockIterator, nextEntries);
 
-      blockIterator.seek(TestHelper.after(entry));
+      blockIterator.seek(TestHelper.after(entry.getKey()));
       TestHelper.assertSequence(blockIterator, nextEntries.subList(1, nextEntries.size()));
 
-      blockIterator.seek(TestHelper.before(entry));
+      blockIterator.seek(TestHelper.before(entry.getKey()));
       TestHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
 
       blockIterator.seek(entry.getKey());
       TestHelper.assertReverseSequence(blockIterator, prevEntries.subList(1, prevEntries.size()));
 
-      blockIterator.seek(TestHelper.after(entry));
+      blockIterator.seek(TestHelper.after(entry.getKey()));
       TestHelper.assertReverseSequence(blockIterator, prevEntries);
     }
 

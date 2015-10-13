@@ -17,8 +17,6 @@ package org.iq80.leveldb.table;
 import static java.util.Arrays.asList;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
@@ -143,8 +141,6 @@ public abstract class TableTest extends EnvDependentTest {
 
   private void tableTest(final int blockSize, final int blockRestartInterval,
       final List<Entry<InternalKey, ByteBuffer>> entries) throws Exception {
-    final List<Entry<InternalKey, ByteBuffer>> reverseEntries = new ArrayList<>(entries);
-    Collections.reverse(reverseEntries);
 
     clearFile();
     final Options options = Options.make().blockSize(blockSize)

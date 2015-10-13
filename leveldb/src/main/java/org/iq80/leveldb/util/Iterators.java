@@ -46,6 +46,11 @@ public final class Iterators {
     return new EmptySeekingAsyncIterator<K, V>();
   }
 
+  public static <K, V> SeekingAsynchronousIterator<K, V> async(
+      final ReverseSeekingIterator<K, V> iter) {
+    return new AsyncWrappedSeekingIterator<>(iter);
+  }
+
   public static <T> ListReverseIterator<T> listReverseIterator(final ListIterator<T> listIter) {
     return new ListReverseIterator<T>(listIter);
   }
@@ -288,7 +293,7 @@ public final class Iterators {
     }
   }
 
-  public static class AsyncWrappedSeekingIterator<K, V>
+  private static class AsyncWrappedSeekingIterator<K, V>
       implements SeekingAsynchronousIterator<K, V> {
 
     private final ReverseSeekingIterator<K, V> iter;
@@ -343,32 +348,37 @@ public final class Iterators {
     public CompletionStage<Optional<T>> next() {
       return CompletableFuture.completedFuture(Optional.empty());
     }
+
+    @Override
+    public String toString() {
+      return "EmptyAsyncIterator []";
+    }
   }
 
   private static class EmptySeekingAsyncIterator<K, V> extends EmptyAsyncIterator<Entry<K, V>>
       implements SeekingAsynchronousIterator<K, V> {
     @Override
     public CompletionStage<Optional<Entry<K, V>>> prev() {
-      return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    @Override
-    public CompletionStage<Void> asyncClose() {
-      return CompletableFuture.completedFuture(null);
+      return next();
     }
 
     @Override
     public CompletionStage<Void> seek(final K key) {
-      return CompletableFuture.completedFuture(null);
+      return seekToEnd();
     }
 
     @Override
     public CompletionStage<Void> seekToFirst() {
-      return CompletableFuture.completedFuture(null);
+      return seekToEnd();
     }
 
     @Override
     public CompletionStage<Void> seekToEnd() {
+      return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public CompletionStage<Void> asyncClose() {
       return CompletableFuture.completedFuture(null);
     }
 

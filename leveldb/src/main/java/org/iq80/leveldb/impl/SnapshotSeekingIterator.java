@@ -18,7 +18,6 @@ package org.iq80.leveldb.impl;
 import static org.iq80.leveldb.util.Iterators.Direction.FORWARD;
 import static org.iq80.leveldb.util.Iterators.Direction.REVERSE;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map.Entry;
@@ -29,59 +28,44 @@ import java.util.concurrent.Executor;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.util.Iterators.Direction;
-import org.iq80.leveldb.util.MergingIterator;
 
 import com.google.common.collect.Maps;
 
 public final class SnapshotSeekingIterator
     implements SeekingAsynchronousIterator<ByteBuffer, ByteBuffer> {
-  private final MergingIterator iterator;
-  private final SnapshotImpl snapshot;
+  private final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator;
+  private final long sequence;
   private final Comparator<ByteBuffer> userComparator;
   private final Executor asyncExec;
-  // indicates the direction in which the iterator was last advanced
   private Direction direction;
   private Entry<InternalKey, ByteBuffer> savedEntry;
+  private Optional<Entry<InternalKey, ByteBuffer>> savedPrev;
 
-  public SnapshotSeekingIterator(final MergingIterator iterator, final SnapshotImpl snapshot,
-      final Comparator<ByteBuffer> userComparator, final Executor asyncExec) {
+  public SnapshotSeekingIterator(
+      final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator,
+      final SnapshotImpl snapshot, final Comparator<ByteBuffer> userComparator,
+      final Executor asyncExec) {
     this.iterator = iterator;
-    this.snapshot = snapshot;
+    this.sequence = snapshot.getLastSequence();
     this.userComparator = userComparator;
-    this.snapshot.getVersion().retain();
-    this.savedEntry = null;
     this.asyncExec = asyncExec;
   }
 
-  @Override
-  public void close() throws IOException {
-    this.snapshot.getVersion().release();
-    this.iterator.close();
+  private static Entry<ByteBuffer, ByteBuffer> externalize(
+      final Entry<InternalKey, ByteBuffer> internalEntry) {
+    return Maps.immutableEntry(internalEntry.getKey().getUserKey(), internalEntry.getValue());
   }
 
   @Override
   public CompletionStage<Void> asyncClose() {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  protected void seekToFirstInternal() {
-    iterator.seekToFirst();
-    direction = FORWARD;
-  }
-
-  @Override
-  public void seekToEndInternal() {
-    iterator.seekToEnd();
-    savedEntry = null;
-    direction = REVERSE;
+    return iterator.asyncClose();
   }
 
   @Override
   public CompletionStage<Void> seekToFirst() {
     direction = FORWARD;
     savedEntry = null;
+    savedPrev = null;
     return iterator.seekToFirst();
   }
 
@@ -89,152 +73,65 @@ public final class SnapshotSeekingIterator
   public CompletionStage<Void> seekToEnd() {
     direction = REVERSE;
     savedEntry = null;
+    savedPrev = null;
     return iterator.seekToEnd();
   }
 
   @Override
-  protected void seekInternal(final ByteBuffer targetKey) {
-    iterator.seek(new TransientInternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
-    findNextUserEntry(false, null);
-    direction = REVERSE; // the next user entry has been found, but not yet advanced
-  }
-
-  @Override
   public CompletionStage<Void> seek(final ByteBuffer key) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  protected Entry<ByteBuffer, ByteBuffer> getNextElement() {
-    if (direction == REVERSE) {
-      if (!iterator.hasNext()) {
-        savedEntry = null;
-        return null;
-      }
-      direction = FORWARD;
-
-      // the last valid entry was returned by getPrevElement
-      // so iterator's next must be the valid entry
-    } else if (direction == FORWARD) {
-      findNextUserEntry(true, savedEntry);
-
-      if (!iterator.hasNext()) {
-        return null;
-      }
-    } else {
-      throw new IllegalStateException("must seek before iterating");
-    }
-
-    savedEntry = iterator.next();
-
-    return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
+    direction = null;
+    savedEntry = null;
+    savedPrev = null;
+    return iterator.seek(new TransientInternalKey(key, sequence, ValueType.VALUE));
   }
 
   @Override
   public CompletionStage<Optional<Entry<ByteBuffer, ByteBuffer>>> next() {
-    if (direction == FORWARD) {
-      return nextUserEntry(savedEntry == null ? null : savedEntry.getKey().getUserKey())
-          .thenApply(next -> {
-            savedEntry = next;
-            return next == null ? Optional.empty()
-                : Optional.of(Maps.immutableEntry(next.getKey().getUserKey(), next.getValue()));
-          });
-    }
     if (direction == REVERSE) {
-      direction = FORWARD;
-      if (savedEntry == null) {
-
-      }
-    }
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  protected Entry<ByteBuffer, ByteBuffer> getPrevElement() {
-    if (direction == FORWARD) {
-      if (!iterator.hasPrev()) {
-        savedEntry = null;
-        return null;
-      }
-      direction = REVERSE;
-      // the last valid entry was returned by getNextElement
-      // so iterator's prev must be the valid entry
-      savedEntry = iterator.prev();
-    } else if (direction == REVERSE) {
-      findPrevUserEntry();
-
-      if (savedEntry == null) {
-        return null;
-      }
+      // direction = FORWARD;
+      //// advance twice because prevUserEntry is consuming
+      // return (savedPrev == null ? iterator.next()
+      // : iterator.next().thenCompose(ignored -> iterator.next())).thenApply(optNext -> {
+      // savedEntry = optNext.orElse(null);
+      // if (savedEntry == null) {
+      // direction = REVERSE;
+      // }
+      // return optNext.map(SnapshotSeekingIterator::externalize);
+      // });
     } else {
-      throw new IllegalStateException("must seek before iterating");
+      return nextUserEntry(savedEntry == null ? null : savedEntry.getKey().getUserKey());
     }
-
-    return Maps.immutableEntry(savedEntry.getKey().getUserKey(), savedEntry.getValue());
   }
 
   @Override
   public CompletionStage<Optional<Entry<ByteBuffer, ByteBuffer>>> prev() {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  protected Entry<ByteBuffer, ByteBuffer> peekInternal() {
-    if (hasNextInternal()) {
-      final Entry<InternalKey, ByteBuffer> peek = iterator.peek();
-      return Maps.immutableEntry(peek.getKey().getUserKey(), peek.getValue());
-    }
-    return null;
-  }
-
-  @Override
-  protected Entry<ByteBuffer, ByteBuffer> peekPrevInternal() {
-    if (hasPrevInternal()) {
-      final Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
-      return Maps.immutableEntry(peekPrev.getKey().getUserKey(), peekPrev.getValue());
-    }
-    return null;
-  }
-
-  private void findNextUserEntry(boolean skipping, final Entry<InternalKey, ByteBuffer> skipEntry) {
-    ByteBuffer skipKey;
-    if (skipEntry == null) {
-      skipping = false;
-      skipKey = null;
+    if (direction == FORWARD) {
+      // direction = REVERSE;
+      //// the last valid entry was returned by next
+      //// so iterator's prev must be the valid entry
+      // return iterator.prev().thenApply(optPrev -> {
+      // savedEntry = optPrev.orElse(null);
+      // if (savedEntry == null) {
+      // direction = FORWARD;
+      // }
+      // return optPrev.map(SnapshotSeekingIterator::externalize);
+      // });
     } else {
-      skipKey = skipEntry.getKey().getUserKey();
+      return prevUserEntry(savedPrev).thenApply(optSave -> {
+        savedPrev = optSave;
+        return Optional.ofNullable(savedEntry).map(SnapshotSeekingIterator::externalize);
+      });
     }
-
-    while (iterator.hasNext()) {
-      final InternalKey internalKey = iterator.peek().getKey();
-      if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
-        switch (internalKey.getValueType()) {
-          case DELETION:
-            skipKey = internalKey.getUserKey();
-            skipping = true;
-            break;
-          case VALUE:
-            if (!skipping || userComparator.compare(internalKey.getUserKey(), skipKey) > 0) {
-              savedEntry = null;
-              return;
-            }
-            break;
-        }
-      }
-      iterator.next();
-    }
-    savedEntry = null;
   }
 
-  private CompletionStage<Entry<InternalKey, ByteBuffer>> nextUserEntry(final ByteBuffer skipKey) {
+  // TODO(optimization) don't asyncExec until certain stack depth
+  private CompletionStage<Optional<Entry<ByteBuffer, ByteBuffer>>> nextUserEntry(
+      final ByteBuffer skipKey) {
     return iterator.next().thenComposeAsync(optNext -> {
       if (optNext.isPresent()) {
         final InternalKey internalKey = optNext.get().getKey();
 
-        if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
+        if (internalKey.getSequenceNumber() <= sequence) {
           switch (internalKey.getValueType()) {
             case DELETION:
               return nextUserEntry(internalKey.getUserKey());
@@ -242,7 +139,8 @@ public final class SnapshotSeekingIterator
               if (skipKey == null
                   || userComparator.compare(internalKey.getUserKey(), skipKey) > 0) {
                 // no longer skipping, or found the next larger key
-                return CompletableFuture.completedFuture(optNext.get());
+                savedEntry = optNext.get();
+                return CompletableFuture.completedFuture(Optional.of(externalize(savedEntry)));
               }
               return nextUserEntry(skipKey);
             default:
@@ -254,104 +152,55 @@ public final class SnapshotSeekingIterator
         }
       } else {
         // out of entries
-        return CompletableFuture.completedFuture(null);
+        direction = REVERSE;
+        savedEntry = null;
+        return CompletableFuture.completedFuture(Optional.empty());
       }
     } , asyncExec);
   }
 
-  private void findPrevUserEntry() {
-    ValueType valueType = ValueType.DELETION;
-    while (iterator.hasPrev()) {
-      final Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
-      final InternalKey internalKey = peekPrev.getKey();
-      if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
-        if (valueType != ValueType.DELETION && (savedEntry == null || userComparator
-            .compare(internalKey.getUserKey(), savedEntry.getKey().getUserKey()) < 0)) {
-          break;
-        }
-        valueType = internalKey.getValueType();
-        if (valueType == ValueType.DELETION) {
-          savedEntry = null;
-        } else {
-          savedEntry = peekPrev;
-        }
-      } else if (valueType == ValueType.VALUE) {
-        // we've found an entry out of this sequence after finding a value type
-        // the value type is a valid entry to return, stop advancing prev
-        return;
-      }
-      iterator.prev();
-    }
+  // private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prevUserEntry(
+  // final Optional<Entry<InternalKey, ByteBuffer>> saved) {
+  // return prevStep(saved != null ? CompletableFuture.completedFuture(saved) : iterator.prev(),
+  // ValueType.DELETION);
+  // }
 
-    if (valueType == ValueType.DELETION) {
-      savedEntry = null;
-      direction = FORWARD;
-    }
-  }
-
-  private CompletionStage<?> prevUserEntry() {
-    return prevStep(ValueType.DELETION);
-  }
-
-  private CompletionStage<?> prevStep(final ValueType valueType) {
-    iterator.prev().thenComposeAsync(optPrev -> {
+  private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prevUserEntry(
+      final CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev,
+      final ValueType valueType) {
+    return prev.thenComposeAsync(optPrev -> {
       if (optPrev.isPresent()) {
         final InternalKey internalKey = optPrev.get().getKey();
-        if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
+        if (internalKey.getSequenceNumber() <= sequence) {
+          if (valueType == ValueType.VALUE && (savedEntry == null || userComparator
+              .compare(internalKey.getUserKey(), savedEntry.getKey().getUserKey()) < 0)) {
+            return CompletableFuture.completedFuture(optPrev);
+          }
+          final ValueType newType = internalKey.getValueType();
+          if (newType == ValueType.DELETION) {
+            savedEntry = null;
+          } else {
+            savedEntry = optPrev.get();
+          }
+          return prevUserEntry(iterator.prev(), newType);
 
         } else if (valueType == ValueType.VALUE) {
-          // return next;
-          return null;
+          return CompletableFuture.completedFuture(optPrev);
         } else {
-          return prevStep(valueType);
+          return prevUserEntry(iterator.prev(), valueType);
         }
       } else {
-        // out of entries
-        return null;
+        if (valueType == ValueType.DELETION) {
+          savedEntry = null;
+          direction = FORWARD;
+        }
+        return CompletableFuture.completedFuture(Optional.empty());
       }
     } , asyncExec);
-    return null;
   }
 
   @Override
   public String toString() {
-    final StringBuilder sb = new StringBuilder();
-    sb.append("SnapshotSeekingIterator");
-    sb.append("{snapshot=").append(snapshot);
-    sb.append(", iterator=").append(iterator);
-    sb.append('}');
-    return sb.toString();
-  }
-
-  @Override
-  protected boolean hasNextInternal() {
-    if (direction == FORWARD) {
-      findNextUserEntry(true, savedEntry);
-      // calls to findNextUserEntry will place the iterator in a state where
-      // next() is valid, which is the same as a state of coming from a reverse advance
-      direction = REVERSE;
-    } else if (direction == null) {
-      throw new IllegalStateException("must seek before iterating");
-    }
-    return iterator.hasNext();
-  }
-
-  @Override
-  protected boolean hasPrevInternal() {
-    if (direction == REVERSE) {
-      findPrevUserEntry();
-      if (savedEntry != null) {
-        // findPrevUserEntry places the iterator before the valid user entry
-        // so hasPrev after this call is answered by hasNext
-        // but the has... functions should not advance the iterator
-        // so advance forward to a position that appears externally the same as before this call
-        // (though not identical if deletions are present)
-        iterator.next();
-        direction = FORWARD;
-      }
-    } else if (direction == null) {
-      throw new IllegalStateException("must seek before iterating");
-    }
-    return iterator.hasPrev();
+    return "SnapshotSeekingIterator [sequence=" + sequence + ", iterator=" + iterator + "]";
   }
 }

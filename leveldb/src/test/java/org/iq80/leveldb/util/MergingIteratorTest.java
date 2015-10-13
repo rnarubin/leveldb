@@ -32,7 +32,6 @@ import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.BytewiseComparator;
 import org.iq80.leveldb.table.TestHelper;
-import org.iq80.leveldb.util.Iterators.AsyncWrappedSeekingIterator;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -75,8 +74,7 @@ public class MergingIteratorTest {
   private void iterTest(final List<List<Entry<InternalKey, ByteBuffer>>> input) {
     final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter =
         MergingIterator.newMergingIterator(input.stream()
-            .map(list -> new AsyncWrappedSeekingIterator<>(
-                Iterators.reverseSeekingIterator(list, comparator)))
+            .map(list -> Iterators.async(Iterators.reverseSeekingIterator(list, comparator)))
             .collect(Collectors.toList()), comparator);
     final List<Entry<InternalKey, ByteBuffer>> entries =
         input.stream().reduce(new ArrayList<>(), (x, y) -> {
@@ -85,7 +83,7 @@ public class MergingIteratorTest {
         });
     entries.sort((o1, o2) -> comparator.compare(o1.getKey(), o2.getKey()));
 
-    TestHelper.testInternalKeyIterator(iter, entries, r -> r.run());
+    TestHelper.testInternalKeyIterator(iter, entries, Runnable::run);
   }
 }
 

@@ -32,7 +32,7 @@ public interface FileEnvTestProvider extends EnvTestProvider {
     final Path tempDir = Files.createTempDirectory("leveldb-testing");
     final FileEnv env = new FileEnv();
     final DBHandle handle =
-        env.createDB(Optional.<DBHandle>of(FileEnv.handle(tempDir))).toCompletableFuture().get();
+        env.createDB(Optional.of(FileEnv.handle(tempDir))).toCompletableFuture().get();
     return Maps.immutableEntry(env, handle);
   }
 }

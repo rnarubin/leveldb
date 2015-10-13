@@ -168,14 +168,23 @@ public final class TestHelper {
     if (actual.getKey() instanceof InternalKey) {
       assertEquals(actual.getKey(), expected.getKey());
       assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
+    } else if (actual.getKey() instanceof ByteBuffer) {
+      assertByteBufferEquals((ByteBuffer) actual.getKey(), (ByteBuffer) expected.getKey());
+      assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
     } else {
       assertEquals(actual, expected);
     }
   }
 
   public static void assertByteBufferEquals(final ByteBuffer actual, final ByteBuffer expected) {
-    assertTrue(actual.compareTo(expected) == 0);
+    try {
+      assertTrue(actual.compareTo(expected) == 0);
+    } catch (final AssertionError e) {
+      throw new AssertionError(String.format("bytebuffers not equal: expected [%s], actual [%s]",
+          ByteBuffers.toString(expected), ByteBuffers.toString(actual)));
+    }
   }
+
 
   public static String beforeString(final Entry<String, ?> expectedEntry) {
     final String key = expectedEntry.getKey();
@@ -246,6 +255,17 @@ public final class TestHelper {
             ValueType.VALUE),
         ByteBuffer.wrap(value.getBytes(UTF_8)));
   }
+
+
+  public static void testBufferIterator(
+      final SeekingAsynchronousIterator<ByteBuffer, ByteBuffer> iter,
+      final List<Entry<ByteBuffer, ByteBuffer>> entries, final Executor... asyncExec) {
+    testIterator(iter, entries, ByteBuffer.wrap(new byte[] {0}),
+        ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
+        TestHelper::before, TestHelper::after,
+        asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
+  }
+
 
   public static void testInternalKeyIterator(
       final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter,

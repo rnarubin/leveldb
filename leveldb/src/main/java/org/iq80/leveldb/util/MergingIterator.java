@@ -41,6 +41,7 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   private final OrdinalIterator[] iters;
   private final Comparator<OrdinalIterator> smallerNext, largerPrev;
   private boolean uncleanReverse;
+  private boolean sought = false;
 
   private MergingIterator(
       final Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
@@ -72,11 +73,17 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> next() {
+    if (!sought) {
+      throw new IllegalStateException("must seek before iterating");
+    }
     return Stream.of(iters).min(smallerNext).orElseThrow(IllegalStateException::new).pollNext();
   }
 
   @Override
   public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> prev() {
+    if (!sought) {
+      throw new IllegalStateException("must seek before iterating");
+    }
     final CompletionStage<Void> cleanup;
     if (uncleanReverse) {
       cleanup = CompletableFutures.allOfVoid(Stream.of(iters).filter(ord -> ord.cachedPrev == null)
@@ -96,16 +103,19 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
   @Override
   public CompletionStage<Void> seekToFirst() {
+    sought = true;
     return CompletableFutures.allOfVoid(Stream.of(iters).map(OrdinalIterator::seekToFirst));
   }
 
   @Override
   public CompletionStage<Void> seekToEnd() {
+    sought = true;
     return CompletableFutures.allOfVoid(Stream.of(iters).map(OrdinalIterator::seekToEnd));
   }
 
   @Override
   public CompletionStage<Void> seek(final InternalKey key) {
+    sought = true;
     uncleanReverse = true;
     return CompletableFutures.allOfVoid(Stream.of(iters).map(ord -> ord.seek(key)));
   }
@@ -113,7 +123,8 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   private static final class OrdinalIterator {
     private final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator;
     private final int ordinal;
-    private Optional<Entry<InternalKey, ByteBuffer>> cachedNext, cachedPrev;
+    private Optional<Entry<InternalKey, ByteBuffer>> cachedNext;
+    Optional<Entry<InternalKey, ByteBuffer>> cachedPrev;
     private Direction lastAdvance;
 
     public OrdinalIterator(final int ordinal,
@@ -149,7 +160,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
     public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollNext() {
       assert lastAdvance != null;
-      assert cachedNext != null;
       if (!cachedNext.isPresent()) {
         return CompletableFuture.completedFuture(Optional.empty());
       } else if (lastAdvance == FORWARD) {
@@ -159,7 +169,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
           return cachedPrev;
         });
       } else {
-        assert cachedPrev != null;
         lastAdvance = FORWARD;
         return (cachedPrev.isPresent() ? iterator.next().thenCompose(ignored -> iterator.next())
             : iterator.next()).thenCompose(ignored -> pollNext());
@@ -168,7 +177,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
     public CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> pollPrev() {
       assert lastAdvance != null;
-      assert cachedPrev != null;
       if (!cachedPrev.isPresent()) {
         return CompletableFuture.completedFuture(Optional.empty());
       } else if (lastAdvance == REVERSE) {
@@ -178,7 +186,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
           return cachedNext;
         });
       } else {
-        assert cachedNext != null;
         lastAdvance = REVERSE;
         return (cachedNext.isPresent() ? iterator.prev().thenCompose(ignored -> iterator.prev())
             : iterator.prev()).thenCompose(ignored -> pollPrev());
@@ -187,7 +194,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
 
     public CompletionStage<Void> sanitizePrev() {
       assert lastAdvance == FORWARD;
-      assert cachedNext != null;
       assert cachedPrev == null;
       lastAdvance = REVERSE;
       return (cachedNext.isPresent() ? iterator.prev().thenCompose(ignored -> iterator.prev())
@@ -197,9 +203,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     public static Comparator<OrdinalIterator> smallerNext(
         final Comparator<InternalKey> keyComparator) {
       return (o1, o2) -> {
-        assert o1.cachedNext != null;
-        assert o2.cachedNext != null;
-
         if (o1.cachedNext.isPresent()) {
           if (o2.cachedNext.isPresent()) {
             final int result =
@@ -219,9 +222,6 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     public static Comparator<OrdinalIterator> largerPrev(
         final Comparator<InternalKey> keyComparator) {
       return (o1, o2) -> {
-        assert o1.cachedPrev != null;
-        assert o2.cachedPrev != null;
-
         if (o1.cachedPrev.isPresent()) {
           if (o2.cachedPrev.isPresent()) {
             final int result =
