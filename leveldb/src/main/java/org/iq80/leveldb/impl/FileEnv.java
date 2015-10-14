@@ -120,6 +120,7 @@ public class FileEnv extends PathEnv {
   protected CompletionStage<Void> deleteDB(final Path path, final Predicate<Path> fileNameFilter) {
     // instead of blindly deleting the entire directory, delete all files owned by the DB; if the
     // dir is empty after those deletions, delete the dir
+    // TODO(maybe) deletion default on interface, recurse with Y combinator
     return submit(() -> new DirectoryIterator<Path>(path, fileNameFilter, Function.identity()))
         .thenCompose(iter -> CompletableFutures.composeUnconditionally(
             CompletableFutures.flatMapIterator(iter, this::deleteFile, getExecutor()).thenCompose(

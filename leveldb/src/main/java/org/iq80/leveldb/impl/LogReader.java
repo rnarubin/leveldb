@@ -134,7 +134,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
     final long blockStartLocation = blockStart;
     // Skip to start of first block that can contain the initial record
     return blockStartLocation > 0 ? CompletableFutures
-        .handleExceptionally(file.skip(blockStartLocation), (voidSuccess, exception) -> {
+        .handleExceptional(file.skip(blockStartLocation), (voidSuccess, exception) -> {
           if (exception == null) {
             return true;
           } else {
@@ -151,7 +151,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
   }
 
   private CompletionStage<ByteBuffer> nextRecord(final boolean inFragmentedRecord) {
-    return CompletableFutures.composeExceptionally(readNextChunk(), chunkType -> {
+    return CompletableFutures.thenComposeExceptional(readNextChunk(), chunkType -> {
       switch (chunkType) {
         case FULL:
           if (inFragmentedRecord) {
@@ -230,7 +230,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
         ? readNextBlock() : CompletableFuture.completedFuture(true);
     currentChunk = ByteBuffers.EMPTY_BUFFER;
 
-    return CompletableFutures.applyExceptionally(readNext, hasData -> {
+    return CompletableFutures.thenApplyExceptional(readNext, hasData -> {
       if (!hasData) {
         return EOF;
       }
@@ -293,7 +293,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
    */
   private CompletionStage<Boolean> readNextBlock() {
     blockScratch.clear();
-    return CompletableFutures.handleExceptionally(read(), (eof, exception) -> {
+    return CompletableFutures.handleExceptional(read(), (eof, exception) -> {
       if (exception != null) {
         currentBlock = ByteBuffers.EMPTY_BUFFER;
         reportDrop(BLOCK_SIZE, exception);

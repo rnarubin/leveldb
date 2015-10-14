@@ -14,9 +14,6 @@
  */
 package org.iq80.leveldb.util;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletionStage;
 
@@ -26,15 +23,14 @@ import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.TableCache;
 import org.iq80.leveldb.table.TableIterator;
-import org.iq80.leveldb.util.LevelIterator.FileIterator;
 
 import com.google.common.collect.Maps;
 
-public final class LevelIterator
-    extends TwoStageIterator<FileIterator, TableIterator, FileMetaData> {
+public final class LevelIterator extends
+    TwoStageIterator<ReverseSeekingIterator<InternalKey, FileMetaData>, TableIterator, FileMetaData> {
   private final TableCache tableCache;
 
-  public LevelIterator(final TableCache tableCache, final List<FileMetaData> files,
+  public LevelIterator(final TableCache tableCache, final FileMetaData[] files,
       final InternalKeyComparator comparator) {
     super(new FileIterator(files, comparator));
     this.tableCache = tableCache;
@@ -45,13 +41,13 @@ public final class LevelIterator
     return tableCache.newIterator(file);
   }
 
-  static final class FileIterator
-      implements ReverseSeekingIterator<InternalKey, FileMetaData>, Closeable {
-    private final List<FileMetaData> files;
+  private static final class FileIterator
+      implements ReverseSeekingIterator<InternalKey, FileMetaData> {
+    private final FileMetaData[] files;
     private final InternalKeyComparator comparator;
     private int index;
 
-    public FileIterator(final List<FileMetaData> files, final InternalKeyComparator comparator) {
+    public FileIterator(final FileMetaData[] files, final InternalKeyComparator comparator) {
       this.files = files;
       this.comparator = comparator;
     }
@@ -64,20 +60,20 @@ public final class LevelIterator
     @Override
     public void seek(final InternalKey targetKey) {
       // seek the index to the block containing the key
-      if (files.size() == 0) {
+      if (files.length == 0) {
         return;
       }
 
       // todo replace with Collections.binarySearch
       int left = 0;
-      int right = files.size() - 1;
+      int right = files.length - 1;
 
       // binary search restart positions to find the restart position immediately before the
       // targetKey
       while (left < right) {
         final int mid = (left + right) / 2;
 
-        if (comparator.compare(files.get(mid).getLargest(), targetKey) < 0) {
+        if (comparator.compare(files[mid].getLargest(), targetKey) < 0) {
           // Key at "mid.largest" is < "target". Therefore all
           // files at or before "mid" are uninteresting.
           left = mid + 1;
@@ -91,8 +87,8 @@ public final class LevelIterator
 
       // if the index is now pointing to the last block in the file, check if the largest key in
       // the block is less than the target key. If so, we need to seek beyond the end of this file
-      if (index == files.size() - 1
-          && comparator.compare(files.get(index).getLargest(), targetKey) < 0) {
+      if (index == files.length - 1
+          && comparator.compare(files[index].getLargest(), targetKey) < 0) {
         index++;
       }
     }
@@ -104,7 +100,7 @@ public final class LevelIterator
 
     @Override
     public Entry<InternalKey, FileMetaData> next() {
-      final FileMetaData f = files.get(index++);
+      final FileMetaData f = files[index++];
       return Maps.immutableEntry(f.getLargest(), f);
     }
 
@@ -115,7 +111,7 @@ public final class LevelIterator
 
     @Override
     public boolean hasNext() {
-      return index < files.size();
+      return index < files.length;
     }
 
     @Override
@@ -125,7 +121,7 @@ public final class LevelIterator
 
     @Override
     public Entry<InternalKey, FileMetaData> prev() {
-      final FileMetaData f = files.get(--index);
+      final FileMetaData f = files[--index];
       return Maps.immutableEntry(f.getLargest(), f);
     }
 
@@ -135,13 +131,8 @@ public final class LevelIterator
     }
 
     @Override
-    public void close() throws IOException {
-      // noop
-    }
-
-    @Override
     public void seekToEnd() {
-      index = files.size();
+      index = files.length;
     }
 
   }

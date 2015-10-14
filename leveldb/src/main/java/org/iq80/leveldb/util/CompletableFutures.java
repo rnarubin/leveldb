@@ -81,7 +81,7 @@ public final class CompletableFutures {
     return CompletableFuture.allOf(futures);
   }
 
-  public static <T, U> CompletionStage<U> handleExceptionally(final CompletionStage<T> first,
+  public static <T, U> CompletionStage<U> handleExceptional(final CompletionStage<T> first,
       final ExceptionalBiFunction<? super T, Throwable, ? extends U> handler) {
     final CompletableFuture<U> f = new CompletableFuture<>();
     first.whenComplete((t, throwable) -> {
@@ -94,7 +94,7 @@ public final class CompletableFutures {
     return f;
   }
 
-  public static <T, U> CompletionStage<U> applyExceptionally(final CompletionStage<T> first,
+  public static <T, U> CompletionStage<U> thenApplyExceptional(final CompletionStage<T> first,
       final ExceptionalFunction<? super T, ? extends U> applier) {
     final CompletableFuture<U> f = new CompletableFuture<>();
     first.whenComplete((t, throwable) -> {
@@ -111,7 +111,7 @@ public final class CompletableFutures {
     return f;
   }
 
-  public static <T, U> CompletionStage<U> composeExceptionally(final CompletionStage<T> first,
+  public static <T, U> CompletionStage<U> thenComposeExceptional(final CompletionStage<T> first,
       final ExceptionalFunction<? super T, ? extends CompletionStage<U>> composer) {
     final CompletableFuture<U> f = new CompletableFuture<>();
     first.whenComplete((t, tException) -> {
@@ -129,6 +129,24 @@ public final class CompletableFutures {
         } catch (final Exception e) {
           f.completeExceptionally(e);
         }
+      }
+    });
+    return f;
+  }
+
+  public static <T> CompletionStage<T> composeOnException(final CompletionStage<T> first,
+      final Function<Throwable, CompletionStage<Void>> onException) {
+    final CompletableFuture<T> f = new CompletableFuture<>();
+    first.whenComplete((t, tException) -> {
+      if (tException != null) {
+        onException.apply(tException).whenComplete((voided, suppressedException) -> {
+          if (suppressedException != null) {
+            tException.addSuppressed(suppressedException);
+          }
+          f.completeExceptionally(tException);
+        });
+      } else {
+        f.complete(t);
       }
     });
     return f;

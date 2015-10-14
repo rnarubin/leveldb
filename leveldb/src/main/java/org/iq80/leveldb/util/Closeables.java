@@ -16,7 +16,6 @@ package org.iq80.leveldb.util;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -39,12 +38,6 @@ public final class Closeables {
 
   public static CompletionStage<Void> asyncClose(final AsynchronousCloseable closeable) {
     return closeable != null ? closeable.asyncClose() : CompletableFuture.completedFuture(null);
-  }
-
-  public static CompletionStage<Void> asyncClose(
-      final Optional<? extends AsynchronousCloseable> closeable) {
-    return closeable.isPresent() ? closeable.get().asyncClose()
-        : CompletableFuture.completedFuture(null);
   }
 
   public static void close(final AutoCloseable closeable) throws Exception {
