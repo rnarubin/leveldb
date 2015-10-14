@@ -23,7 +23,7 @@ import java.util.concurrent.CompletionStage;
 
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.Env.RandomReadFile;
-import org.iq80.leveldb.Options;
+import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.ByteBufferCrc32C;
@@ -31,6 +31,7 @@ import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.ReferenceCounted;
 import org.iq80.leveldb.util.Snappy;
+import org.iq80.leveldb.util.TwoStageIterator;
 
 import com.google.common.base.Preconditions;
 
@@ -48,12 +49,13 @@ public final class Table extends ReferenceCounted<Table> {
   private Block<InternalKey> indexBlock;
 
   private Table(final RandomReadFile file, final Comparator<InternalKey> comparator,
-      final Options options, final BlockHandle metaindexBlockHandle) {
+      final boolean verifyChecksums, final Compression compression,
+      final BlockHandle metaindexBlockHandle) {
     Preconditions.checkNotNull(file, "file is null");
     Preconditions.checkNotNull(comparator, "comparator is null");
 
-    this.verifyChecksums = options.verifyChecksums();
-    this.compression = options.compression();
+    this.verifyChecksums = verifyChecksums;
+    this.compression = compression;
 
     this.file = file;
     this.comparator = comparator;
@@ -62,14 +64,16 @@ public final class Table extends ReferenceCounted<Table> {
   }
 
   public static CompletionStage<Table> newTable(final RandomReadFile file,
-      final Comparator<InternalKey> comparator, final Options options) {
+      final Comparator<InternalKey> comparator, final boolean verifyChecksums,
+      final Compression compression) {
     final long size = file.size();
     Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH,
         "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
 
     return file.read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH).thenCompose(footerBuf -> {
       final Footer footer = Footer.readFooter(footerBuf);
-      final Table table = new Table(file, comparator, options, footer.getMetaindexBlockHandle());
+      final Table table = new Table(file, comparator, verifyChecksums, compression,
+          footer.getMetaindexBlockHandle());
       return table.readBlock(footer.getIndexBlockHandle()).thenApply(block -> {
         table.indexBlock = block;
         return table;
@@ -180,13 +184,29 @@ public final class Table extends ReferenceCounted<Table> {
 
   @Override
   public String toString() {
-    final StringBuilder sb = new StringBuilder();
-    sb.append("Table");
-    sb.append("[file=").append(file);
-    sb.append(", comparator=").append(comparator);
-    sb.append(", verifyChecksums=").append(verifyChecksums);
-    sb.append(']');
-    return sb.toString();
+    return "Table [file=" + file + ", compression=" + compression + ", verifyChecksums="
+        + verifyChecksums + "]";
   }
 
+  public static final class TableIterator extends
+      TwoStageIterator<BlockIterator<InternalKey>, SeekingAsynchronousIterator<InternalKey, ByteBuffer>, ByteBuffer> {
+    private final Table table;
+
+    public TableIterator(final Table table, final BlockIterator<InternalKey> indexIterator) {
+      super(indexIterator);
+      this.table = table;
+    }
+
+    @Override
+    protected CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> getData(
+        final ByteBuffer blockHandle) {
+      return table.openBlock(blockHandle)
+          .thenApply(block -> org.iq80.leveldb.util.Iterators.async(block.iterator()));
+    }
+
+    @Override
+    public CompletionStage<Void> asyncClose() {
+      return table.release();
+    }
+  }
 }

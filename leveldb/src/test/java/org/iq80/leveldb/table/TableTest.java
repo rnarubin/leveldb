@@ -27,16 +27,15 @@ import java.util.concurrent.ExecutionException;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
+import org.iq80.leveldb.table.Table.TableIterator;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.EnvDependentTest;
 import org.iq80.leveldb.util.FileEnvTestProvider;
-import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.Snappy;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
@@ -74,13 +73,15 @@ public abstract class TableTest extends EnvDependentTest {
         .toCompletableFuture().get();
 
     try {
-      getEnv().openRandomReadFile(fileInfo)
+      getEnv()
+          .openRandomReadFile(
+              fileInfo)
           .thenCompose(
-              file -> CompletableFutures.composeUnconditionally(Table
-                  .newTable(file, new InternalKeyComparator(byteCompare),
-                      Options.make().env(getEnv()).bufferComparator(byteCompare)
-                          .verifyChecksums(true).compression(Snappy.instance()))
-              .thenCompose(Table::release), voided -> file.asyncClose()))
+              file -> CompletableFutures
+                  .composeUnconditionally(
+                      Table.newTable(file, new InternalKeyComparator(byteCompare), true,
+                          Snappy.instance()).thenCompose(Table::release),
+                  voided -> file.asyncClose()))
           .toCompletableFuture().get();
     } catch (final ExecutionException e) {
       throw e.getCause();
@@ -143,16 +144,13 @@ public abstract class TableTest extends EnvDependentTest {
       final List<Entry<InternalKey, ByteBuffer>> entries) throws Exception {
 
     clearFile();
-    final Options options = Options.make().blockSize(blockSize)
-        .blockRestartInterval(blockRestartInterval).memoryManager(MemoryManagers.heap())
-        .compression(Snappy.instance()).bufferComparator(byteCompare).env(getEnv());
 
     final SequentialWriteFile writeFile =
         getEnv().openSequentialWriteFile(fileInfo).toCompletableFuture().get();
 
     try (
-        final TableBuilder builder = new TableBuilder(options, writeFile,
-            new InternalKeyComparator(options.bufferComparator()));
+        final TableBuilder builder = new TableBuilder(blockRestartInterval, blockSize,
+            Snappy.instance(), writeFile, new InternalKeyComparator(byteCompare));
         final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
 
       final Iterator<Entry<InternalKey, ByteBuffer>> iter = entries.iterator();
@@ -166,9 +164,10 @@ public abstract class TableTest extends EnvDependentTest {
       last.thenCompose(voided -> builder.finish()).toCompletableFuture().get();
     }
 
-    final Table table =
-        Table.newTable(getEnv().openRandomReadFile(fileInfo).toCompletableFuture().get(),
-            new InternalKeyComparator(byteCompare), options).toCompletableFuture().get();
+    final Table table = Table
+        .newTable(getEnv().openRandomReadFile(fileInfo).toCompletableFuture().get(),
+            new InternalKeyComparator(byteCompare), true, Snappy.instance())
+        .toCompletableFuture().get();
 
 
     final TableIterator iter = table.retain().iterator();

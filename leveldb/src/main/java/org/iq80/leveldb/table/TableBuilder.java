@@ -12,7 +12,6 @@ import java.util.concurrent.CompletionStage;
 
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.Env.SequentialWriteFile;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.util.ByteBufferCrc32C;
@@ -21,8 +20,6 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.base.Preconditions;
 
 
 public class TableBuilder implements Closeable {
@@ -47,17 +44,15 @@ public class TableBuilder implements Closeable {
   private long position;
   private InternalKey lastKey;
 
-  public TableBuilder(final Options options, final SequentialWriteFile file,
+  public TableBuilder(final int blockRestartInterval, final int blockSize,
+      final Compression compression, final SequentialWriteFile file,
       final InternalKeyComparator internalKeyComparator) {
-    Preconditions.checkNotNull(options, "options is null");
-    Preconditions.checkNotNull(file, "file is null");
-
     this.file = file;
     this.internalKeyComparator = internalKeyComparator;
 
-    this.blockRestartInterval = options.blockRestartInterval();
-    this.blockSize = options.blockSize();
-    this.compression = options.compression();
+    this.blockRestartInterval = blockRestartInterval;
+    this.blockSize = blockSize;
+    this.compression = compression;
 
     this.dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, TARGET_FILE_SIZE),
         blockRestartInterval, internalKeyComparator.getUserComparator(), MemoryManagers.direct());

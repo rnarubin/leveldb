@@ -17,11 +17,12 @@ package org.iq80.leveldb.impl;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.CompletionStage;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
-import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.table.Table.TableIterator;
 import org.iq80.leveldb.util.CompletableFutures;
 
 import com.google.common.cache.CacheBuilder;
@@ -32,8 +33,8 @@ public final class TableCache implements AutoCloseable {
   private final LoadingCache<Long, CompletionStage<Table>> cache;
 
   public TableCache(final DBHandle dbHandle, final int tableCacheSize,
-      final InternalKeyComparator userComparator, final Options options,
-      final UncaughtExceptionHandler backgroundExceptionHandler) {
+      final InternalKeyComparator userComparator, final Env env, final boolean verifyChecksums,
+      final Compression compression, final UncaughtExceptionHandler backgroundExceptionHandler) {
     this.cache = CacheBuilder.newBuilder().maximumSize(tableCacheSize)
         .<Long, CompletionStage<Table>>removalListener(
             notification -> notification.getValue().whenComplete((table, openException) -> {
@@ -50,9 +51,10 @@ public final class TableCache implements AutoCloseable {
         .build(new CacheLoader<Long, CompletionStage<Table>>() {
           @Override
           public CompletionStage<Table> load(final Long fileNumber) {
-            return options.env().openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
+            return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
                 .thenCompose(file -> {
-              final CompletionStage<Table> table = Table.newTable(file, userComparator, options);
+              final CompletionStage<Table> table =
+                  Table.newTable(file, userComparator, verifyChecksums, compression);
               return CompletableFutures.composeUnconditionally(table, optTable -> {
                 if (optTable.isPresent()) {
                   return table;
@@ -66,11 +68,11 @@ public final class TableCache implements AutoCloseable {
         });
   }
 
-  public CompletionStage<TableIterator> newIterator(final FileMetaData file) {
-    return newIterator(file.getNumber());
+  public CompletionStage<TableIterator> tableIterator(final FileMetaData file) {
+    return tableIterator(file.getNumber());
   }
 
-  public CompletionStage<TableIterator> newIterator(final long number) {
+  public CompletionStage<TableIterator> tableIterator(final long number) {
     return getTable(number).thenApply(Table::iterator);
   }
 
