@@ -14,161 +14,250 @@
  */
 package org.iq80.leveldb.impl;
 
-import static com.google.common.collect.Lists.newArrayList;
 import static org.iq80.leveldb.impl.DbConstants.MAX_MEM_COMPACT_LEVEL;
-import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.table.TableIterator;
-import org.iq80.leveldb.util.LevelIterator;
+import org.iq80.leveldb.SeekingAsynchronousIterator;
+import org.iq80.leveldb.table.Table.TableIterator;
+import org.iq80.leveldb.util.CompletableFutures;
+import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.TwoStageIterator;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableList.Builder;
-import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 
-// TODO this class should be immutable
-public class Version {
-  private final VersionSet versionSet;
-  private final Level0 level0;
-  private final List<Level> levels;
+final class Version {
+  private final FileMetaData[][] files;
+  private final TableCache tableCache;
+  private final InternalKeyComparator internalKeyComparator;
 
   private final int compactionLevel;
   private final double compactionScore;
-  // private FileMetaData fileToCompact;
-  // private int fileToCompactLevel;
+  private final AtomicReference<Entry<FileMetaData, Integer>> seekCompaction;
 
-  public Version(final VersionSet versionSet, final FileMetaData[][] levelFiles,
-      final int compactionLevel, final double compactionScore) {
-    Preconditions.checkArgument(NUM_LEVELS > 1, "levels must be at least 2");
-    this.versionSet = versionSet;
+  Version(final FileMetaData[][] levelFiles, final int compactionLevel,
+      final double compactionScore, final TableCache tableCache,
+      final InternalKeyComparator internalKeyComparator) {
+    this.internalKeyComparator = internalKeyComparator;
+    this.seekCompaction = new AtomicReference<>(null);
     this.compactionLevel = compactionLevel;
     this.compactionScore = compactionScore;
-
-    this.level0 =
-        new Level0(Lists.<FileMetaData>newArrayList(), getTableCache(), getInternalKeyComparator());
-
-    final Builder<Level> builder = ImmutableList.builder();
-    for (int i = 1; i < NUM_LEVELS; i++) {
-      final List<FileMetaData> files = newArrayList();
-      builder.add(new Level(i, files, getTableCache(), getInternalKeyComparator()));
-    }
-    this.levels = builder.build();
+    this.tableCache = tableCache;
+    this.files = levelFiles;
   }
 
   /**
    * @return true iff no overlap
    */
   public boolean assertNoOverlappingFiles() {
-    for (int level = 1; level < NUM_LEVELS; level++) {
+    for (int level = 1; level < files.length; level++) {
       assertNoOverlappingFiles(level);
     }
     return true;
   }
 
   private void assertNoOverlappingFiles(final int level) {
-    if (level > 0) {
-      final Collection<FileMetaData> files = getFiles(level);
-      if (files != null) {
-        long previousFileNumber = 0;
-        InternalKey previousEnd = null;
-        for (final FileMetaData fileMetaData : files) {
-          if (previousEnd != null) {
-            Preconditions.checkArgument(
-                getInternalKeyComparator().compare(previousEnd, fileMetaData.getSmallest()) < 0,
-                "Overlapping files %s and %s in level %s", previousFileNumber,
-                fileMetaData.getNumber(), level);
-          }
-
-          previousFileNumber = fileMetaData.getNumber();
-          previousEnd = fileMetaData.getLargest();
-        }
-      }
+    for (int i = 1; i < files[level].length; i++) {
+      Preconditions.checkArgument(
+          internalKeyComparator.compare(files[level][i - 1].getLargest(),
+              files[level][i].getSmallest()) < 0,
+          "Overlapping files %s and %s in level %s", files[level][i - 1].getNumber(),
+          files[level][i].getNumber(), level);
     }
   }
 
-  private TableCache getTableCache() {
-    return versionSet.getTableCache();
-  }
-
-  public final InternalKeyComparator getInternalKeyComparator() {
-    return versionSet.getInternalKeyComparator();
-  }
-
-  public synchronized int getCompactionLevel() {
+  public int getCompactionLevel() {
     return compactionLevel;
   }
 
-  public synchronized void setCompactionLevel(final int compactionLevel) {
-    this.compactionLevel = compactionLevel;
-  }
-
-  public synchronized double getCompactionScore() {
+  public double getCompactionScore() {
     return compactionScore;
   }
 
-  public synchronized void setCompactionScore(final double compactionScore) {
-    this.compactionScore = compactionScore;
-  }
-
-  List<TableIterator> getLevel0Files() {
-    final Builder<TableIterator> builder = ImmutableList.builder();
-    for (final FileMetaData file : level0.getFiles()) {
-      builder.add(getTableCache().newIterator(file));
+  public CompletionStage<Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>>> getIterators() {
+    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> listBuilder =
+        ImmutableList.builder();
+    final CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0 =
+        CompletableFutures.allOf(Stream.of(files[0]).map(tableCache::tableIterator))
+            .thenApply(tableIters -> MergingIterator.newMergingIterator(
+                tableIters.collect(Collectors.toList()), internalKeyComparator));
+    for (int i = 1; i < files.length; i++) {
+      listBuilder.add(new LevelIterator(tableCache, files[i], internalKeyComparator));
     }
-    return builder.build();
+    return level0.thenApply(level0Iter -> listBuilder.add(level0Iter).build());
   }
 
-  List<LevelIterator> getLevelIterators() {
-    final Builder<LevelIterator> builder = ImmutableList.builder();
-    for (final Level level : levels) {
-      if (!level.getFiles().isEmpty()) {
-        builder.add(level.iterator());
-      }
-    }
-    return builder.build();
-  }
-
-  public LookupResult get(final LookupKey key, final MemoryManager memory) throws IOException {
+  public CompletionStage<LookupResult> get(final LookupKey key) {
     // We can search level-by-level since entries never hop across
     // levels. Therefore we are guaranteed that if we find data
     // in an smaller level, later levels are irrelevant.
     final ReadStats readStats = new ReadStats();
-    LookupResult lookupResult = level0.get(key, readStats, memory);
-    if (lookupResult == null) {
-      for (final Level level : levels) {
-        lookupResult = level.get(key, readStats, memory);
-        if (lookupResult != null) {
-          break;
+    // TODO read sampling, maybe compaction
+    return get(key, 0, readStats).thenApply(lookupResult -> {
+      updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile());
+      return lookupResult;
+    });
+  }
+
+  public CompletionStage<LookupResult> get(final LookupKey key, final int level,
+      final ReadStats readStats) {
+    if (level == files.length) {
+      return CompletableFuture.completedFuture(null);
+    }
+    if (files[level].length == 0) {
+      return get(key, level + 1, readStats);
+    }
+
+    final List<FileMetaData> fileMetaDataList;
+    if (level == 0) {
+      fileMetaDataList = new ArrayList<>();
+      for (final FileMetaData fileMetaData : files[level]) {
+        if (internalKeyComparator.getUserComparator().compare(key.getUserKey(),
+            fileMetaData.getSmallest().getUserKey()) >= 0
+            && internalKeyComparator.getUserComparator().compare(key.getUserKey(),
+                fileMetaData.getLargest().getUserKey()) <= 0) {
+          fileMetaDataList.add(fileMetaData);
         }
       }
+
+      if (fileMetaDataList.isEmpty()) {
+        return get(key, level + 1, readStats);
+      }
+
+      Collections.sort(fileMetaDataList,
+          (file1, file2) -> Long.compare(file2.getNumber(), file1.getNumber()));
+    } else {
+      // Binary search to find earliest index whose largest key >= ikey.
+      final int index = findFile(files[level], key.getInternalKey(), internalKeyComparator);
+
+      // did we find any files that could contain the key?
+      if (index >= files[level].length) {
+        return get(key, level + 1, readStats);
+      }
+
+      // check if the smallest user key in the file is less than the target user key
+      final FileMetaData fileMetaData = files[level][index];
+      if (internalKeyComparator.getUserComparator().compare(key.getUserKey(),
+          fileMetaData.getSmallest().getUserKey()) < 0) {
+        return get(key, level + 1, readStats);
+      }
+
+      // search this file
+      fileMetaDataList = Collections.singletonList(fileMetaData);
     }
-    updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile());
-    return lookupResult;
+
+    readStats.clear();
+    final CompletionStage<LookupResult> levelLookup =
+        lookup(key, level, fileMetaDataList.iterator(), null, readStats);
+
+    return levelLookup.thenCompose(
+        lookupResult -> lookupResult != null ? levelLookup : get(key, level + 1, readStats));
+  }
+
+  private CompletionStage<LookupResult> lookup(final LookupKey key, final int level,
+      final Iterator<FileMetaData> fileIter, final FileMetaData prevFile,
+      final ReadStats readStats) {
+    if (!fileIter.hasNext()) {
+      return CompletableFuture.completedFuture(null);
+    }
+    final FileMetaData file = fileIter.next();
+    final CompletionStage<LookupResult> lookup =
+        tableCache.tableIterator(file).thenCompose(tableIter -> {
+          if (prevFile != null && readStats.getSeekFile() == null) {
+            readStats.setSeekFile(file);
+            readStats.setSeekFileLevel(level);
+          }
+          return CompletableFutures.composeUnconditionally(tableIter.seek(key.getInternalKey())
+              .thenCompose(voided -> tableIter.next()).thenApply(optNext -> {
+            if (optNext.isPresent()) {
+              final InternalKey internalKey = optNext.get().getKey();
+              if (internalKeyComparator.getUserComparator().compare(key.getUserKey(),
+                  internalKey.getUserKey()) == 0) {
+                if (internalKey.getValueType() == ValueType.DELETION) {
+                  return LookupResult.deleted(key);
+                } else {
+                  return LookupResult.ok(key, optNext.get().getValue());
+                }
+              } else {
+                return null;
+              }
+            } else {
+              return null;
+            }
+            // TODO(optimization) overlap async close with next lookup
+          }), optLookup -> tableIter.asyncClose().thenApply(voided -> optLookup.orElse(null)));
+        });
+
+    return lookup.thenCompose(lookupResult -> lookupResult != null ? lookup
+        : lookup(key, level, fileIter, file, readStats));
+  }
+
+  private boolean someFileOverlapsRange(final FileMetaData[] files,
+      final ByteBuffer smallestUserKey, final ByteBuffer largestUserKey) {
+    final InternalKey smallestInternalKey =
+        new TransientInternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
+    final int index = findFile(files, smallestInternalKey, internalKeyComparator);
+
+    return ((index < files.length) && internalKeyComparator.getUserComparator()
+        .compare(largestUserKey, files[index].getSmallest().getUserKey()) >= 0);
+  }
+
+  private static int findFile(final FileMetaData[] files, final InternalKey targetKey,
+      final Comparator<InternalKey> internalKeyComparator) {
+    if (files.length == 0) {
+      return 0;
+    }
+
+    int left = 0;
+    int right = files.length - 1;
+
+    // binary search restart positions to find the restart position immediately before the targetKey
+    while (left < right) {
+      final int mid = (left + right) / 2;
+
+      if (internalKeyComparator.compare(files[mid].getLargest(), targetKey) < 0) {
+        // Key at "mid.largest" is < "target". Therefore all
+        // files at or before "mid" are uninteresting.
+        left = mid + 1;
+      } else {
+        // Key at "mid.largest" is >= "target". Therefore all files
+        // after "mid" are uninteresting.
+        right = mid;
+      }
+    }
+    return right;
   }
 
   int pickLevelForMemTableOutput(final ByteBuffer smallestUserKey,
       final ByteBuffer largestUserKey) {
     int level = 0;
-    if (!overlapInLevel(0, smallestUserKey, largestUserKey)) {
+    if (!someFileOverlapsRange(files[level], smallestUserKey, largestUserKey)) {
       // Push to next level if there is no overlap in next level,
       // and the #bytes overlapping in the level after that are limited.
       final InternalKey start =
           new TransientInternalKey(smallestUserKey, MAX_SEQUENCE_NUMBER, ValueType.VALUE);
       final InternalKey limit = new TransientInternalKey(largestUserKey, 0, ValueType.VALUE);
       while (level < MAX_MEM_COMPACT_LEVEL) {
-        if (overlapInLevel(level + 1, smallestUserKey, largestUserKey)) {
+        if (someFileOverlapsRange(files[level + 1], smallestUserKey, largestUserKey)) {
           break;
         }
-        final long sum =
-            Compaction.totalFileSize(versionSet.getOverlappingInputs(level + 2, start, limit));
+        final long sum = Compaction.totalFileSize(getOverlappingInputs(level + 2, start, limit));
         if (sum > MAX_GRAND_PARENT_OVERLAP_BYTES) {
           break;
         }
@@ -178,44 +267,41 @@ public class Version {
     return level;
   }
 
-  public boolean overlapInLevel(final int level, final ByteBuffer smallestUserKey,
-      final ByteBuffer largestUserKey) {
-    Preconditions.checkPositionIndex(level, levels.size(), "Invalid level");
-    Preconditions.checkNotNull(smallestUserKey, "smallestUserKey is null");
-    Preconditions.checkNotNull(largestUserKey, "largestUserKey is null");
-
-    if (level == 0) {
-      return level0.someFileOverlapsRange(smallestUserKey, largestUserKey);
+  public List<FileMetaData> getOverlappingInputs(final int level, final InternalKey begin,
+      final InternalKey end) {
+    final List<FileMetaData> inputs = new ArrayList<>();
+    ByteBuffer userBegin = begin.getUserKey();
+    ByteBuffer userEnd = end.getUserKey();
+    final Comparator<ByteBuffer> userComparator = internalKeyComparator.getUserComparator();
+    for (int i = 0; i < files[level].length;) {
+      final FileMetaData fileMetaData = files[level][i++];
+      final ByteBuffer fileStart = fileMetaData.getSmallest().getUserKey();
+      final ByteBuffer fileLimit = fileMetaData.getLargest().getUserKey();
+      if (userComparator.compare(fileLimit, userBegin) >= 0
+          && userComparator.compare(fileStart, userEnd) <= 0) {
+        inputs.add(fileMetaData);
+        if (level == 0) {
+          if (userComparator.compare(fileStart, userBegin) < 0) {
+            userBegin = fileStart;
+            inputs.clear();
+            i = 0;
+          } else if (userComparator.compare(fileLimit, userEnd) > 0) {
+            userEnd = fileLimit;
+            inputs.clear();
+            i = 0;
+          }
+        }
+      }
     }
-    return levels.get(level - 1).someFileOverlapsRange(smallestUserKey, largestUserKey);
-  }
-
-  public int numberOfLevels() {
-    return levels.size() + 1;
+    return inputs;
   }
 
   public int numberOfFilesInLevel(final int level) {
-    if (level == 0) {
-      return level0.getFiles().size();
-    } else {
-      return levels.get(level - 1).getFiles().size();
-    }
+    return files[level].length;
   }
 
-  public List<FileMetaData> getFiles(final int level) {
-    if (level == 0) {
-      return level0.getFiles();
-    } else {
-      return levels.get(level - 1).getFiles();
-    }
-  }
-
-  public void addFile(final int level, final FileMetaData fileMetaData) {
-    if (level == 0) {
-      level0.addFile(fileMetaData);
-    } else {
-      levels.get(level - 1).addFile(fileMetaData);
-    }
+  public FileMetaData[] getFiles(final int level) {
+    return files[level];
   }
 
   private boolean updateStats(final int seekFileLevel, final FileMetaData seekFile) {
@@ -224,44 +310,141 @@ public class Version {
     }
 
     seekFile.decrementAllowedSeeks();
-    if (seekFile.getAllowedSeeks() <= 0 && fileToCompact == null) {
-      fileToCompact = seekFile;
-      fileToCompactLevel = seekFileLevel;
+    if (seekFile.getAllowedSeeks() <= 0) {
+      Entry<FileMetaData, Integer> current;
+      do {
+        current = seekCompaction.get();
+        if (current != null) {
+          return false;
+        }
+      } while (!seekCompaction.compareAndSet(current,
+          Maps.immutableEntry(seekFile, seekFileLevel)));
       return true;
     }
     return false;
   }
 
-  public FileMetaData getFileToCompact() {
-    return fileToCompact;
+  public Entry<FileMetaData, Integer> getSeekCompaction() {
+    return seekCompaction.get();
   }
 
-  public int getFileToCompactLevel() {
-    return fileToCompactLevel;
-  }
-
-  public long getApproximateOffsetOf(final InternalKey key) {
+  public CompletionStage<Long> getApproximateOffsetOf(final InternalKey key) {
     long result = 0;
-    for (int level = 0; level < NUM_LEVELS; level++) {
-      for (final FileMetaData fileMetaData : getFiles(level)) {
-        if (getInternalKeyComparator().compare(fileMetaData.getLargest(), key) <= 0) {
-          // Entire file is before "ikey", so just add the file size
+    final Stream.Builder<CompletionStage<Long>> tableReads = Stream.builder();
+    for (int level = 0; level < files.length; level++) {
+      for (final FileMetaData fileMetaData : files[level]) {
+        if (internalKeyComparator.compare(fileMetaData.getLargest(), key) <= 0) {
+          // Entire file is before "key", so just add the file size
           result += fileMetaData.getFileSize();
-        } else if (getInternalKeyComparator().compare(fileMetaData.getSmallest(), key) > 0) {
-          // Entire file is after "ikey", so ignore
+        } else if (internalKeyComparator.compare(fileMetaData.getSmallest(), key) > 0) {
+          // Entire file is after "key", so ignore
           if (level > 0) {
             // Files other than level 0 are sorted by meta.smallest, so
             // no further files in this level will contain data for
-            // "ikey".
+            // "Key".
             break;
           }
         } else {
-          // "ikey" falls in the range for this table. Add the
-          // approximate offset of "ikey" within the table.
-          result += getTableCache().getApproximateOffsetOf(fileMetaData, key);
+          // "key" falls in the range for this table. Add the
+          // approximate offset of "key" within the table.
+          tableReads.add(tableCache.getApproximateOffsetOf(fileMetaData, key));
         }
       }
     }
-    return result;
+    final long prelimResult = result;
+    return CompletableFutures.allOf(tableReads.build())
+        .thenApply(longStream -> longStream.mapToLong(Long::longValue).sum() + prelimResult);
+  }
+
+  static final class LevelIterator extends
+      TwoStageIterator<ReverseSeekingIterator<InternalKey, FileMetaData>, TableIterator, FileMetaData> {
+    private final TableCache tableCache;
+
+    public LevelIterator(final TableCache tableCache, final FileMetaData[] files,
+        final InternalKeyComparator comparator) {
+      super(new FileIterator(files, comparator));
+      this.tableCache = tableCache;
+    }
+
+    @Override
+    protected CompletionStage<TableIterator> getData(final FileMetaData file) {
+      return tableCache.tableIterator(file);
+    }
+
+    private static final class FileIterator
+        implements ReverseSeekingIterator<InternalKey, FileMetaData> {
+      private final FileMetaData[] files;
+      private final InternalKeyComparator comparator;
+      private int index;
+
+      public FileIterator(final FileMetaData[] files, final InternalKeyComparator comparator) {
+        this.files = files;
+        this.comparator = comparator;
+      }
+
+      @Override
+      public void seekToFirst() {
+        index = 0;
+      }
+
+      @Override
+      public void seek(final InternalKey targetKey) {
+        if (files.length == 0) {
+          return;
+        }
+
+        // seek the index to the block containing the key
+        index = findFile(files, targetKey, comparator);
+
+        // if the index is now pointing to the last block in the file, check if the largest key in
+        // the block is less than the target key. If so, we need to seek beyond the end of this file
+        if (index == files.length - 1
+            && comparator.compare(files[index].getLargest(), targetKey) < 0) {
+          index++;
+        }
+      }
+
+      @Override
+      public Entry<InternalKey, FileMetaData> peek() {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public Entry<InternalKey, FileMetaData> next() {
+        final FileMetaData f = files[index++];
+        return Maps.immutableEntry(f.getLargest(), f);
+      }
+
+      @Override
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public boolean hasNext() {
+        return index < files.length;
+      }
+
+      @Override
+      public Entry<InternalKey, FileMetaData> peekPrev() {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public Entry<InternalKey, FileMetaData> prev() {
+        final FileMetaData f = files[--index];
+        return Maps.immutableEntry(f.getLargest(), f);
+      }
+
+      @Override
+      public boolean hasPrev() {
+        return index > 0;
+      }
+
+      @Override
+      public void seekToEnd() {
+        index = files.length;
+      }
+    }
   }
 }

@@ -29,12 +29,15 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 
-public final class TableCache implements AutoCloseable {
+public class TableCache implements AutoCloseable {
   private final LoadingCache<Long, CompletionStage<Table>> cache;
+  private final Env env;
 
   public TableCache(final DBHandle dbHandle, final int tableCacheSize,
-      final InternalKeyComparator userComparator, final Env env, final boolean verifyChecksums,
-      final Compression compression, final UncaughtExceptionHandler backgroundExceptionHandler) {
+      final InternalKeyComparator internalKeyComparator, final Env env,
+      final boolean verifyChecksums, final Compression compression,
+      final UncaughtExceptionHandler backgroundExceptionHandler) {
+    this.env = env;
     this.cache = CacheBuilder.newBuilder().maximumSize(tableCacheSize)
         .<Long, CompletionStage<Table>>removalListener(
             notification -> notification.getValue().whenComplete((table, openException) -> {
@@ -54,7 +57,7 @@ public final class TableCache implements AutoCloseable {
             return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
                 .thenCompose(file -> {
               final CompletionStage<Table> table =
-                  Table.newTable(file, userComparator, verifyChecksums, compression);
+                  Table.newTable(file, internalKeyComparator, verifyChecksums, compression);
               return CompletableFutures.composeUnconditionally(table, optTable -> {
                 if (optTable.isPresent()) {
                   return table;
@@ -78,10 +81,10 @@ public final class TableCache implements AutoCloseable {
 
   public CompletionStage<Long> getApproximateOffsetOf(final FileMetaData file,
       final InternalKey key) {
-    return getTable(file.getNumber()).thenCompose(table -> {
+    return getTable(file.getNumber()).thenComposeAsync(table -> {
       final long offset = table.getApproximateOffsetOf(key);
       return table.release().thenApply(voided -> offset);
-    });
+    } , env.getExecutor());
   }
 
   private CompletionStage<Table> getTable(final long number) {

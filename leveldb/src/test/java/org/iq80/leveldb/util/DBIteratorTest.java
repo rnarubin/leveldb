@@ -55,7 +55,7 @@ import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.table.TestHelper;
+import org.iq80.leveldb.table.TestUtils;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -294,11 +294,11 @@ public class DBIteratorTest
                 String target = ordered.get(index).getKey();
                 double r = rand.nextDouble();
                 if (r < 1.0 / 3) {
-                    target = TestHelper.beforeString(Maps.immutableEntry(target, null));
+                    target = TestUtils.beforeString(Maps.immutableEntry(target, null));
                 }
                 else if (r > 2.0 / 3) {
                     index++;
-                    target = TestHelper.afterString(Maps.immutableEntry(target, null));
+                    target = TestUtils.afterString(Maps.immutableEntry(target, null));
                 }
                 actual.seek(target);
                 assertForwardSame(actual, ordered.subList(index, Math.min(ordered.size(), index + dist)), false);

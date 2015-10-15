@@ -31,10 +31,10 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.AsynchronousCloseable;
-import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.SequentialReadFile;
@@ -186,12 +186,6 @@ public class VersionSet implements AsynchronousCloseable {
 
   public LookupResult get(final LookupKey key) throws IOException {
     return current.get(key, options.memoryManager());
-  }
-
-  // TODO remove maybe
-  public boolean overlapInLevel(final int level, final ByteBuffer smallestUserKey,
-      final ByteBuffer largestUserKey) {
-    return current.overlapInLevel(level, smallestUserKey, largestUserKey);
   }
 
   public int numberOfFilesInLevel(final int level) {
@@ -543,23 +537,6 @@ public class VersionSet implements AsynchronousCloseable {
     return compaction;
   }
 
-  List<FileMetaData> getOverlappingInputs(final int level, final InternalKey begin,
-      final InternalKey end) {
-    final ImmutableList.Builder<FileMetaData> files = ImmutableList.builder();
-    final ByteBuffer userBegin = begin.getUserKey();
-    final ByteBuffer userEnd = end.getUserKey();
-    final DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
-    for (final FileMetaData fileMetaData : current.getFiles(level)) {
-      if (userComparator.compare(fileMetaData.getLargest().getUserKey(), userBegin) < 0
-          || userComparator.compare(fileMetaData.getSmallest().getUserKey(), userEnd) > 0) {
-        // Either completely before or after range; skip it
-      } else {
-        files.add(fileMetaData);
-      }
-    }
-    return files.build();
-  }
-
   @SafeVarargs
   private final Entry<InternalKey, InternalKey> getRange(final List<FileMetaData>... inputLists) {
     InternalKey smallest = null;
@@ -660,7 +637,8 @@ public class VersionSet implements AsynchronousCloseable {
       this.baseVersion = baseVersion;
 
       for (int i = 0; i < NUM_LEVELS; i++) {
-        levels[i] = new LevelState(versionSet.getInternalKeyComparator());
+        levels[i] = new LevelState(versionSet.getInternalKeyComparator(),
+            baseVersion.numberOfFilesInLevel(i));
       }
     }
 
@@ -791,8 +769,6 @@ public class VersionSet implements AsynchronousCloseable {
         }
       }
 
-      // version.setCompactionLevel(bestLevel);
-      // version.setCompactionScore(bestScore);
       final FileMetaData[][] levelFiles =
           Stream.of(levels)
               .map(level -> level.collectedFiles

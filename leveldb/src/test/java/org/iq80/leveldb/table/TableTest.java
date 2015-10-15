@@ -17,18 +17,13 @@ package org.iq80.leveldb.table;
 import static java.util.Arrays.asList;
 
 import java.nio.ByteBuffer;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 
-import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.Table.TableIterator;
@@ -43,8 +38,6 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 public abstract class TableTest extends EnvDependentTest {
-
-  private static final DBBufferComparator byteCompare = new BytewiseComparator();
   private FileInfo fileInfo;
 
   @BeforeMethod
@@ -73,15 +66,11 @@ public abstract class TableTest extends EnvDependentTest {
         .toCompletableFuture().get();
 
     try {
-      getEnv()
-          .openRandomReadFile(
-              fileInfo)
-          .thenCompose(
-              file -> CompletableFutures
-                  .composeUnconditionally(
-                      Table.newTable(file, new InternalKeyComparator(byteCompare), true,
-                          Snappy.instance()).thenCompose(Table::release),
-                  voided -> file.asyncClose()))
+      getEnv().openRandomReadFile(fileInfo)
+          .thenCompose(file -> CompletableFutures.composeUnconditionally(
+              Table.newTable(file, TestUtils.keyComparator, true, Snappy.instance())
+                  .thenCompose(Table::release),
+              voided -> file.asyncClose()))
           .toCompletableFuture().get();
     } catch (final ExecutionException e) {
       throw e.getCause();
@@ -96,19 +85,19 @@ public abstract class TableTest extends EnvDependentTest {
   @Test
   public void testSingleEntrySingleBlock() throws Exception {
     tableTest(Integer.MAX_VALUE, Integer.MAX_VALUE,
-        TestHelper.createInternalEntry("name", "dain sundstrom", 0));
+        TestUtils.createInternalEntry("name", "dain sundstrom", 0));
   }
 
   @Test
   public void testMultipleEntriesWithSingleBlock() throws Exception {
     long seq = 0;
     final List<Entry<InternalKey, ByteBuffer>> entries = asList(
-        TestHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
-        TestHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
-        TestHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
-        TestHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
-        TestHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
-        TestHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
+        TestUtils.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+        TestUtils.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+        TestUtils.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+        TestUtils.createInternalEntry("scotch/light", "Oban 14", seq++),
+        TestUtils.createInternalEntry("scotch/medium", "Highland Park", seq++),
+        TestUtils.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
     for (int i = 1; i < entries.size(); i++) {
       tableTest(Integer.MAX_VALUE, i, entries);
@@ -119,18 +108,18 @@ public abstract class TableTest extends EnvDependentTest {
   public void testMultipleEntriesWithMultipleBlock() throws Exception {
     long seq = 0;
     final List<Entry<InternalKey, ByteBuffer>> entries = asList(
-        TestHelper.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
-        TestHelper.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
-        TestHelper.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
-        TestHelper.createInternalEntry("scotch/light", "Oban 14", seq++),
-        TestHelper.createInternalEntry("scotch/medium", "Highland Park", seq++),
-        TestHelper.createInternalEntry("scotch/strong", "Lagavulin", seq++));
+        TestUtils.createInternalEntry("beer/ale", "Lagunitas  Little Sumpin’ Sumpin’", seq++),
+        TestUtils.createInternalEntry("beer/ipa", "Lagunitas IPA", seq++),
+        TestUtils.createInternalEntry("beer/stout", "Lagunitas Imperial Stout", seq++),
+        TestUtils.createInternalEntry("scotch/light", "Oban 14", seq++),
+        TestUtils.createInternalEntry("scotch/medium", "Highland Park", seq++),
+        TestUtils.createInternalEntry("scotch/strong", "Lagavulin", seq++));
 
     // one entry per block
     tableTest(1, Integer.MAX_VALUE, entries);
 
     // about 3 blocks
-    tableTest(TestHelper.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3,
+    tableTest(TestUtils.estimateBlockSizeInternalKey(Integer.MAX_VALUE, entries) / 3,
         Integer.MAX_VALUE, entries);
   }
 
@@ -145,33 +134,16 @@ public abstract class TableTest extends EnvDependentTest {
 
     clearFile();
 
-    final SequentialWriteFile writeFile =
-        getEnv().openSequentialWriteFile(fileInfo).toCompletableFuture().get();
+    TestUtils.buildTable(getEnv(), fileInfo, entries, blockSize, blockRestartInterval,
+        Snappy.instance());
 
-    try (
-        final TableBuilder builder = new TableBuilder(blockRestartInterval, blockSize,
-            Snappy.instance(), writeFile, new InternalKeyComparator(byteCompare));
-        final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
-
-      final Iterator<Entry<InternalKey, ByteBuffer>> iter = entries.iterator();
-      CompletionStage<Void> last = CompletableFuture.completedFuture(null);
-
-      while (iter.hasNext()) {
-        final Entry<InternalKey, ByteBuffer> entry = iter.next();
-        last = last.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
-      }
-
-      last.thenCompose(voided -> builder.finish()).toCompletableFuture().get();
-    }
-
-    final Table table = Table
-        .newTable(getEnv().openRandomReadFile(fileInfo).toCompletableFuture().get(),
-            new InternalKeyComparator(byteCompare), true, Snappy.instance())
-        .toCompletableFuture().get();
+    final Table table =
+        Table.newTable(getEnv().openRandomReadFile(fileInfo).toCompletableFuture().get(),
+            TestUtils.keyComparator, true, Snappy.instance()).toCompletableFuture().get();
 
 
     final TableIterator iter = table.retain().iterator();
-    TestHelper.testInternalKeyIterator(iter, entries);
+    TestUtils.testInternalKeyIterator(iter, entries);
 
     long lastApproximateOffset = 0;
     for (final Entry<InternalKey, ByteBuffer> entry : entries) {

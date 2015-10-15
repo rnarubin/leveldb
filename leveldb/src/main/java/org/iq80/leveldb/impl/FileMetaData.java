@@ -16,7 +16,7 @@ package org.iq80.leveldb.impl;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class FileMetaData {
+public final class FileMetaData {
   private final long number;
 
   /**
@@ -78,14 +78,8 @@ public class FileMetaData {
 
   @Override
   public String toString() {
-    final StringBuilder sb = new StringBuilder();
-    sb.append("FileMetaData");
-    sb.append("{number=").append(number);
-    sb.append(", fileSize=").append(fileSize);
-    sb.append(", smallest=").append(smallest);
-    sb.append(", largest=").append(largest);
-    sb.append(", allowedSeeks=").append(allowedSeeks);
-    sb.append('}');
-    return sb.toString();
+    return "FileMetaData [number=" + number + ", fileSize=" + fileSize + ", smallest=" + smallest
+        + ", largest=" + largest + ", allowedSeeks=" + allowedSeeks + "]";
   }
+
 }

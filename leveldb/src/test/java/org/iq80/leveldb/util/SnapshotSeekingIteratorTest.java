@@ -33,7 +33,7 @@ import org.iq80.leveldb.impl.SnapshotSeekingIterator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.table.BytewiseComparator;
-import org.iq80.leveldb.table.TestHelper;
+import org.iq80.leveldb.table.TestUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -127,7 +127,7 @@ public class SnapshotSeekingIteratorTest {
         Iterators.async(Iterators.reverseSeekingIterator(allEntries, keyComparator)),
         new SnapshotImpl(sequence, null), userComparator, Runnable::run);
 
-    TestHelper.testBufferIterator(iter, expectedEntries, Runnable::run);
+    TestUtils.testBufferIterator(iter, expectedEntries, Runnable::run);
   }
 }
 

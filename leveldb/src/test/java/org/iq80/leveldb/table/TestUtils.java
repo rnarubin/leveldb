@@ -37,14 +37,25 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import java.util.function.UnaryOperator;
 
+import org.iq80.leveldb.Compression;
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.SeekingAsynchronousIterator;
+import org.iq80.leveldb.impl.FileMetaData;
 import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.ReverseIterator;
 import org.iq80.leveldb.impl.ReverseSeekingIterator;
 import org.iq80.leveldb.impl.SeekingIterator;
 import org.iq80.leveldb.impl.SequenceNumber;
+import org.iq80.leveldb.impl.TableCache;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
 import org.iq80.leveldb.util.ByteBuffers;
@@ -52,13 +63,18 @@ import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.Iterators;
 import org.iq80.leveldb.util.Iterators.Direction;
 import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.util.Snappy;
 import org.testng.Assert;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 
-public final class TestHelper {
-  private TestHelper() {}
+public final class TestUtils {
+  public static final DBBufferComparator byteComparator = new BytewiseComparator();
+  public static final InternalKeyComparator keyComparator =
+      new InternalKeyComparator(byteComparator);
+
+  private TestUtils() {}
 
   public static int estimateBlockSizeInternalKey(final int blockRestartInterval,
       final List<Entry<InternalKey, ByteBuffer>> entries) {
@@ -248,11 +264,14 @@ public final class TestHelper {
         ByteBuffer.wrap(value.getBytes(UTF_8)));
   }
 
+  public static InternalKey createInternalKey(final String key, final long sequenceNumber) {
+    return new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), sequenceNumber,
+        ValueType.VALUE);
+  }
+
   public static Entry<InternalKey, ByteBuffer> createInternalEntry(final String key,
       final String value, final long sequenceNumber) {
-    return Maps.<InternalKey, ByteBuffer>immutableEntry(
-        new TransientInternalKey(ByteBuffer.wrap(key.getBytes(UTF_8)), sequenceNumber,
-            ValueType.VALUE),
+    return Maps.<InternalKey, ByteBuffer>immutableEntry(createInternalKey(key, sequenceNumber),
         ByteBuffer.wrap(value.getBytes(UTF_8)));
   }
 
@@ -262,7 +281,7 @@ public final class TestHelper {
       final List<Entry<ByteBuffer, ByteBuffer>> entries, final Executor... asyncExec) {
     testIterator(iter, entries, ByteBuffer.wrap(new byte[] {0}),
         ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
-        TestHelper::before, TestHelper::after,
+        TestUtils::before, TestUtils::after,
         asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
   }
 
@@ -275,7 +294,7 @@ public final class TestHelper {
         new TransientInternalKey(
             ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
             ValueType.VALUE),
-        TestHelper::before, TestHelper::after,
+        TestUtils::before, TestUtils::after,
         asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
   }
 
@@ -288,18 +307,17 @@ public final class TestHelper {
     try {
       iter.seekToFirst()
           .thenCompose(
-              voided -> TestHelper.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
-          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+              voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
           .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(
-              voided -> TestHelper.assertSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
-          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
           .thenCompose(voided -> iter.seekToFirst())
-          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
           .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
           .toCompletableFuture().get();
 
       {
@@ -311,20 +329,20 @@ public final class TestHelper {
               reverseEntries.subList(entries.size() - i, entries.size());
 
           iter.seek(entry.getKey())
-              .thenCompose(voided -> TestHelper.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries, asyncExec))
               .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
-              .thenCompose(voided -> TestHelper.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries, asyncExec))
               .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
-              .thenCompose(voided -> TestHelper.assertSequence(iter,
+              .thenCompose(voided -> TestUtils.assertSequence(iter,
                   nextEntries.subList(1, nextEntries.size()), asyncExec))
               .toCompletableFuture().get();
 
           iter.seek(entry.getKey())
-              .thenCompose(voided -> TestHelper.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries, asyncExec))
               .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
-              .thenCompose(voided -> TestHelper.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries, asyncExec))
               .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
-              .thenCompose(voided -> TestHelper.assertReverseSequence(iter,
+              .thenCompose(voided -> TestUtils.assertReverseSequence(iter,
                   Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries),
                   asyncExec))
               .toCompletableFuture().get();
@@ -351,18 +369,17 @@ public final class TestHelper {
 
       iter.seek(first)
           .thenCompose(
-              voided -> TestHelper.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+              voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
           .thenCompose(voided -> iter.seek(first))
-          .thenCompose(voided -> TestHelper.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
           .toCompletableFuture().get();
 
       iter.seek(end)
-          .thenCompose(
-              voided -> TestHelper.assertSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList(), asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
           .thenCompose(voided -> iter.seek(end))
-          .thenCompose(voided -> TestHelper.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
           .toCompletableFuture().get();
 
       iter.asyncClose().toCompletableFuture().get();
@@ -382,5 +399,71 @@ public final class TestHelper {
       return steps == 1 ? CompletableFuture.completedFuture(null)
           : step(direction, iter, expected, steps - 1);
     });
+  }
+
+  public static FileMetaData buildTable(final Env env, final DBHandle db, final long fileNumber,
+      final List<Entry<InternalKey, ByteBuffer>> entries, final int blockSize,
+      final int blockRestartInterval, final Compression compression) throws Exception {
+    return buildTable(env, FileInfo.table(db, fileNumber), entries, blockSize, blockRestartInterval,
+        compression);
+  }
+
+  public static FileMetaData buildTable(final Env env, final FileInfo info,
+      final List<Entry<InternalKey, ByteBuffer>> entries, final int blockSize,
+      final int blockRestartInterval, final Compression compression) throws Exception {
+
+    final SequentialWriteFile writeFile =
+        env.openSequentialWriteFile(info).toCompletableFuture().get();
+
+    try (
+        final TableBuilder builder = new TableBuilder(blockRestartInterval, blockSize, compression,
+            writeFile, keyComparator);
+        final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
+
+      CompletionStage<Void> last = CompletableFuture.completedFuture(null);
+      for (final Entry<InternalKey, ByteBuffer> entry : entries) {
+        last = last.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
+      }
+
+      final long fileSize =
+          last.thenCompose(voided -> builder.finish()).toCompletableFuture().get();
+
+      if (entries.isEmpty()) {
+        return new FileMetaData(info.getFileNumber(), fileSize, null, null);
+      } else {
+        return new FileMetaData(info.getFileNumber(), fileSize, entries.get(0).getKey(),
+            entries.get(entries.size() - 1).getKey());
+      }
+    }
+
+  }
+
+  public static Entry<TableCache, FileMetaData[]> generateTableCache(final Env env,
+      final DBHandle db, final List<List<Entry<InternalKey, ByteBuffer>>> tableEntries,
+      final LongSupplier fileNumbers, final int blockSize, final int blockRestartInterval,
+      final int cacheSize) throws Exception {
+    final Compression compression = Snappy.instance();
+
+    final FileMetaData[] files = new FileMetaData[tableEntries.size()];
+    int i = 0;
+    for (final List<Entry<InternalKey, ByteBuffer>> entries : tableEntries) {
+      files[i] = buildTable(env, db, fileNumbers.getAsLong(), entries, blockSize,
+          blockRestartInterval, compression);
+      i++;
+    }
+
+    final AtomicReference<Throwable> throwableHolder = new AtomicReference<>(null);
+    return Maps.immutableEntry(new TableCache(db, cacheSize, keyComparator, env, true, compression,
+        (thread, throwable) -> throwableHolder.set(throwable)) {
+      @Override
+      public void close() {
+        super.close();
+        final Throwable t = throwableHolder.get();
+        if (t != null) {
+          throw new AssertionError(t);
+        }
+      }
+    }, files);
+
   }
 }

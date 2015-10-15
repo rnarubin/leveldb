@@ -15,11 +15,12 @@
 
 package org.iq80.leveldb.util;
 
+import static org.iq80.leveldb.table.TestUtils.keyComparator;
+
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
@@ -27,20 +28,15 @@ import java.util.stream.Stream;
 
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
 import org.iq80.leveldb.impl.ValueType;
-import org.iq80.leveldb.table.BytewiseComparator;
-import org.iq80.leveldb.table.TestHelper;
+import org.iq80.leveldb.table.TestUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.Maps;
 
 public class MergingIteratorTest {
-  private static final Comparator<InternalKey> comparator =
-      new InternalKeyComparator(new BytewiseComparator());
-
   @Test
   public void testEmpty() {
     iterTest(Collections.emptyList());
@@ -49,7 +45,7 @@ public class MergingIteratorTest {
   @Test
   public void testSingle() {
     iterTest(Collections.singletonList(Stream.of(1, 2, 3, 4, 5, 6, 7)
-        .map(i -> TestHelper.createInternalEntry("" + i, "" + i, i)).collect(Collectors.toList())));
+        .map(i -> TestUtils.createInternalEntry("" + i, "" + i, i)).collect(Collectors.toList())));
   }
 
   @Test(dataProvider = "getData")
@@ -73,17 +69,20 @@ public class MergingIteratorTest {
 
   private void iterTest(final List<List<Entry<InternalKey, ByteBuffer>>> input) {
     final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter =
-        MergingIterator.newMergingIterator(input.stream()
-            .map(list -> Iterators.async(Iterators.reverseSeekingIterator(list, comparator)))
-            .collect(Collectors.toList()), comparator);
+        MergingIterator
+            .newMergingIterator(
+                input.stream()
+                    .map(list -> Iterators
+                        .async(Iterators.reverseSeekingIterator(list, keyComparator)))
+                .collect(Collectors.toList()), keyComparator);
     final List<Entry<InternalKey, ByteBuffer>> entries =
         input.stream().reduce(new ArrayList<>(), (x, y) -> {
           x.addAll(y);
           return x;
         });
-    entries.sort((o1, o2) -> comparator.compare(o1.getKey(), o2.getKey()));
+    entries.sort((o1, o2) -> keyComparator.compare(o1.getKey(), o2.getKey()));
 
-    TestHelper.testInternalKeyIterator(iter, entries, Runnable::run);
+    TestUtils.testInternalKeyIterator(iter, entries, Runnable::run);
   }
 }
 
