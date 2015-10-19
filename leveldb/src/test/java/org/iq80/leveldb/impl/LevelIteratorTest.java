@@ -22,7 +22,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -82,10 +81,8 @@ public abstract class LevelIteratorTest extends EnvDependentTest {
   private void test(final List<List<Entry<InternalKey, ByteBuffer>>> tableEntries,
       final int blockSize, final int blockRestartInterval) {
     try {
-      final AtomicLong i = new AtomicLong(0);
-      final Entry<TableCache, FileMetaData[]> tables =
-          TestUtils.generateTableCache(getEnv(), getHandle(), tableEntries,
-              () -> i.getAndIncrement(), blockSize, blockRestartInterval, 100);
+      final Entry<TableCache, FileMetaData[]> tables = TestUtils.generateTableCache(getEnv(),
+          getHandle(), tableEntries, TestUtils.counter(0), blockSize, blockRestartInterval, 100);
 
       try (final TableCache tableCache = tables.getKey()) {
         final List<Entry<InternalKey, ByteBuffer>> expected =

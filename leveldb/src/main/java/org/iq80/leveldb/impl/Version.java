@@ -20,6 +20,7 @@ import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -90,13 +91,19 @@ final class Version {
     return compactionScore;
   }
 
+  public static CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> newLevel0Iterator(
+      final Stream<FileMetaData> files, final TableCache tableCache,
+      final Comparator<InternalKey> internalKeyComparator) {
+    return CompletableFutures.allOf(files.map(tableCache::tableIterator))
+        .thenApply(tableIters -> MergingIterator
+            .newMergingIterator(tableIters.collect(Collectors.toList()), internalKeyComparator));
+  }
+
   public CompletionStage<Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>>> getIterators() {
+    final CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0 =
+        newLevel0Iterator(Arrays.stream(files[0]), tableCache, internalKeyComparator);
     final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> listBuilder =
         ImmutableList.builder();
-    final CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0 =
-        CompletableFutures.allOf(Stream.of(files[0]).map(tableCache::tableIterator))
-            .thenApply(tableIters -> MergingIterator.newMergingIterator(
-                tableIters.collect(Collectors.toList()), internalKeyComparator));
     for (int i = 1; i < files.length; i++) {
       listBuilder.add(new LevelIterator(tableCache, files[i], internalKeyComparator));
     }
@@ -109,13 +116,11 @@ final class Version {
     // in an smaller level, later levels are irrelevant.
     final ReadStats readStats = new ReadStats();
     // TODO read sampling, maybe compaction
-    return get(key, 0, readStats).thenApply(lookupResult -> {
-      updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile());
-      return lookupResult;
-    });
+    return get(key, 0, readStats).whenComplete(
+        (result, exception) -> updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile()));
   }
 
-  public CompletionStage<LookupResult> get(final LookupKey key, final int level,
+  private CompletionStage<LookupResult> get(final LookupKey key, final int level,
       final ReadStats readStats) {
     if (level == files.length) {
       return CompletableFuture.completedFuture(null);
@@ -361,7 +366,7 @@ final class Version {
     private final TableCache tableCache;
 
     public LevelIterator(final TableCache tableCache, final FileMetaData[] files,
-        final InternalKeyComparator comparator) {
+        final Comparator<InternalKey> comparator) {
       super(new FileIterator(files, comparator));
       this.tableCache = tableCache;
     }
@@ -374,10 +379,10 @@ final class Version {
     private static final class FileIterator
         implements ReverseSeekingIterator<InternalKey, FileMetaData> {
       private final FileMetaData[] files;
-      private final InternalKeyComparator comparator;
+      private final Comparator<InternalKey> comparator;
       private int index;
 
-      public FileIterator(final FileMetaData[] files, final InternalKeyComparator comparator) {
+      public FileIterator(final FileMetaData[] files, final Comparator<InternalKey> comparator) {
         this.files = files;
         this.comparator = comparator;
       }

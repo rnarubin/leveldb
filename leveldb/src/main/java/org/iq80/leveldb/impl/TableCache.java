@@ -15,6 +15,7 @@
 package org.iq80.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.Comparator;
 import java.util.concurrent.CompletionStage;
 
 import org.iq80.leveldb.Compression;
@@ -31,13 +32,11 @@ import com.google.common.cache.LoadingCache;
 
 public class TableCache implements AutoCloseable {
   private final LoadingCache<Long, CompletionStage<Table>> cache;
-  private final Env env;
 
   public TableCache(final DBHandle dbHandle, final int tableCacheSize,
-      final InternalKeyComparator internalKeyComparator, final Env env,
+      final Comparator<InternalKey> internalKeyComparator, final Env env,
       final boolean verifyChecksums, final Compression compression,
       final UncaughtExceptionHandler backgroundExceptionHandler) {
-    this.env = env;
     this.cache = CacheBuilder.newBuilder().maximumSize(tableCacheSize)
         .<Long, CompletionStage<Table>>removalListener(
             notification -> notification.getValue().whenComplete((table, openException) -> {
@@ -81,10 +80,10 @@ public class TableCache implements AutoCloseable {
 
   public CompletionStage<Long> getApproximateOffsetOf(final FileMetaData file,
       final InternalKey key) {
-    return getTable(file.getNumber()).thenComposeAsync(table -> {
+    return getTable(file.getNumber()).thenCompose(table -> {
       final long offset = table.getApproximateOffsetOf(key);
       return table.release().thenApply(voided -> offset);
-    } , env.getExecutor());
+    });
   }
 
   private CompletionStage<Table> getTable(final long number) {

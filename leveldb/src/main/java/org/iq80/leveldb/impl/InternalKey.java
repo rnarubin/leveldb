@@ -70,7 +70,7 @@ public abstract class InternalKey {
 
   @Override
   public String toString() {
-    return getClass().getSimpleName() + " [getUserKey()=" + getUserKey() + ", getSequenceNumber()="
-        + getSequenceNumber() + ", getValueType()=" + getValueType() + "]";
+    return getClass().getSimpleName() + " [key=" + ByteBuffers.toString(getUserKey())
+        + ", sequence=" + getSequenceNumber() + ", type=" + getValueType() + "]";
   }
 }

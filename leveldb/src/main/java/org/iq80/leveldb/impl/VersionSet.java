@@ -31,7 +31,6 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Level;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.AsynchronousCloseable;
@@ -40,10 +39,10 @@ import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
+import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.GrowingBuffer;
-import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.MemoryManagers;
 import org.iq80.leveldb.util.MergingIterator;
 import org.slf4j.Logger;
@@ -72,7 +71,7 @@ public class VersionSet implements AsynchronousCloseable {
 
   private final AtomicLong nextFileNumber = new AtomicLong(2);
   private long manifestFileNumber = 1;
-  private Version current;
+  private volatile Version current;
   private final AtomicLong lastSequence = new AtomicLong(0);
   private long logNumber;
   private long prevLogNumber;
@@ -93,7 +92,7 @@ public class VersionSet implements AsynchronousCloseable {
     this.tableCache = tableCache;
     this.internalKeyComparator = internalKeyComparator;
     this.options = options;
-    appendVersion(new Version(this));
+    appendVersion(new Version());
   }
 
   public static CompletionStage<VersionSet> newVersionSet(final DBHandle dbHandle,
@@ -105,7 +104,7 @@ public class VersionSet implements AsynchronousCloseable {
       } else {
         // create new initial manifest file
         final VersionEdit edit = new VersionEdit();
-        edit.setComparatorName(internalKeyComparator.name());
+        edit.setComparatorName(internalKeyComparator.getUserComparator().name());
         edit.setLastSequenceNumber(0L);
         edit.setLogNumber(0L);
         final long manifestNum = 1L;
@@ -164,28 +163,35 @@ public class VersionSet implements AsynchronousCloseable {
     return prevLogNumber;
   }
 
-  public MergingIterator makeInputIterator(final Compaction c) {
+  public CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> makeInputIterator(
+      final Compaction c) {
     // Level-0 files have to be merged together. For other levels,
     // we will make a concatenating iterator per level.
     // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-    final List<InternalIterator> list = new ArrayList<>();
+    CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0Iter = null;
+    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> list =
+        ImmutableList.builder();
     for (int which = 0; which < 2; which++) {
-      if (!c.getInputs()[which].isEmpty()) {
+      final List<FileMetaData> input = c.getInputs()[which];
+      if (!input.isEmpty()) {
         if (c.getLevel() + which == 0) {
-          final List<FileMetaData> files = c.getInputs()[which];
-          list.add(Level0.createLevel0Iterator(tableCache, files, internalKeyComparator));
+          level0Iter = Version.newLevel0Iterator(input.stream(), tableCache, internalKeyComparator);
         } else {
           // Create concatenating iterator for the files from this level
-          list.add(Level.createLevelConcatIterator(tableCache, c.getInputs()[which],
-              internalKeyComparator));
+          list.add(new Version.LevelIterator(tableCache,
+              input.toArray(new FileMetaData[input.size()]), internalKeyComparator));
         }
       }
     }
-    return new MergingIterator(list, internalKeyComparator);
+    return level0Iter != null
+        ? level0Iter.thenApply(level0 -> MergingIterator
+            .newMergingIterator(list.add(level0).build(), internalKeyComparator))
+        : CompletableFuture.completedFuture(
+            MergingIterator.newMergingIterator(list.build(), internalKeyComparator));
   }
 
-  public LookupResult get(final LookupKey key) throws IOException {
-    return current.get(key, options.memoryManager());
+  public CompletionStage<LookupResult> get(final LookupKey key) {
+    return current.get(key);
   }
 
   public int numberOfFilesInLevel(final int level) {

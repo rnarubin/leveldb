@@ -25,6 +25,7 @@ import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -37,6 +38,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.UnaryOperator;
@@ -201,7 +203,6 @@ public final class TestUtils {
     }
   }
 
-
   public static String beforeString(final Entry<String, ?> expectedEntry) {
     final String key = expectedEntry.getKey();
     final int lastByte = key.charAt(key.length() - 1);
@@ -233,6 +234,10 @@ public final class TestUtils {
   public static InternalKey after(final InternalKey key) {
     return new TransientInternalKey(after(key.getUserKey()), SequenceNumber.MAX_SEQUENCE_NUMBER,
         ValueType.VALUE);
+  }
+
+  public static ByteBuffer toBuf(final String s) {
+    return ByteBuffer.wrap(s.getBytes(StandardCharsets.UTF_8));
   }
 
   public static int estimateEntriesSize(final int blockRestartInterval,
@@ -438,6 +443,11 @@ public final class TestUtils {
 
   }
 
+  public static LongSupplier counter(final long seed) {
+    final AtomicLong i = new AtomicLong(seed);
+    return () -> i.getAndIncrement();
+  }
+
   public static Entry<TableCache, FileMetaData[]> generateTableCache(final Env env,
       final DBHandle db, final List<List<Entry<InternalKey, ByteBuffer>>> tableEntries,
       final LongSupplier fileNumbers, final int blockSize, final int blockRestartInterval,
@@ -464,6 +474,5 @@ public final class TestUtils {
         }
       }
     }, files);
-
   }
 }

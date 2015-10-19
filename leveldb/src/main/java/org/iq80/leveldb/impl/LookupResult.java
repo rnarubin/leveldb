@@ -16,13 +16,15 @@ package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
 
+import org.iq80.leveldb.util.ByteBuffers;
+
 public class LookupResult {
   public static LookupResult ok(final LookupKey key, final ByteBuffer value) {
     return new LookupResult(key, value, false);
   }
 
   public static LookupResult deleted(final LookupKey key) {
-    return new LookupResult(key, null, true);
+    return new LookupResult(key, ByteBuffers.EMPTY_BUFFER, true);
   }
 
   private final LookupKey key;
@@ -46,5 +48,10 @@ public class LookupResult {
 
   public boolean isDeleted() {
     return deleted;
+  }
+
+  @Override
+  public String toString() {
+    return "LookupResult [key=" + key + ", value=" + value + ", deleted=" + deleted + "]";
   }
 }

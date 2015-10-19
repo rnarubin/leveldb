@@ -7,6 +7,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Comparator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -38,7 +39,7 @@ public class TableBuilder implements Closeable {
   private final SequentialWriteFile file;
   private final BlockBuilder dataBlockBuilder;
   private final BlockBuilder indexBlockBuilder;
-  private final InternalKeyComparator internalKeyComparator;
+  private final Comparator<InternalKey> internalKeyComparator;
 
   private BlockHandle pendingHandle;
   private long position;

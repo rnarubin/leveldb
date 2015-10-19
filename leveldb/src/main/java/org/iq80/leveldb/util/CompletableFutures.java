@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.AsynchronousIterator;
@@ -187,6 +188,21 @@ public final class CompletableFutures {
   public static <T> CompletableFuture<T> exceptionalFuture(final Throwable ex) {
     final CompletableFuture<T> f = new CompletableFuture<>();
     f.completeExceptionally(ex);
+    return f;
+  }
+
+  public static <T> CompletionStage<T> startAsync(final Supplier<CompletionStage<T>> work,
+      final Executor asyncExec) {
+    final CompletableFuture<T> f = new CompletableFuture<>();
+    asyncExec.execute(() -> {
+      work.get().whenComplete((t, throwable) -> {
+        if (throwable == null) {
+          f.complete(t);
+        } else {
+          f.completeExceptionally(throwable);
+        }
+      });
+    });
     return f;
   }
 
