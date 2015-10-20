@@ -144,6 +144,9 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
         }) : CompletableFuture.completedFuture(true);
   }
 
+  /**
+   * NOTE buffers must be copied if held beyond call to next or close
+   */
   @Override
   public CompletionStage<Optional<ByteBuffer>> next() {
     recordScratch.clear();
@@ -159,7 +162,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
             // simply return this full block
           }
           recordScratch.clear();
-          return CompletableFuture.completedFuture(ByteBuffers.copyOwned(currentChunk));
+          return CompletableFuture.completedFuture(currentChunk);
 
         case FIRST:
           if (inFragmentedRecord) {
@@ -190,7 +193,7 @@ public class LogReader implements AsynchronousCloseableIterator<ByteBuffer> {
             return nextRecord(inFragmentedRecord);
           } else {
             recordScratch.put(currentChunk);
-            return CompletableFuture.completedFuture(ByteBuffers.copyOwned(recordScratch.get()));
+            return CompletableFuture.completedFuture(recordScratch.get());
           }
 
         case EOF:

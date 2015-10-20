@@ -85,9 +85,9 @@ public final class CompletableFutures {
   public static <T, U> CompletionStage<U> handleExceptional(final CompletionStage<T> first,
       final ExceptionalBiFunction<? super T, Throwable, ? extends U> handler) {
     final CompletableFuture<U> f = new CompletableFuture<>();
-    first.whenComplete((t, throwable) -> {
+    first.whenComplete((t, tException) -> {
       try {
-        f.complete(handler.apply(t, throwable));
+        f.complete(handler.apply(t, tException));
       } catch (final Exception e) {
         f.completeExceptionally(e);
       }
@@ -98,9 +98,9 @@ public final class CompletableFutures {
   public static <T, U> CompletionStage<U> thenApplyExceptional(final CompletionStage<T> first,
       final ExceptionalFunction<? super T, ? extends U> applier) {
     final CompletableFuture<U> f = new CompletableFuture<>();
-    first.whenComplete((t, throwable) -> {
-      if (throwable != null) {
-        f.completeExceptionally(throwable);
+    first.whenComplete((t, tException) -> {
+      if (tException != null) {
+        f.completeExceptionally(tException);
       } else {
         try {
           f.complete(applier.apply(t));
@@ -195,11 +195,11 @@ public final class CompletableFutures {
       final Executor asyncExec) {
     final CompletableFuture<T> f = new CompletableFuture<>();
     asyncExec.execute(() -> {
-      work.get().whenComplete((t, throwable) -> {
-        if (throwable == null) {
+      work.get().whenComplete((t, tException) -> {
+        if (tException == null) {
           f.complete(t);
         } else {
-          f.completeExceptionally(throwable);
+          f.completeExceptionally(tException);
         }
       });
     });

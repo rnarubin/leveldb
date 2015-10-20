@@ -17,8 +17,8 @@ package org.iq80.leveldb.impl;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletionStage;
 
+import org.iq80.leveldb.Env;
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBufferCrc32C;
 import org.iq80.leveldb.util.ByteBuffers;
 
@@ -26,9 +26,8 @@ public final class Logs {
   private Logs() {}
 
   public static CompletionStage<LogWriter> createLogWriter(final FileInfo fileInfo,
-      final long fileNumber, final Options options) {
-    return options.env().openConcurrentWriteFile(fileInfo)
-        .thenApply(file -> new LogWriter(file, fileNumber));
+      final long fileNumber, final Env env) {
+    return env.openConcurrentWriteFile(fileInfo).thenApply(file -> new LogWriter(file, fileNumber));
   }
 
   public static int getChunkChecksum(final int chunkTypeId, final ByteBuffer data) {

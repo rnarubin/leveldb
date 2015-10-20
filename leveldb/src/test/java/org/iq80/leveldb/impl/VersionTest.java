@@ -85,6 +85,15 @@ public abstract class VersionTest extends EnvDependentTest {
           TestUtils.createInternalKey("w", 0)).isEmpty());
     }
 
+    // exact overlap
+    {
+      final FileMetaData[][] files = genMetaData(
+          new String[][][] {{{"a", "b"}, {"c", "f"}, {"d", "f"}, {"h", "i"}, {"e", "e"}}});
+      final Version v = new Version(files, 0, 0, null, TestUtils.keyComparator);
+      Assert.assertEquals(Arrays.asList(files[0][3]), v.getOverlappingInputs(0,
+          TestUtils.createInternalKey("h", 0), TestUtils.createInternalKey("i", 0)));
+    }
+
     // lower bound overlap
     {
       final FileMetaData[][] files = genMetaData(
@@ -125,6 +134,7 @@ public abstract class VersionTest extends EnvDependentTest {
           v.getOverlappingInputs(0, TestUtils.createInternalKey("f", 0),
               TestUtils.createInternalKey("g", 0)));
     }
+
   }
 
   private FileMetaData[][] genMetaData(final String[][][] levels) {

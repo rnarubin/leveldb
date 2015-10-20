@@ -50,13 +50,13 @@ final class Version {
 
   private final int compactionLevel;
   private final double compactionScore;
-  private final AtomicReference<Entry<FileMetaData, Integer>> seekCompaction;
+  private final AtomicReference<Entry<FileMetaData, Integer>> seekCompaction =
+      new AtomicReference<>(null);
 
   Version(final FileMetaData[][] levelFiles, final int compactionLevel,
       final double compactionScore, final TableCache tableCache,
       final InternalKeyComparator internalKeyComparator) {
     this.internalKeyComparator = internalKeyComparator;
-    this.seekCompaction = new AtomicReference<>(null);
     this.compactionLevel = compactionLevel;
     this.compactionScore = compactionScore;
     this.tableCache = tableCache;
@@ -307,6 +307,10 @@ final class Version {
 
   public FileMetaData[] getFiles(final int level) {
     return files[level];
+  }
+
+  public FileMetaData[][] getFiles() {
+    return files;
   }
 
   private boolean updateStats(final int seekFileLevel, final FileMetaData seekFile) {

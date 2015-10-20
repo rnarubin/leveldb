@@ -28,7 +28,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
 import org.iq80.leveldb.util.EnvDependentTest;
@@ -45,13 +44,11 @@ public abstract class LogTest extends EnvDependentTest {
 
   private LogWriter writer;
   private FileInfo fileInfo;
-  private Options options;
 
   @BeforeMethod
   public void setUp() throws InterruptedException, ExecutionException {
-    options = Options.make().env(getEnv()).verifyChecksums(true);
     fileInfo = FileInfo.log(getHandle(), 42);
-    writer = Logs.createLogWriter(fileInfo, 42, options).toCompletableFuture().get();
+    writer = Logs.createLogWriter(fileInfo, 42, getEnv()).toCompletableFuture().get();
   }
 
   @AfterMethod

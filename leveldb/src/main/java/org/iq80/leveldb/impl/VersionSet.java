@@ -16,12 +16,14 @@ package org.iq80.leveldb.impl;
 
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -31,6 +33,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.iq80.leveldb.AsynchronousCloseable;
@@ -38,7 +41,6 @@ import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.Env.SequentialReadFile;
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.CompletableFutures;
@@ -48,15 +50,12 @@ import org.iq80.leveldb.util.MergingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.PeekingIterator;
 
 public class VersionSet implements AsynchronousCloseable {
   private static final Logger LOGGER = LoggerFactory.getLogger(VersionSet.class);
@@ -69,38 +68,51 @@ public class VersionSet implements AsynchronousCloseable {
   // stop building a single file in a level.level+1 compaction.
   public static final long MAX_GRAND_PARENT_OVERLAP_BYTES = 10 * TARGET_FILE_SIZE;
 
-  private final AtomicLong nextFileNumber = new AtomicLong(2);
-  private long manifestFileNumber = 1;
-  private volatile Version current;
-  private final AtomicLong lastSequence = new AtomicLong(0);
+  private final AtomicLong nextFileNumber;
+  private final AtomicLong lastSequence;
+  private final long manifestFileNumber;
   private long logNumber;
   private long prevLogNumber;
+  private final AtomicReference<Version> current = new AtomicReference<>(null);
 
-  private static final Object PRESENT = new Object();
+  private static final Object PRESENT = Boolean.TRUE;
   private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
   private final DBHandle dbHandle;
   private final TableCache tableCache;
   private final InternalKeyComparator internalKeyComparator;
-  private final Options options;
+  private final Env env;
 
   private LogWriter descriptorLog;
-  private final Map<Integer, InternalKey> compactPointers = Maps.newTreeMap();
+
+  private final InternalKey[] compactPointers;
 
   private VersionSet(final DBHandle dbHandle, final TableCache tableCache,
-      final InternalKeyComparator internalKeyComparator, final Options options) {
+      final InternalKeyComparator internalKeyComparator, final Env env, final long nextFileNumber,
+      final long manifestFileNumber, final long lastSequence, final long logNumber,
+      final long prevLogNumber, final Version initialVersion, final InternalKey[] compactPointers) {
     this.dbHandle = dbHandle;
     this.tableCache = tableCache;
     this.internalKeyComparator = internalKeyComparator;
-    this.options = options;
-    appendVersion(new Version());
+    this.env = env;
+    this.nextFileNumber = new AtomicLong(nextFileNumber);
+    this.lastSequence = new AtomicLong(lastSequence);
+    this.manifestFileNumber = manifestFileNumber;
+    this.logNumber = logNumber;
+    this.prevLogNumber = prevLogNumber;
+    this.compactPointers = compactPointers;
+    appendVersion(null, initialVersion);
   }
 
+  /**
+   * if the CURRENT file exists, recovers the version set from the existing manifest. otherwise,
+   * creates a new manifest and version set
+   */
   public static CompletionStage<VersionSet> newVersionSet(final DBHandle dbHandle,
       final TableCache tableCache, final InternalKeyComparator internalKeyComparator,
-      final Options options) {
-    return options.env().fileExists(FileInfo.current(dbHandle)).thenCompose(exists -> {
+      final Env env) {
+    return env.fileExists(FileInfo.current(dbHandle)).thenCompose(exists -> {
       if (exists) {
-        return CompletableFuture.<Void>completedFuture(null);
+        return recover(dbHandle, env, tableCache, internalKeyComparator);
       } else {
         // create new initial manifest file
         final VersionEdit edit = new VersionEdit();
@@ -111,28 +123,117 @@ public class VersionSet implements AsynchronousCloseable {
         edit.setNextFileNumber(2L);
         final GrowingBuffer record = edit.encode(MemoryManagers.heap());
 
-        return Logs.createLogWriter(FileInfo.manifest(dbHandle, manifestNum), manifestNum, options)
+        return Logs.createLogWriter(FileInfo.manifest(dbHandle, manifestNum), manifestNum, env)
             .thenCompose(logWriter -> CompletableFutures.composeUnconditionally(
                 logWriter.addRecord(record.get(), true),
                 voided -> logWriter.asyncClose().<Void>handle((close, closeException) -> {
           record.close();
           return null;
-        }))).thenCompose(voided -> setCurrentFile(options.env(), dbHandle, manifestNum));
+        }))).thenCompose(voided -> setCurrentFile(env, dbHandle, manifestNum))
+            .thenApply(voided -> new VersionSet(dbHandle, tableCache, internalKeyComparator, env,
+                2L, 1L, 0L, 0L, 0L,
+                new Version(new FileMetaData[][] {{}}, 0, 0, tableCache, internalKeyComparator),
+                new InternalKey[NUM_LEVELS]));
       }
-    }).thenApply(voided -> new VersionSet(dbHandle, tableCache, internalKeyComparator, options));
+    });
+  }
+
+  private static CompletionStage<VersionSet> recover(final DBHandle dbHandle, final Env env,
+      final TableCache tableCache, final InternalKeyComparator internalKeyComparator) {
+    // Read "CURRENT" file, which contains a pointer to the current manifest file
+    return readStringFromFile(env, FileInfo.current(dbHandle)).thenCompose(currentName -> {
+      if (currentName.isEmpty()) {
+        throw new IllegalStateException("CURRENT name is empty");
+      }
+      final int newLineIndex = currentName.indexOf('\n');
+      if (newLineIndex != currentName.length() - 1) {
+        throw new IllegalStateException("CURRENT file's first newline is not at end of file");
+      }
+      currentName = currentName.substring(0, newLineIndex);
+
+      return LogReader
+          .newLogReader(env, FileInfo.manifest(dbHandle, descriptorFileNumber(currentName)),
+              LogMonitors.throwExceptionMonitor(), true, 0)
+          .thenCompose(manifestReader -> {
+        final InternalKey[] compactedPointers = new InternalKey[NUM_LEVELS];
+        final VersionBuilder versionBuilder =
+            new VersionBuilder(internalKeyComparator, tableCache, new FileMetaData[][] {{}});
+        class LongHolder {
+          long nextFileNumber = 1L;
+          long lastSequence = 0L;
+          long logNumber = 0L;
+          long prevLogNumber = 0L;
+        }
+        final LongHolder vals = new LongHolder();
+        return CompletableFutures.composeUnconditionally(
+            CompletableFutures.<ByteBuffer, Void>flatMapIterator(manifestReader, record -> {
+          final VersionEdit edit = new VersionEdit(record);
+
+          final String editComparator = edit.getComparatorName();
+          final String userComparator = internalKeyComparator.getUserComparator().name();
+          Preconditions.checkArgument(
+              editComparator == null || editComparator.equals(userComparator),
+              "Expected user comparator %s to match existing database comparator %s",
+              userComparator, editComparator);
+
+          VersionEdit.mergeCompactPointers(edit.getCompactPointers(), compactedPointers);
+
+          versionBuilder.apply(edit);
+
+          vals.nextFileNumber = edit.getNextFileNumber().orElse(vals.nextFileNumber);
+          vals.lastSequence = edit.getLastSequenceNumber().orElse(vals.lastSequence);
+          vals.logNumber = edit.getLogNumber().orElse(vals.logNumber);
+          vals.prevLogNumber = edit.getPreviousLogNumber().orElse(vals.prevLogNumber);
+          return null;
+        } , Runnable::run).thenApply(ignored ->
+        // TODO call corruption if missing vals
+        new VersionSet(dbHandle, tableCache, internalKeyComparator, env, vals.nextFileNumber + 1,
+            vals.nextFileNumber, vals.lastSequence, vals.logNumber, vals.prevLogNumber,
+            versionBuilder.build(), compactedPointers)),
+            optVersionSet -> manifestReader.asyncClose()
+                .thenApply(voided -> optVersionSet.orElse(null)));
+      });
+    });
+  }
+
+  private static CompletionStage<String> readStringFromFile(final Env env,
+      final FileInfo fileInfo) {
+    final StringBuilder builder = new StringBuilder();
+    return env.openSequentialReadFile(fileInfo)
+        .thenCompose(reader -> CompletableFutures.composeUnconditionally(
+            buildString(reader, builder, ByteBuffer.allocate(4096)), voided -> reader.asyncClose()))
+        .thenApply(voided -> builder.toString());
+  }
+
+  private static CompletionStage<Void> buildString(final SequentialReadFile reader,
+      final StringBuilder builder, final ByteBuffer buffer) {
+    return reader.read(buffer).thenCompose(bytesRead -> {
+      if (bytesRead > 0) {
+        buffer.flip();
+        assert buffer.hasArray();
+        builder.append(new String(buffer.array(), buffer.position(), buffer.remaining(),
+            StandardCharsets.UTF_8));
+        buffer.clear();
+        return buildString(reader, builder, buffer);
+      } else {
+        return CompletableFuture.completedFuture(null);
+      }
+    });
   }
 
   @Override
   public CompletionStage<Void> asyncClose() {
-    current = null;
+    current.set(null);
     return Closeables.asyncClose(descriptorLog);
   }
 
   // TODO check synchronization
-  private void appendVersion(final Version version) {
-    final Object oldMapping = activeVersions.put(version, PRESENT);
+  private void appendVersion(final Version previous, final Version update) {
+    final Object oldMapping = activeVersions.put(update, PRESENT);
     assert oldMapping == null : "appended already existing version";
-    current = version;
+    if (!current.compareAndSet(previous, update)) {
+      throw new IllegalStateException("unexpected interleaved version update");
+    }
   }
 
   public InternalKeyComparator getInternalKeyComparator() {
@@ -144,7 +245,7 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   public Version getCurrent() {
-    return current;
+    return current.get();
   }
 
   public long getManifestFileNumber() {
@@ -191,15 +292,15 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   public CompletionStage<LookupResult> get(final LookupKey key) {
-    return current.get(key);
+    return getCurrent().get(key);
   }
 
   public int numberOfFilesInLevel(final int level) {
-    return current.numberOfFilesInLevel(level);
+    return getCurrent().numberOfFilesInLevel(level);
   }
 
   public long numberOfBytesInLevel(final int level) {
-    return current.numberOfFilesInLevel(level);
+    return getCurrent().numberOfFilesInLevel(level);
   }
 
   public long getLastSequence() {
@@ -216,189 +317,78 @@ public class VersionSet implements AsynchronousCloseable {
     this.lastSequence.set(newLastSequence);
   }
 
-  public void logAndApply(final VersionEdit edit) throws IOException {
-    if (edit.getLogNumber() != null) {
-      Preconditions.checkArgument(edit.getLogNumber() >= logNumber);
-      Preconditions.checkArgument(edit.getLogNumber() < nextFileNumber.get());
+  public void logAndApply(final VersionEdit edit) {
+    final long nextFileNum = nextFileNumber.get();
+    final long lastSequenceNum = lastSequence.get();
+    final Version base = getCurrent();
+
+    if (edit.getLogNumber().isPresent()) {
+      final long num = edit.getLogNumber().getAsLong();
+      Preconditions.checkArgument(num >= logNumber);
+      Preconditions.checkArgument(num < nextFileNum);
     } else {
       edit.setLogNumber(logNumber);
     }
 
-    if (edit.getPreviousLogNumber() == null) {
+    if (!edit.getPreviousLogNumber().isPresent()) {
       edit.setPreviousLogNumber(prevLogNumber);
     }
 
-    edit.setNextFileNumber(nextFileNumber.get());
-    edit.setLastSequenceNumber(lastSequence.get());
+    edit.setNextFileNumber(nextFileNum);
+    edit.setLastSequenceNumber(lastSequenceNum);
 
     // Update compaction pointers
-    for (final Entry<Integer, InternalKey> entry : edit.getCompactPointers().entrySet()) {
-      final Integer level = entry.getKey();
-      final InternalKey internalKey = entry.getValue();
-      compactPointers.put(level, internalKey);
-    }
-    final VersionBuilder builder = new VersionBuilder(this, current);
-    final Version version = builder.apply(edit).build();
+    VersionEdit.mergeCompactPointers(edit.getCompactPointers(), compactPointers);
 
-    boolean createdNewManifest = false;
     final FileInfo manifestFile = FileInfo.manifest(dbHandle, manifestFileNumber);
-    try {
-      // Initialize new descriptor log file if necessary by creating
-      // a temporary file that contains a snapshot of the current version.
-      if (descriptorLog == null) {
-        edit.setNextFileNumber(nextFileNumber.get());
-        descriptorLog = Logs.createLogWriter(manifestFile, manifestFileNumber, options);
-        writeSnapshot(descriptorLog);
-        createdNewManifest = true;
-      }
-
-      // Write new record to MANIFEST log
-      try (GrowingBuffer record = edit.encode(options.memoryManager())) {
-        descriptorLog.addRecord(record.get(), true);
-      }
-
-      // If we just created a new descriptor file, install it by writing a
-      // new CURRENT file that points to it.
-      if (createdNewManifest) {
-        setCurrentFile(options.env(), descriptorLog.getFileNumber());
-      }
-    } catch (final IOException e) {
-      // New manifest file was not installed, so clean up state and delete the file
-      if (createdNewManifest) {
-        descriptorLog.close();
-        options.env().deleteFile(manifestFile);
-        descriptorLog = null;
-      }
-      throw e;
+    final CompletionStage<Void> manifestWrite;
+    // Initialize new descriptor log file if necessary by creating
+    // a temporary file that contains a snapshot of the current version.
+    if (descriptorLog == null) {
+      manifestWrite = Logs.createLogWriter(manifestFile, manifestFileNumber, env)
+          .thenCompose(logWriter -> CompletableFutures
+              .composeOnException(writeSnapshot(descriptorLog = logWriter, base), exception -> {
+                descriptorLog = null;
+                return logWriter.asyncClose().thenCompose(voided -> env.deleteFile(manifestFile));
+              }).thenCompose(voided -> writeEditToLog(edit, descriptorLog))
+              .thenCompose(voided -> setCurrentFile(env, dbHandle, descriptorLog.getFileNumber())));
+    } else {
+      manifestWrite = writeEditToLog(edit, descriptorLog);
     }
+
+    final Version version =
+        new VersionBuilder(internalKeyComparator, tableCache, base.getFiles()).apply(edit).build();
 
     // Install the new version
-    appendVersion(version);
-    logNumber = edit.getLogNumber();
-    prevLogNumber = edit.getPreviousLogNumber();
+    manifestWrite.thenAccept(vodied -> {
+      appendVersion(base, version);
+      logNumber = edit.getLogNumber().orElseThrow(IllegalStateException::new);
+      prevLogNumber = edit.getPreviousLogNumber().orElseThrow(IllegalStateException::new);
+    });
   }
 
-  private static CompletionStage<Void> writeSnapshot(final LogWriter log,
-      final InternalKeyComparator internalKeyComparator,
-      final Map<Integer, InternalKey> compactPointers,
-      final Multimap<Integer, FileMetaData> currentFiles) throws IOException {
+  private CompletionStage<Void> writeSnapshot(final LogWriter log, final Version base) {
     // Save metadata
     final VersionEdit edit = new VersionEdit();
-    edit.setComparatorName(internalKeyComparator.name());
+    edit.setComparatorName(internalKeyComparator.getUserComparator().name());
 
     // Save compaction pointers
     edit.setCompactPointers(compactPointers);
 
     // Save files
-    edit.addFiles(currentFiles);
+    edit.addFiles(base.getFiles());
 
-    // TODO this try is wrong
-    try (GrowingBuffer record = edit.encode(MemoryManagers.heap())) {
-      log.addRecord(record.get(), true);
-    }
+    return writeEditToLog(edit, log);
   }
 
-  public void recover() throws IOException {
-
-    // Read "CURRENT" file, which contains a pointer to the current manifest file
-    final FileInfo currentFile = FileInfo.current(dbHandle);
-    Preconditions.checkState(options.env().fileExists(currentFile), "CURRENT file does not exist");
-
-    String currentName = readStringFromFile(options.env(), currentFile);
-    if (currentName.isEmpty() || currentName.charAt(currentName.length() - 1) != '\n') {
-      throw new IllegalStateException("CURRENT file does not end with newline");
-    }
-    currentName = currentName.substring(0, currentName.length() - 1);
-
-    // open file channel
-    try (
-        SequentialReadFile fileInput = options.env()
-            .openSequentialReadFile(FileInfo.manifest(dbHandle, descriptorFileNumber(currentName)));
-        LogReader reader =
-            new LogReader(fileInput, throwExceptionMonitor(), true, 0, options.memoryManager())) {
-      // read log edit log
-      Long nextFileNumber = null;
-      Long lastSequence = null;
-      Long logNumber = null;
-      Long prevLogNumber = null;
-      final VersionBuilder builder = new VersionBuilder(this, current);
-
-      for (ByteBuffer record = reader.readRecord(); record != null; record = reader.readRecord()) {
-        // read version edit
-        final VersionEdit edit = new VersionEdit(record);
-        options.memoryManager().free(record);
-
-        // verify comparator
-        // todo implement user comparator
-        final String editComparator = edit.getComparatorName();
-        final String userComparator = internalKeyComparator.name();
-        Preconditions.checkArgument(editComparator == null || editComparator.equals(userComparator),
-            "Expected user comparator %s to match existing database comparator ", userComparator,
-            editComparator);
-
-        // Update compaction pointers
-        for (final Entry<Integer, InternalKey> entry : edit.getCompactPointers().entrySet()) {
-          final Integer level = entry.getKey();
-          final InternalKey internalKey = entry.getValue();
-          compactPointers.put(level, internalKey);
-        }
-        // apply edit
-        builder.apply(edit);
-
-        // save edit values for verification below
-        logNumber = coalesce(edit.getLogNumber(), logNumber);
-        prevLogNumber = coalesce(edit.getPreviousLogNumber(), prevLogNumber);
-        nextFileNumber = coalesce(edit.getNextFileNumber(), nextFileNumber);
-        lastSequence = coalesce(edit.getLastSequenceNumber(), lastSequence);
-      }
-
-      final List<String> problems = newArrayList();
-      if (nextFileNumber == null) {
-        problems.add("Descriptor does not contain a meta-nextfile entry");
-      }
-      if (logNumber == null) {
-        problems.add("Descriptor does not contain a meta-lognumber entry");
-      }
-      if (lastSequence == null) {
-        problems.add("Descriptor does not contain a last-sequence-number entry");
-      }
-      if (!problems.isEmpty()) {
-        throw new RuntimeException("Corruption: \n\t" + Joiner.on("\n\t").join(problems));
-      }
-
-      if (prevLogNumber == null) {
-        prevLogNumber = 0L;
-      }
-
-
-      final Version newVersion = builder.build();
-
-      // Install recovered version
-      appendVersion(newVersion);
-      manifestFileNumber = nextFileNumber;
-      this.nextFileNumber.set(nextFileNumber + 1);
-      this.lastSequence.set(lastSequence);
-      this.logNumber = logNumber;
-      this.prevLogNumber = prevLogNumber;
-    }
+  private static CompletionStage<Void> writeEditToLog(final VersionEdit edit, final LogWriter log) {
+    final GrowingBuffer record = edit.encode(MemoryManagers.heap());
+    return log.addRecord(record.get(), true).whenComplete((success, exception) -> record.close());
   }
 
-  @SafeVarargs
-  private static <V> V coalesce(final V... values) {
-    for (final V value : values) {
-      if (value != null) {
-        return value;
-      }
-    }
-    return null;
-  }
-
-  public List<FileMetaData> getLiveFiles() {
-    final ImmutableList.Builder<FileMetaData> builder = ImmutableList.builder();
-    for (final Version activeVersion : activeVersions.keySet()) {
-      builder.addAll(activeVersion.getFiles().values());
-    }
-    return builder.build();
+  public Stream<FileMetaData> getLiveFiles() {
+    return activeVersions.keySet().stream().map(Version::getFiles).flatMap(Arrays::stream)
+        .flatMap(Arrays::stream);
   }
 
   private static double maxBytesForLevel(int level) {
@@ -412,77 +402,77 @@ public class VersionSet implements AsynchronousCloseable {
     return result;
   }
 
-  public static long maxFileSizeForLevel(final int level) {
+  public static long maxFileSizeForLevel(@SuppressWarnings("unused") final int level) {
     return TARGET_FILE_SIZE; // We could vary per level to reduce number of files?
   }
 
   public boolean needsCompaction() {
-    return current.getCompactionScore() >= 1 || current.getFileToCompact() != null;
+    final Version v = current.get();
+    return v.getCompactionScore() >= 1 || v.getSeekCompaction() != null;
   }
 
   public Compaction compactRange(final int level, final InternalKey begin, final InternalKey end) {
-    final List<FileMetaData> levelInputs = getOverlappingInputs(level, begin, end);
+    final Version v = current.get();
+    final List<FileMetaData> levelInputs = v.getOverlappingInputs(level, begin, end);
     if (levelInputs.isEmpty()) {
       return null;
     }
 
-    return setupOtherInputs(level, levelInputs);
+    return setupOtherInputs(v, level, levelInputs);
   }
 
   public Compaction pickCompaction() {
+    final Version v = current.get();
     // We prefer compactions triggered by too much data in a level over
     // the compactions triggered by seeks.
-    final boolean sizeCompaction = (current.getCompactionScore() >= 1);
-    final boolean seekCompaction = (current.getFileToCompact() != null);
+    final boolean shouldSizeCompact = (v.getCompactionScore() >= 1);
+    final Entry<FileMetaData, Integer> seekCompaction;
 
     int level;
-    List<FileMetaData> levelInputs;
-    if (sizeCompaction) {
-      level = current.getCompactionLevel();
-      Preconditions.checkState(level >= 0);
-      Preconditions.checkState(level + 1 < NUM_LEVELS);
-
+    FileMetaData inputFile = null;
+    if (shouldSizeCompact) {
+      level = v.getCompactionLevel();
+      assert (level >= 0);
+      assert (level + 1 < NUM_LEVELS);
       // Pick the first file that comes after compact_pointer_[level]
-      levelInputs = newArrayList();
-      for (final FileMetaData fileMetaData : current.getFiles(level)) {
-        if (!compactPointers.containsKey(level) || internalKeyComparator
-            .compare(fileMetaData.getLargest(), compactPointers.get(level)) > 0) {
-          levelInputs.add(fileMetaData);
-          break;
+
+      if (compactPointers[level] == null) {
+        inputFile = v.getFiles()[level][0];
+      } else {
+        // TODO(optimization) this could be a binary search for levels > 0
+        for (final FileMetaData fileMetaData : v.getFiles(level)) {
+          if (internalKeyComparator.compare(fileMetaData.getLargest(),
+              compactPointers[level]) > 0) {
+            inputFile = fileMetaData;
+            break;
+          }
+        }
+        if (inputFile == null) {
+          inputFile = v.getFiles()[level][0];
         }
       }
-      if (levelInputs.isEmpty()) {
-        // Wrap-around to the beginning of the key space
-        levelInputs.add(current.getFiles(level).get(0));
-      }
-    } else if (seekCompaction) {
-      level = current.getFileToCompactLevel();
-      levelInputs = ImmutableList.of(current.getFileToCompact());
+    } else if ((seekCompaction = v.getSeekCompaction()) != null) {
+      level = seekCompaction.getValue();
+      inputFile = seekCompaction.getKey();
     } else {
       return null;
     }
 
     // Files in level 0 may overlap each other, so pick up all overlapping ones
-    if (level == 0) {
-      final Entry<InternalKey, InternalKey> range = getRange(levelInputs);
-      // Note that the next call will discard the file we placed in
-      // c->inputs_[0] earlier and replace it with an overlapping set
-      // which will include the picked file.
-      levelInputs = getOverlappingInputs(0, range.getKey(), range.getValue());
+    final List<FileMetaData> levelInputs =
+        level == 0 ? v.getOverlappingInputs(0, inputFile.getSmallest(), inputFile.getLargest())
+            : Collections.singletonList(inputFile);
 
-      Preconditions.checkState(!levelInputs.isEmpty());
-    }
-
-    final Compaction compaction = setupOtherInputs(level, levelInputs);
-    return compaction;
+    return setupOtherInputs(v, level, levelInputs);
   }
 
-  private Compaction setupOtherInputs(final int level, List<FileMetaData> levelInputs) {
+  private Compaction setupOtherInputs(final Version v, final int level,
+      List<FileMetaData> levelInputs) {
     Entry<InternalKey, InternalKey> range = getRange(levelInputs);
     InternalKey smallest = range.getKey();
     InternalKey largest = range.getValue();
 
-    List<FileMetaData> levelUpInputs = getOverlappingInputs(level + 1, smallest, largest);
+    List<FileMetaData> levelUpInputs = v.getOverlappingInputs(level + 1, smallest, largest);
 
     // Get entire range covered by compaction
     range = getRange(levelInputs, levelUpInputs);
@@ -493,14 +483,15 @@ public class VersionSet implements AsynchronousCloseable {
     // changing the number of "level+1" files we pick up.
     if (!levelUpInputs.isEmpty()) {
 
-      final List<FileMetaData> expanded0 = getOverlappingInputs(level, allStart, allLimit);
+      final List<FileMetaData> expanded0 = v.getOverlappingInputs(level, allStart, allLimit);
 
+      // TODO kExpandedCompactionByteSizeLimit
       if (expanded0.size() > levelInputs.size()) {
         range = getRange(expanded0);
         final InternalKey newStart = range.getKey();
         final InternalKey newLimit = range.getValue();
 
-        final List<FileMetaData> expanded1 = getOverlappingInputs(level + 1, newStart, newLimit);
+        final List<FileMetaData> expanded1 = v.getOverlappingInputs(level + 1, newStart, newLimit);
         if (expanded1.size() == levelUpInputs.size()) {
           LOGGER.debug("Expanding@{} {}+{} to {}+{}", level, levelInputs.size(),
               levelUpInputs.size(), expanded0.size(), expanded1.size());
@@ -520,57 +511,59 @@ public class VersionSet implements AsynchronousCloseable {
     // (parent == level+1; grandparent == level+2)
     List<FileMetaData> grandparents = null;
     if (level + 2 < NUM_LEVELS) {
-      grandparents = getOverlappingInputs(level + 2, allStart, allLimit);
+      grandparents = v.getOverlappingInputs(level + 2, allStart, allLimit);
     }
 
-    // if (false) {
-    // Log(options_ - > info_log, "Compacting %d '%s' .. '%s'",
-    // level,
-    // EscapeString(smallest.Encode()).c_str(),
-    // EscapeString(largest.Encode()).c_str());
-    // }
+    LOGGER.trace("Compacting level {} '{}' .. '{}'", level, smallest, largest);
 
     final Compaction compaction =
-        new Compaction(current, level, levelInputs, levelUpInputs, grandparents);
+        new Compaction(v, level, levelInputs, levelUpInputs, grandparents);
 
     // Update the place where we will do the next compaction for this level.
     // We update this immediately instead of waiting for the VersionEdit
     // to be applied so that if the compaction fails, we will try a different
     // key range next time.
-    compactPointers.put(level, largest);
+    compactPointers[level] = largest;
     compaction.getEdit().setCompactPointer(level, largest);
 
     return compaction;
   }
 
-  @SafeVarargs
-  private final Entry<InternalKey, InternalKey> getRange(final List<FileMetaData>... inputLists) {
-    InternalKey smallest = null;
-    InternalKey largest = null;
-    for (final List<FileMetaData> inputList : inputLists) {
-      for (final FileMetaData fileMetaData : inputList) {
-        if (smallest == null) {
-          smallest = fileMetaData.getSmallest();
-          largest = fileMetaData.getLargest();
-        } else {
-          if (internalKeyComparator.compare(fileMetaData.getSmallest(), smallest) < 0) {
-            smallest = fileMetaData.getSmallest();
-          }
-          if (internalKeyComparator.compare(fileMetaData.getLargest(), largest) > 0) {
-            largest = fileMetaData.getLargest();
-          }
-        }
+  private final Entry<InternalKey, InternalKey> getRange(final List<FileMetaData> files) {
+    return getRange(files.iterator());
+  }
+
+  private final Entry<InternalKey, InternalKey> getRange(final List<FileMetaData> f1,
+      final List<FileMetaData> f2) {
+    return getRange(Iterators.concat(f1.iterator(), f2.iterator()));
+  }
+
+  private final Entry<InternalKey, InternalKey> getRange(final Iterator<FileMetaData> files) {
+    assert files.hasNext();
+    final FileMetaData first = files.next();
+    InternalKey smallest = first.getSmallest();
+    InternalKey largest = first.getLargest();
+
+    while (files.hasNext()) {
+      final FileMetaData fileMetaData = files.next();
+
+      if (internalKeyComparator.compare(fileMetaData.getSmallest(), smallest) < 0) {
+        smallest = fileMetaData.getSmallest();
+      }
+      if (internalKeyComparator.compare(fileMetaData.getLargest(), largest) > 0) {
+        largest = fileMetaData.getLargest();
       }
     }
     return Maps.immutableEntry(smallest, largest);
   }
 
   public long getMaxNextLevelOverlappingBytes() {
+    final Version v = current.get();
     long result = 0;
     for (int level = 1; level < NUM_LEVELS; level++) {
-      for (final FileMetaData fileMetaData : current.getFiles(level)) {
-        final List<FileMetaData> overlaps =
-            getOverlappingInputs(level + 1, fileMetaData.getSmallest(), fileMetaData.getLargest());
+      for (final FileMetaData fileMetaData : v.getFiles(level)) {
+        final List<FileMetaData> overlaps = v.getOverlappingInputs(level + 1,
+            fileMetaData.getSmallest(), fileMetaData.getLargest());
         long totalSize = 0;
         for (final FileMetaData overlap : overlaps) {
           totalSize += overlap.getFileSize();
@@ -587,17 +580,15 @@ public class VersionSet implements AsynchronousCloseable {
   public static CompletionStage<Void> setCurrentFile(final Env env, final DBHandle dbHandle,
       final long descriptorNumber) {
     final FileInfo temp = FileInfo.temp(dbHandle, descriptorNumber);
-    // @formatter:off
-    return env.openTemporaryWriteFile(temp, FileInfo.current(dbHandle))
-        .thenCompose(file ->
-        CompletableFutures.composeUnconditionally(
-            CompletableFutures.composeOnException(
+    return env
+        .openTemporaryWriteFile(temp,
+            FileInfo
+                .current(dbHandle))
+        .thenCompose(
+            file -> CompletableFutures.composeUnconditionally(CompletableFutures.composeOnException(
                 file.write(ByteBuffer.wrap((descriptorStringName(descriptorNumber) + "\n")
-                    .getBytes(StandardCharsets.UTF_8)))
-                .thenCompose(ignored -> file.sync()),
-              writeOrSyncFailure -> env.deleteFile(temp)),
-            voided -> file.asyncClose()));
-    // @formatter:on
+                    .getBytes(StandardCharsets.UTF_8))).thenCompose(ignored -> file.sync()),
+            writeOrSyncFailure -> env.deleteFile(temp)), voided -> file.asyncClose()));
   }
 
   private static final String MANIFEST_PREFIX = "MANIFEST-";
@@ -611,40 +602,25 @@ public class VersionSet implements AsynchronousCloseable {
     return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
   }
 
-  public static String readStringFromFile(final Env env, final FileInfo fileInfo)
-      throws IOException {
-    final StringBuilder builder = new StringBuilder();
-    // rare enough that it's really not an issue not using the
-    // MemoryManager; furthermore, accessing the known underlying array
-    // facilitates String conversion
-    final ByteBuffer buffer = ByteBuffer.allocate(4096);
-    try (SequentialReadFile reader = env.openSequentialReadFile(fileInfo)) {
-      while (reader.read(buffer) > 0) {
-        buffer.flip();
-        builder.append(new String(buffer.array(), buffer.position(), buffer.remaining(),
-            StandardCharsets.UTF_8));
-        buffer.clear();
-      }
-    }
-    return builder.toString();
-  }
-
   /**
    * A helper class so we can efficiently apply a whole sequence of edits to a particular state
    * without creating intermediate Versions that contain full copies of the intermediate state.
    */
   private static class VersionBuilder {
-    private final VersionSet versionSet;
-    private final Version baseVersion;
+    private final InternalKeyComparator internalKeyComparator;
+    private final TableCache tableCache;
+    private final FileMetaData[][] baseFiles;
     private final LevelState[] levels = new LevelState[NUM_LEVELS];
 
-    private VersionBuilder(final VersionSet versionSet, final Version baseVersion) {
-      this.versionSet = versionSet;
-      this.baseVersion = baseVersion;
+    private VersionBuilder(final InternalKeyComparator internalKeyComparator,
+        final TableCache tableCache, final FileMetaData[][] baseFiles) {
+      this.internalKeyComparator = internalKeyComparator;
+      this.tableCache = tableCache;
+      this.baseFiles = baseFiles;
 
       for (int i = 0; i < NUM_LEVELS; i++) {
-        levels[i] = new LevelState(versionSet.getInternalKeyComparator(),
-            baseVersion.numberOfFilesInLevel(i));
+        levels[i] =
+            new LevelState(internalKeyComparator, i < baseFiles.length ? baseFiles[i].length : 0);
       }
     }
 
@@ -653,39 +629,43 @@ public class VersionSet implements AsynchronousCloseable {
      */
     public VersionBuilder apply(final VersionEdit edit) {
 
-      // Delete files
-      for (final Entry<Integer, Long> entry : edit.getDeletedFiles().entries()) {
-        final Integer level = entry.getKey();
-        final Long fileNumber = entry.getValue();
-        levels[level].deletedFiles.add(fileNumber);
+      {
+        // Delete files
+        int level = 0;
+        for (final List<Long> deletions : edit.getDeletedFiles()) {
+          levels[level++].deletedFiles.addAll(deletions);
+        }
       }
 
-      // Add new files
-      for (final Entry<Integer, FileMetaData> entry : edit.getNewFiles().entries()) {
-        final Integer level = entry.getKey();
-        final FileMetaData fileMetaData = entry.getValue();
+      {
+        // Add new files
+        int level = 0;
+        for (final List<FileMetaData> newFiles : edit.getNewFiles()) {
+          for (final FileMetaData fileMetaData : newFiles) {
+            // We arrange to automatically compact this file after
+            // a certain number of seeks. Let's assume:
+            // (1) One seek costs 10ms
+            // (2) Writing or reading 1MB costs 10ms (100MB/s)
+            // (3) A compaction of 1MB does 25MB of IO:
+            // 1MB read from this level
+            // 10-12MB read from next level (boundaries may be misaligned)
+            // 10-12MB written to next level
+            // This implies that 25 seeks cost the same as the compaction
+            // of 1MB of data. I.e., one seek costs approximately the
+            // same as the compaction of 40KB of data. We are a little
+            // conservative and allow approximately one seek for every 16KB
+            // of data before triggering a compaction.
+            int allowedSeeks = (int) (fileMetaData.getFileSize() / 16384);
+            if (allowedSeeks < 100) {
+              allowedSeeks = 100;
+            }
+            fileMetaData.setAllowedSeeks(allowedSeeks);
 
-        // We arrange to automatically compact this file after
-        // a certain number of seeks. Let's assume:
-        // (1) One seek costs 10ms
-        // (2) Writing or reading 1MB costs 10ms (100MB/s)
-        // (3) A compaction of 1MB does 25MB of IO:
-        // 1MB read from this level
-        // 10-12MB read from next level (boundaries may be misaligned)
-        // 10-12MB written to next level
-        // This implies that 25 seeks cost the same as the compaction
-        // of 1MB of data. I.e., one seek costs approximately the
-        // same as the compaction of 40KB of data. We are a little
-        // conservative and allow approximately one seek for every 16KB
-        // of data before triggering a compaction.
-        int allowedSeeks = (int) (fileMetaData.getFileSize() / 16384);
-        if (allowedSeeks < 100) {
-          allowedSeeks = 100;
+            levels[level].deletedFiles.remove(fileMetaData.getNumber());
+            levels[level].addedFiles.add(fileMetaData);
+          }
+          level++;
         }
-        fileMetaData.setAllowedSeeks(allowedSeeks);
-
-        levels[level].deletedFiles.remove(fileMetaData.getNumber());
-        levels[level].addedFiles.add(fileMetaData);
       }
 
       return this;
@@ -695,19 +675,18 @@ public class VersionSet implements AsynchronousCloseable {
      * Saves the current state in specified version.
      */
     private void collectFiles() {
-      final FileMetaDataBySmallestKey cmp =
-          new FileMetaDataBySmallestKey(versionSet.internalKeyComparator);
+      final FileMetaDataBySmallestKey cmp = new FileMetaDataBySmallestKey(internalKeyComparator);
       for (int level = 0; level < NUM_LEVELS; level++) {
 
         // Merge the set of added files with the set of pre-existing files.
         // Drop any deleted files
 
-        final PeekingIterator<FileMetaData> baseFiles =
-            Iterators.peekingIterator(baseVersion.getFiles(level).iterator());
+        final FileMetaData[] levelFiles = baseFiles[level];
+        int lfile = 0;
         // files must be added in sorted order so assertion check in maybeAddFile works
         for (final FileMetaData addedFile : levels[level].addedFiles) {
-          while (baseFiles.hasNext() && cmp.compare(baseFiles.peek(), addedFile) <= 0) {
-            maybeAddFile(level, baseFiles.next());
+          while (lfile < levelFiles.length && cmp.compare(levelFiles[lfile], addedFile) <= 0) {
+            maybeAddFile(level, levelFiles[lfile++]);
           }
           maybeAddFile(level, addedFile);
         }
@@ -721,7 +700,7 @@ public class VersionSet implements AsynchronousCloseable {
         final List<FileMetaData> files = levels[level].collectedFiles;
         if (level > 0 && !files.isEmpty()) {
           // Must not overlap
-          final boolean filesOverlap = versionSet.internalKeyComparator
+          final boolean filesOverlap = internalKeyComparator
               .compare(files.get(files.size() - 1).getLargest(), fileMetaData.getSmallest()) >= 0;
           if (filesOverlap) {
             // A memory compaction, while this compaction was running, resulted in a a database
@@ -780,7 +759,8 @@ public class VersionSet implements AsynchronousCloseable {
               .map(level -> level.collectedFiles
                   .toArray(new FileMetaData[level.collectedFiles.size()]))
           .toArray(FileMetaData[][]::new);
-      final Version version = new Version(versionSet, levelFiles, bestLevel, bestScore);
+      final Version version =
+          new Version(levelFiles, bestLevel, bestScore, tableCache, internalKeyComparator);
       // Make sure there is no overlap in levels > 0
       assert version.assertNoOverlappingFiles();
       return version;
