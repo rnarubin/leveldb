@@ -84,7 +84,8 @@ public abstract class LevelIteratorTest extends EnvDependentTest {
       final Entry<TableCache, FileMetaData[]> tables = TestUtils.generateTableCache(getEnv(),
           getHandle(), tableEntries, TestUtils.counter(0), blockSize, blockRestartInterval, 100);
 
-      try (final TableCache tableCache = tables.getKey()) {
+      final TableCache tableCache = tables.getKey();
+      try (AutoCloseable c = TestUtils.autoCloseable(tableCache)) {
         final List<Entry<InternalKey, ByteBuffer>> expected =
             tableEntries.stream().flatMap(List::stream).collect(Collectors.toList());
         Assert.assertTrue(Ordering

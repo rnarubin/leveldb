@@ -55,6 +55,7 @@ public final class CompletableFutures {
   private static <T, U> CompletionStage<Stream<U>> iteratorStep(
       final ReverseAsynchronousIterator<T> iter, final Direction direction,
       final Stream.Builder<U> builder, final Function<T, U> mapper, final Executor asyncExec) {
+    // TODO count stack depth before asyncExec
     return direction.asyncAdvance(iter).thenComposeAsync(next -> {
       if (next.isPresent()) {
         builder.add(mapper.apply(next.get()));
@@ -159,11 +160,7 @@ public final class CompletableFutures {
    * completes with an exception, the second stage will be run (with an {@link Optional#empty()
    * empty} argument), but the returned stage will fail upon the second's completion with the first
    * stage's exception. If both the first and the second stage complete with exceptions, the
-   * returned stage will fail with the first stage's exception and the second stage's exception
-   * added as a suppressed exception
-   * <p>
-   * Think of this as an async "try/finally" where the first stage is within the "try" block and the
-   * second stage is within the "finally"
+   * returned stage will fail with the first stage's exception
    */
   public static <T, U> CompletionStage<U> composeUnconditionally(final CompletionStage<T> first,
       final Function<Optional<T>, ? extends CompletionStage<U>> then) {
@@ -172,6 +169,7 @@ public final class CompletableFutures {
       then.apply(Optional.ofNullable(t)).whenComplete((u, uException) -> {
         if (tException != null) {
           if (uException != null) {
+            // TODO this suppression doesn't seem to propagate
             tException.addSuppressed(uException);
           }
           f.completeExceptionally(tException);

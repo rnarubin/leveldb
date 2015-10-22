@@ -15,6 +15,7 @@
 
 package org.iq80.leveldb.util;
 
+import java.io.IOException;
 import java.util.Map.Entry;
 import java.util.concurrent.ExecutionException;
 
@@ -24,19 +25,22 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 
 public abstract class EnvDependentTest implements EnvTestProvider {
+  // private StrictEnv env;
   private Env env;
   private DBHandle handle;
 
   @BeforeMethod
   public void setupEnvAndDB() throws Exception {
     final Entry<? extends Env, ? extends DBHandle> envAndDB = createTempDB();
+    // this.env = new StrictEnv(envAndDB.getKey());
     this.env = envAndDB.getKey();
     this.handle = envAndDB.getValue();
   }
 
   @AfterMethod
-  public void tearDownDB() throws InterruptedException, ExecutionException {
+  public void tearDownDB() throws InterruptedException, ExecutionException, IOException {
     getEnv().deleteDB(getHandle()).toCompletableFuture().get();
+    // env.close();
   }
 
   protected Env getEnv() {

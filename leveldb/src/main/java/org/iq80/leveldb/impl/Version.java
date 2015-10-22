@@ -16,7 +16,6 @@ package org.iq80.leveldb.impl;
 
 import static org.iq80.leveldb.impl.DbConstants.MAX_MEM_COMPACT_LEVEL;
 import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
-import static org.iq80.leveldb.impl.VersionSet.MAX_GRAND_PARENT_OVERLAP_BYTES;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -116,8 +115,9 @@ final class Version {
     // in an smaller level, later levels are irrelevant.
     final ReadStats readStats = new ReadStats();
     // TODO read sampling, maybe compaction
-    return get(key, 0, readStats).whenComplete(
-        (result, exception) -> updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile()));
+    return get(key, 0, readStats).whenComplete((result, exception) -> {
+      updateStats(readStats.getSeekFileLevel(), readStats.getSeekFile());
+    });
   }
 
   private CompletionStage<LookupResult> get(final LookupKey key, final int level,
@@ -263,7 +263,7 @@ final class Version {
           break;
         }
         final long sum = Compaction.totalFileSize(getOverlappingInputs(level + 2, start, limit));
-        if (sum > MAX_GRAND_PARENT_OVERLAP_BYTES) {
+        if (sum > DbConstants.MAX_GRAND_PARENT_OVERLAP_BYTES) {
           break;
         }
         level++;

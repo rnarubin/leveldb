@@ -15,9 +15,13 @@
 package org.iq80.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 
+import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
@@ -30,27 +34,40 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 
-public class TableCache implements AutoCloseable {
+public class TableCache implements AsynchronousCloseable {
+  /**
+   * a set that retains tables removed from the cache before they are closed. tables are added upon
+   * cache invalidation, and removed upon successful release -- if they encounter an exception on
+   * release (i.e. IOException on dispose) they remain in the set to throw an exception on the
+   * TableCache's close
+   */
+  private final Set<CompletionStage<Void>> pendingRemovals =
+      Collections.newSetFromMap(new ConcurrentHashMap<>());
   private final LoadingCache<Long, CompletionStage<Table>> cache;
 
   public TableCache(final DBHandle dbHandle, final int tableCacheSize,
       final Comparator<InternalKey> internalKeyComparator, final Env env,
       final boolean verifyChecksums, final Compression compression,
+      // TODO pending removals might obviate bgExceptionHandler
       final UncaughtExceptionHandler backgroundExceptionHandler) {
     this.cache = CacheBuilder.newBuilder().maximumSize(tableCacheSize)
-        .<Long, CompletionStage<Table>>removalListener(
-            notification -> notification.getValue().whenComplete((table, openException) -> {
-              if (openException != null) {
-                // table was opened successfully
-                table.release().whenComplete((voided, closeException) -> {
-                  if (closeException != null) {
-                    backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
-                        closeException);
-                  }
-                });
-              }
-            }))
-        .build(new CacheLoader<Long, CompletionStage<Table>>() {
+        .<Long, CompletionStage<Table>>removalListener(notification -> {
+          notification.getValue().whenComplete((table, openException) -> {
+            if (openException != null) {
+              // table was originally opened successfully
+              final CompletionStage<Void> release = table.release();
+              pendingRemovals.add(release);
+              release.whenComplete((voided, closeException) -> {
+                if (closeException != null) {
+                  backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
+                      closeException);
+                } else {
+                  pendingRemovals.remove(release);
+                }
+              });
+            }
+          });
+        }).build(new CacheLoader<Long, CompletionStage<Table>>() {
           @Override
           public CompletionStage<Table> load(final Long fileNumber) {
             return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
@@ -94,12 +111,13 @@ public class TableCache implements AutoCloseable {
         table -> table.retain() != null ? attempt : getTable(number));
   }
 
-  @Override
-  public void close() {
-    cache.invalidateAll();
-  }
-
   public void evict(final long number) {
     cache.invalidate(number);
+  }
+
+  @Override
+  public CompletionStage<Void> asyncClose() {
+    cache.invalidateAll();
+    return CompletableFutures.allOfVoid(pendingRemovals.stream());
   }
 }

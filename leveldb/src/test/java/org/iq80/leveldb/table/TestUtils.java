@@ -24,15 +24,20 @@ import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -41,12 +46,15 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
+import java.util.function.LongToIntFunction;
 import java.util.function.UnaryOperator;
 
+import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.DBBufferComparator;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.Env.DelegateEnv;
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.SeekingAsynchronousIterator;
@@ -420,10 +428,9 @@ public final class TestUtils {
     final SequentialWriteFile writeFile =
         env.openSequentialWriteFile(info).toCompletableFuture().get();
 
-    try (
-        final TableBuilder builder = new TableBuilder(blockRestartInterval, blockSize, compression,
-            writeFile, keyComparator);
-        final AutoCloseable c = () -> writeFile.asyncClose().toCompletableFuture().get()) {
+    try (final TableBuilder builder =
+        new TableBuilder(blockRestartInterval, blockSize, compression, writeFile, keyComparator);
+        final AutoCloseable c = autoCloseable(writeFile)) {
 
       CompletionStage<Void> last = CompletableFuture.completedFuture(null);
       for (final Entry<InternalKey, ByteBuffer> entry : entries) {
@@ -440,7 +447,6 @@ public final class TestUtils {
             entries.get(entries.size() - 1).getKey());
       }
     }
-
   }
 
   public static LongSupplier counter(final long seed) {
@@ -466,13 +472,192 @@ public final class TestUtils {
     return Maps.immutableEntry(new TableCache(db, cacheSize, keyComparator, env, true, compression,
         (thread, throwable) -> throwableHolder.set(throwable)) {
       @Override
-      public void close() {
-        super.close();
-        final Throwable t = throwableHolder.get();
-        if (t != null) {
-          throw new AssertionError(t);
-        }
+      public CompletionStage<Void> asyncClose() {
+        return super.asyncClose().thenAccept(voided -> {
+          final Throwable t = throwableHolder.get();
+          if (t != null) {
+            throw new AssertionError(t);
+          }
+        });
       }
     }, files);
+  }
+
+  public static AutoCloseable autoCloseable(final AsynchronousCloseable c) {
+    return () -> c.asyncClose().toCompletableFuture().get();
+  }
+
+  public static class StrictEnv extends DelegateEnv implements Closeable {
+    private final Map<AsynchronousCloseable, MetaData> openMap =
+        Collections.synchronizedMap(new IdentityHashMap<>());
+
+    private class MetaData {
+      public final Throwable stackHolder;
+
+      private MetaData(final Throwable stackHolder) {
+        this.stackHolder = stackHolder;
+      }
+    }
+
+    public StrictEnv(final Env delegate) {
+      super(delegate);
+    }
+
+    private void put(final AsynchronousCloseable c, final MetaData m) {
+      openMap.put(c, m);
+    }
+
+    private void remove(final AsynchronousCloseable c) {
+      if (openMap.remove(c) == null) {
+        throw new IllegalStateException("removed nonexistant object");
+      }
+    }
+
+    @Override
+    public CompletionStage<? extends ConcurrentWriteFile> openConcurrentWriteFile(
+        final FileInfo info) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.openConcurrentWriteFile(info)
+          .thenApply(file -> new DelegateConcurrentWriteFile(file) {
+            {
+              put(file, m);
+            }
+
+            @Override
+            public CompletionStage<WriteRegion> requestRegion(final LongToIntFunction f) {
+              return super.requestRegion(f).thenApply(region -> new DelegateWriteRegion(region) {
+                {
+                  // no stack holder as it's a fairly expensive operation for such a frequent call.
+                  // not very useful either as regions are really only requested in one class
+                  StrictEnv.this.put(region, new MetaData(null));
+                }
+
+                @Override
+                public CompletionStage<Void> asyncClose() {
+                  return super.asyncClose().thenAccept(voided -> remove(region));
+                }
+              });
+            }
+
+            @Override
+            public CompletionStage<Void> asyncClose() {
+              return super.asyncClose().thenAccept(voided -> remove(file));
+            }
+          });
+    }
+
+    @Override
+    public CompletionStage<? extends SequentialWriteFile> openSequentialWriteFile(
+        final FileInfo info) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.openSequentialWriteFile(info)
+          .thenApply(file -> new DelegateSequentialWriteFile(file) {
+            {
+              put(file, m);
+            }
+
+            @Override
+            public CompletionStage<Void> asyncClose() {
+              return super.asyncClose().thenAccept(voided -> remove(file));
+            }
+          });
+    }
+
+    @Override
+    public CompletionStage<? extends TemporaryWriteFile> openTemporaryWriteFile(final FileInfo temp,
+        final FileInfo target) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.openTemporaryWriteFile(temp, target)
+          .thenApply(file -> new DelegateTemporaryWriteFile(file) {
+            {
+              put(file, m);
+            }
+
+            @Override
+            public CompletionStage<Void> asyncClose() {
+              return super.asyncClose().thenAccept(voided -> remove(file));
+            }
+          });
+    }
+
+    @Override
+    public CompletionStage<? extends SequentialReadFile> openSequentialReadFile(
+        final FileInfo info) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.openSequentialReadFile(info)
+          .thenApply(file -> new DelegateSequentialReadFile(file) {
+            {
+              put(file, m);
+            }
+
+            @Override
+            public CompletionStage<Void> asyncClose() {
+              return super.asyncClose().thenAccept(voided -> remove(file));
+            }
+          });
+    }
+
+    @Override
+    public CompletionStage<? extends RandomReadFile> openRandomReadFile(final FileInfo info) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.openRandomReadFile(info).thenApply(file -> new DelegateRandomReadFile(file) {
+        {
+          put(file, m);
+        }
+
+        @Override
+        public CompletionStage<Void> asyncClose() {
+          return super.asyncClose().thenAccept(voided -> remove(file));
+        }
+      });
+    }
+
+    @Override
+    public CompletionStage<? extends LockFile> lockFile(final FileInfo info) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.lockFile(info).thenApply(file -> new DelegateLockFile(file) {
+        {
+          put(file, m);
+        }
+
+        @Override
+        public CompletionStage<Void> asyncClose() {
+          return super.asyncClose().thenAccept(voided -> remove(file));
+        }
+      });
+    }
+
+    @Override
+    public CompletionStage<? extends AsynchronousCloseableIterator<FileInfo>> getOwnedFiles(
+        final DBHandle handle) {
+      final MetaData m = new MetaData(new Throwable());
+      return super.getOwnedFiles(handle).<AsynchronousCloseableIterator<FileInfo>>thenApply(
+          iter -> new AsynchronousCloseableIterator<FileInfo>() {
+            {
+              put(iter, m);
+            }
+
+            @Override
+            public CompletionStage<Optional<FileInfo>> next() {
+              return iter.next();
+            }
+
+            @Override
+            public CompletionStage<Void> asyncClose() {
+              return iter.asyncClose().thenAccept(voided -> remove(iter));
+            }
+          });
+    }
+
+    @Override
+    public void close() throws IOException {
+      if (!openMap.isEmpty()) {
+        final Entry<AsynchronousCloseable, MetaData> openEntry =
+            openMap.entrySet().iterator().next();
+        throw new AssertionError("file not closed:" + openEntry.getKey(),
+            openEntry.getValue().stackHolder);
+      }
+    }
+
   }
 }

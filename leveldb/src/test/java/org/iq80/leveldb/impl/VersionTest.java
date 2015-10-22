@@ -202,7 +202,9 @@ public abstract class VersionTest extends EnvDependentTest {
 
     final FileMetaData[][] levelFiles = levels.stream()
         .map(list -> list.stream().toArray(FileMetaData[]::new)).toArray(FileMetaData[][]::new);
-    try (TableCache tableCache = tables.getKey()) {
+
+    final TableCache tableCache = tables.getKey();
+    try (AutoCloseable c = TestUtils.autoCloseable(tableCache)) {
       final Version v = new Version(levelFiles, 0, 0, tableCache, TestUtils.keyComparator);
       v.assertNoOverlappingFiles();
 

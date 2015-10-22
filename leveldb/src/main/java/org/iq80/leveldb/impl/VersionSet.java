@@ -14,6 +14,7 @@
  */
 package org.iq80.leveldb.impl;
 
+import static org.iq80.leveldb.impl.DbConstants.L0_COMPACTION_TRIGGER;
 import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
 
 import java.nio.ByteBuffer;
@@ -25,7 +26,6 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.SortedSet;
@@ -60,14 +60,6 @@ import com.google.common.collect.Maps;
 public class VersionSet implements AsynchronousCloseable {
   private static final Logger LOGGER = LoggerFactory.getLogger(VersionSet.class);
 
-  private static final int L0_COMPACTION_TRIGGER = 4;
-
-  public static final int TARGET_FILE_SIZE = 2 * 1048576;
-
-  // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
-  // stop building a single file in a level.level+1 compaction.
-  public static final long MAX_GRAND_PARENT_OVERLAP_BYTES = 10 * TARGET_FILE_SIZE;
-
   private final AtomicLong nextFileNumber;
   private final AtomicLong lastSequence;
   private final long manifestFileNumber;
@@ -75,8 +67,8 @@ public class VersionSet implements AsynchronousCloseable {
   private long prevLogNumber;
   private final AtomicReference<Version> current = new AtomicReference<>(null);
 
-  private static final Object PRESENT = Boolean.TRUE;
-  private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
+  private final Set<Version> activeVersions =
+      Collections.newSetFromMap(new MapMaker().weakKeys().makeMap());
   private final DBHandle dbHandle;
   private final TableCache tableCache;
   private final InternalKeyComparator internalKeyComparator;
@@ -227,21 +219,12 @@ public class VersionSet implements AsynchronousCloseable {
     return Closeables.asyncClose(descriptorLog);
   }
 
-  // TODO check synchronization
   private void appendVersion(final Version previous, final Version update) {
-    final Object oldMapping = activeVersions.put(update, PRESENT);
+    final Object oldMapping = activeVersions.add(update);
     assert oldMapping == null : "appended already existing version";
     if (!current.compareAndSet(previous, update)) {
       throw new IllegalStateException("unexpected interleaved version update");
     }
-  }
-
-  public InternalKeyComparator getInternalKeyComparator() {
-    return internalKeyComparator;
-  }
-
-  public TableCache getTableCache() {
-    return tableCache;
   }
 
   public Version getCurrent() {
@@ -264,43 +247,10 @@ public class VersionSet implements AsynchronousCloseable {
     return prevLogNumber;
   }
 
-  public CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> makeInputIterator(
-      final Compaction c) {
-    // Level-0 files have to be merged together. For other levels,
-    // we will make a concatenating iterator per level.
-    // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-    CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0Iter = null;
-    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> list =
-        ImmutableList.builder();
-    for (int which = 0; which < 2; which++) {
-      final List<FileMetaData> input = c.getInputs()[which];
-      if (!input.isEmpty()) {
-        if (c.getLevel() + which == 0) {
-          level0Iter = Version.newLevel0Iterator(input.stream(), tableCache, internalKeyComparator);
-        } else {
-          // Create concatenating iterator for the files from this level
-          list.add(new Version.LevelIterator(tableCache,
-              input.toArray(new FileMetaData[input.size()]), internalKeyComparator));
-        }
-      }
-    }
-    return level0Iter != null
-        ? level0Iter.thenApply(level0 -> MergingIterator
-            .newMergingIterator(list.add(level0).build(), internalKeyComparator))
-        : CompletableFuture.completedFuture(
-            MergingIterator.newMergingIterator(list.build(), internalKeyComparator));
-  }
-
   public CompletionStage<LookupResult> get(final LookupKey key) {
-    return getCurrent().get(key);
-  }
-
-  public int numberOfFilesInLevel(final int level) {
-    return getCurrent().numberOfFilesInLevel(level);
-  }
-
-  public long numberOfBytesInLevel(final int level) {
-    return getCurrent().numberOfFilesInLevel(level);
+    final Version v = getCurrent();
+    // TODO check version holding
+    return v.get(key);
   }
 
   public long getLastSequence() {
@@ -386,8 +336,36 @@ public class VersionSet implements AsynchronousCloseable {
     return log.addRecord(record.get(), true).whenComplete((success, exception) -> record.close());
   }
 
+  /**
+   * Make the CURRENT file point to the descriptor file with the specified number.
+   */
+  public static CompletionStage<Void> setCurrentFile(final Env env, final DBHandle dbHandle,
+      final long descriptorNumber) {
+    final FileInfo temp = FileInfo.temp(dbHandle, descriptorNumber);
+    return env
+        .openTemporaryWriteFile(temp,
+            FileInfo
+                .current(dbHandle))
+        .thenCompose(
+            file -> CompletableFutures.composeUnconditionally(CompletableFutures.composeOnException(
+                file.write(ByteBuffer.wrap((descriptorStringName(descriptorNumber) + "\n")
+                    .getBytes(StandardCharsets.UTF_8))).thenCompose(ignored -> file.sync()),
+            writeOrSyncFailure -> env.deleteFile(temp)), voided -> file.asyncClose()));
+  }
+
+  private static final String MANIFEST_PREFIX = "MANIFEST-";
+
+  public static String descriptorStringName(final long fileNumber) {
+    Preconditions.checkArgument(fileNumber >= 0, "number is negative");
+    return String.format(MANIFEST_PREFIX + "%06d", fileNumber);
+  }
+
+  public static long descriptorFileNumber(final String stringName) {
+    return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
+  }
+
   public Stream<FileMetaData> getLiveFiles() {
-    return activeVersions.keySet().stream().map(Version::getFiles).flatMap(Arrays::stream)
+    return activeVersions.stream().map(Version::getFiles).flatMap(Arrays::stream)
         .flatMap(Arrays::stream);
   }
 
@@ -403,7 +381,7 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   public static long maxFileSizeForLevel(@SuppressWarnings("unused") final int level) {
-    return TARGET_FILE_SIZE; // We could vary per level to reduce number of files?
+    return DbConstants.TARGET_FILE_SIZE; // We could vary per level to reduce number of files?
   }
 
   public boolean needsCompaction() {
@@ -557,6 +535,33 @@ public class VersionSet implements AsynchronousCloseable {
     return Maps.immutableEntry(smallest, largest);
   }
 
+  public CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> makeInputIterator(
+      final Compaction c) {
+    // Level-0 files have to be merged together. For other levels,
+    // we will make a concatenating iterator per level.
+    // TODO(opt): use concatenating iterator for level-0 if there is no overlap
+    CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0Iter = null;
+    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> list =
+        ImmutableList.builder();
+    for (int which = 0; which < 2; which++) {
+      final List<FileMetaData> input = c.getInputs()[which];
+      if (!input.isEmpty()) {
+        if (c.getLevel() + which == 0) {
+          level0Iter = Version.newLevel0Iterator(input.stream(), tableCache, internalKeyComparator);
+        } else {
+          // Create concatenating iterator for the files from this level
+          list.add(new Version.LevelIterator(tableCache,
+              input.toArray(new FileMetaData[input.size()]), internalKeyComparator));
+        }
+      }
+    }
+    return level0Iter != null
+        ? level0Iter.thenApply(level0 -> MergingIterator
+            .newMergingIterator(list.add(level0).build(), internalKeyComparator))
+        : CompletableFuture.completedFuture(
+            MergingIterator.newMergingIterator(list.build(), internalKeyComparator));
+  }
+
   public long getMaxNextLevelOverlappingBytes() {
     final Version v = current.get();
     long result = 0;
@@ -572,34 +577,6 @@ public class VersionSet implements AsynchronousCloseable {
       }
     }
     return result;
-  }
-
-  /**
-   * Make the CURRENT file point to the descriptor file with the specified number.
-   */
-  public static CompletionStage<Void> setCurrentFile(final Env env, final DBHandle dbHandle,
-      final long descriptorNumber) {
-    final FileInfo temp = FileInfo.temp(dbHandle, descriptorNumber);
-    return env
-        .openTemporaryWriteFile(temp,
-            FileInfo
-                .current(dbHandle))
-        .thenCompose(
-            file -> CompletableFutures.composeUnconditionally(CompletableFutures.composeOnException(
-                file.write(ByteBuffer.wrap((descriptorStringName(descriptorNumber) + "\n")
-                    .getBytes(StandardCharsets.UTF_8))).thenCompose(ignored -> file.sync()),
-            writeOrSyncFailure -> env.deleteFile(temp)), voided -> file.asyncClose()));
-  }
-
-  private static final String MANIFEST_PREFIX = "MANIFEST-";
-
-  public static String descriptorStringName(final long fileNumber) {
-    Preconditions.checkArgument(fileNumber >= 0, "number is negative");
-    return String.format(MANIFEST_PREFIX + "%06d", fileNumber);
-  }
-
-  public static long descriptorFileNumber(final String stringName) {
-    return Long.parseLong(stringName.substring(MANIFEST_PREFIX.length()));
   }
 
   /**

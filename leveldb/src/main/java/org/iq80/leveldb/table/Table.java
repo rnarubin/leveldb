@@ -67,8 +67,10 @@ public final class Table extends ReferenceCounted<Table> {
       final Comparator<InternalKey> comparator, final boolean verifyChecksums,
       final Compression compression) {
     final long size = file.size();
-    Preconditions.checkArgument(size >= Footer.ENCODED_LENGTH,
-        "File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH);
+    if (size < Footer.ENCODED_LENGTH) {
+      return CompletableFutures.exceptionalFuture(new IOException(
+          String.format("File is corrupt: size must be at least %s bytes", Footer.ENCODED_LENGTH)));
+    }
 
     return file.read(size - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH).thenCompose(footerBuf -> {
       final Footer footer = Footer.readFooter(footerBuf);

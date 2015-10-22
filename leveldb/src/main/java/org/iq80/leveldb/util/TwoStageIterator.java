@@ -98,6 +98,7 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
       }
 
       final CompletionStage<Void> close = current.asyncClose();
+      current = null;
       if (currentOrigin == Direction.opposite(direction)) {
         if (!direction.hasMore(index)) {
           return close.thenApply(voided -> Optional.empty());
@@ -110,6 +111,7 @@ public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<Int
 
   private CompletionStage<Optional<Entry<InternalKey, ByteBuffer>>> advanceIndex(
       final Direction direction) {
+    assert current == null;
     if (direction.hasMore(index)) {
       return getData(direction.advance(index).getValue()).thenCompose(newCurrent -> {
         current = newCurrent;

@@ -1,7 +1,7 @@
 package org.iq80.leveldb.table;
 
 
-import static org.iq80.leveldb.impl.VersionSet.TARGET_FILE_SIZE;
+import static org.iq80.leveldb.impl.DbConstants.TARGET_FILE_SIZE;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -24,11 +24,6 @@ import org.slf4j.LoggerFactory;
 
 
 public class TableBuilder implements Closeable {
-  /**
-   * TABLE_MAGIC_NUMBER was picked by running echo http://code.google.com/p/leveldb/ | sha1sum and
-   * taking the leading 64 bits.
-   */
-  public static final long TABLE_MAGIC_NUMBER = 0xdb4775248b80fb57L;
 
   private static final Logger LOGGER = LoggerFactory.getLogger(TableBuilder.class);
 

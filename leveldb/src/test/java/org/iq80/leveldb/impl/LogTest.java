@@ -43,17 +43,21 @@ import com.google.common.util.concurrent.AtomicLongMap;
 public abstract class LogTest extends EnvDependentTest {
 
   private LogWriter writer;
+  private boolean mustClose = true;
   private FileInfo fileInfo;
 
   @BeforeMethod
   public void setUp() throws InterruptedException, ExecutionException {
     fileInfo = FileInfo.log(getHandle(), 42);
     writer = Logs.createLogWriter(fileInfo, 42, getEnv()).toCompletableFuture().get();
+    mustClose = true;
   }
 
   @AfterMethod
   public void tearDown() throws InterruptedException, ExecutionException {
-    writer.asyncClose().toCompletableFuture().get();
+    if (mustClose) {
+      writer.asyncClose().toCompletableFuture().get();
+    }
     getEnv().fileExists(fileInfo).thenCompose(
         exists -> exists ? getEnv().deleteFile(fileInfo) : CompletableFuture.completedFuture(null))
         .toCompletableFuture().get();
@@ -146,6 +150,7 @@ public abstract class LogTest extends EnvDependentTest {
 
       if (closeWriter) {
         writer.asyncClose().toCompletableFuture().get();
+        mustClose = false;
       }
     } catch (InterruptedException | ExecutionException e) {
       throw new AssertionError(e);
@@ -176,6 +181,7 @@ public abstract class LogTest extends EnvDependentTest {
 
     writer.addRecord(record, true).thenCompose(voided -> writer.asyncClose()).toCompletableFuture()
         .get();
+    mustClose = false;
     record.rewind();
 
     LogReader.newLogReader(getEnv(), fileInfo, LogMonitors.throwExceptionMonitor(), true, 0)

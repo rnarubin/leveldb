@@ -15,18 +15,15 @@
 
 package org.iq80.leveldb.table;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Map.Entry;
 import java.util.Queue;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import org.iq80.leveldb.Env.SequentialWriteFile;
 import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.InternalKeyComparator;
 import org.iq80.leveldb.impl.TransientInternalKey;
@@ -38,18 +35,19 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.Maps;
+import com.google.common.collect.Ordering;
 
 public abstract class TableBuilderTest extends EnvDependentTest {
 
   @Test
-  public void testBuild() throws InterruptedException, ExecutionException, IOException {
+  public void testBuild() throws Exception {
     final InternalKeyComparator comparator = new InternalKeyComparator(new BytewiseComparator());
     final Queue<Entry<InternalKey, ByteBuffer>> entries = new ConcurrentLinkedQueue<>();
     for (int i = 0; i < 256; i++) {
       final ByteBuffer data = ByteBuffer.allocate(100).put(0, (byte) i);
       entries.add(Maps.immutableEntry(new TransientInternalKey(data, i, ValueType.VALUE), data));
     }
-    Assert.assertTrue(comparator
+    Assert.assertTrue(Ordering.from(comparator)
         .isOrdered(entries.stream().map(entry -> entry.getKey()).collect(Collectors.toList())));
 
     final SequentialWriteFile file = getEnv()
@@ -57,8 +55,10 @@ public abstract class TableBuilderTest extends EnvDependentTest {
 
     final int blockRestartInterval = 16;
     final int blockSize = 4096;
-    try (final TableBuilder builder = new TableBuilder(Options.make().compression(null)
-        .blockRestartInterval(blockRestartInterval).blockSize(blockSize), file, comparator)) {
+    try (
+        final TableBuilder builder =
+            new TableBuilder(blockRestartInterval, blockSize, null, file, comparator);
+        AutoCloseable c = TestUtils.autoCloseable(file)) {
 
       Assert.assertEquals(builder.getFileSizeEstimate(), SizeOf.SIZE_OF_INT);
 

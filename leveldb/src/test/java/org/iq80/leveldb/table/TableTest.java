@@ -16,6 +16,7 @@ package org.iq80.leveldb.table;
 
 import static java.util.Arrays.asList;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map.Entry;
@@ -56,7 +57,7 @@ public abstract class TableTest extends EnvDependentTest {
     clearFile();
   }
 
-  @Test(expectedExceptions = IllegalArgumentException.class)
+  @Test(expectedExceptions = IOException.class)
   public void testEmptyFile() throws Throwable {
     // create empty file if it doesn't exist
     getEnv().openSequentialWriteFile(fileInfo)
