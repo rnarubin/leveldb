@@ -15,7 +15,8 @@
 package org.iq80.leveldb.impl;
 
 import java.nio.ByteBuffer;
-import java.util.Map.Entry;
+import java.util.List;
+import java.util.OptionalLong;
 
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.GrowingBuffer;
@@ -53,10 +54,10 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      final Long logNumber = versionEdit.getLogNumber();
-      if (logNumber != null) {
+      final OptionalLong logNumber = versionEdit.getLogNumber();
+      if (logNumber.isPresent()) {
         VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
-        VariableLengthQuantity.writeVariableLengthLong(logNumber, buffer);
+        VariableLengthQuantity.writeVariableLengthLong(logNumber.getAsLong(), buffer);
       }
     }
   },
@@ -70,10 +71,10 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      final Long previousLogNumber = versionEdit.getPreviousLogNumber();
-      if (previousLogNumber != null) {
+      final OptionalLong previousLogNumber = versionEdit.getPreviousLogNumber();
+      if (previousLogNumber.isPresent()) {
         VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
-        VariableLengthQuantity.writeVariableLengthLong(previousLogNumber, buffer);
+        VariableLengthQuantity.writeVariableLengthLong(previousLogNumber.getAsLong(), buffer);
       }
     }
   },
@@ -86,10 +87,10 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      final Long nextFileNumber = versionEdit.getNextFileNumber();
-      if (nextFileNumber != null) {
+      final OptionalLong nextFileNumber = versionEdit.getNextFileNumber();
+      if (nextFileNumber.isPresent()) {
         VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
-        VariableLengthQuantity.writeVariableLengthLong(nextFileNumber, buffer);
+        VariableLengthQuantity.writeVariableLengthLong(nextFileNumber.getAsLong(), buffer);
       }
     }
   },
@@ -102,10 +103,10 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      final Long lastSequenceNumber = versionEdit.getLastSequenceNumber();
-      if (lastSequenceNumber != null) {
+      final OptionalLong lastSequenceNumber = versionEdit.getLastSequenceNumber();
+      if (lastSequenceNumber.isPresent()) {
         VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
-        VariableLengthQuantity.writeVariableLengthLong(lastSequenceNumber, buffer);
+        VariableLengthQuantity.writeVariableLengthLong(lastSequenceNumber.getAsLong(), buffer);
       }
     }
   },
@@ -125,14 +126,15 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      for (final Entry<Integer, InternalKey> entry : versionEdit.getCompactPointers().entrySet()) {
-        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+      final InternalKey[] compactPointers = versionEdit.getCompactPointers();
+      for (int level = 0; level < compactPointers.length; level++) {
+        if (compactPointers[level] != null) {
+          VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
 
-        // level
-        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+          VariableLengthQuantity.writeVariableLengthInt(level, buffer);
 
-        // internal key
-        buffer.writeLengthPrefixedKey(entry.getValue());
+          buffer.writeLengthPrefixedKey(compactPointers[level]);
+        }
       }
     }
   },
@@ -151,14 +153,15 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      for (final Entry<Integer, Long> entry : versionEdit.getDeletedFiles().entries()) {
-        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+      final List<Long>[] deletedFiles = versionEdit.getDeletedFiles();
+      for (int level = 0; level < deletedFiles.length; level++) {
+        for (final Long fileNumber : deletedFiles[level]) {
+          VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
 
-        // level
-        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+          VariableLengthQuantity.writeVariableLengthInt(level, buffer);
 
-        // file number
-        VariableLengthQuantity.writeVariableLengthLong(entry.getValue(), buffer);
+          VariableLengthQuantity.writeVariableLengthLong(fileNumber, buffer);
+        }
       }
     }
   },
@@ -183,24 +186,21 @@ public enum VersionEditTag {
 
     @Override
     public void writeValue(final GrowingBuffer buffer, final VersionEdit versionEdit) {
-      for (final Entry<Integer, FileMetaData> entry : versionEdit.getNewFiles().entries()) {
-        VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
+      final List<FileMetaData>[] newFiles = versionEdit.getNewFiles();
+      for (int level = 0; level < newFiles.length; level++) {
+        for (final FileMetaData file : newFiles[level]) {
+          VariableLengthQuantity.writeVariableLengthInt(getPersistentId(), buffer);
 
-        // level
-        VariableLengthQuantity.writeVariableLengthInt(entry.getKey(), buffer);
+          VariableLengthQuantity.writeVariableLengthInt(level, buffer);
 
-        // file number
-        final FileMetaData fileMetaData = entry.getValue();
-        VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getNumber(), buffer);
+          VariableLengthQuantity.writeVariableLengthLong(file.getNumber(), buffer);
 
-        // file size
-        VariableLengthQuantity.writeVariableLengthLong(fileMetaData.getFileSize(), buffer);
+          VariableLengthQuantity.writeVariableLengthLong(file.getFileSize(), buffer);
 
-        // smallest key
-        buffer.writeLengthPrefixedKey(fileMetaData.getSmallest());
+          buffer.writeLengthPrefixedKey(file.getSmallest());
 
-        // largest key
-        buffer.writeLengthPrefixedKey(fileMetaData.getLargest());
+          buffer.writeLengthPrefixedKey(file.getLargest());
+        }
       }
     }
   };

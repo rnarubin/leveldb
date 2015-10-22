@@ -220,8 +220,8 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   private void appendVersion(final Version previous, final Version update) {
-    final Object oldMapping = activeVersions.add(update);
-    assert oldMapping == null : "appended already existing version";
+    final boolean newEntry = activeVersions.add(update);
+    assert newEntry : "appended already existing version";
     if (!current.compareAndSet(previous, update)) {
       throw new IllegalStateException("unexpected interleaved version update");
     }
@@ -235,7 +235,11 @@ public class VersionSet implements AsynchronousCloseable {
     return manifestFileNumber;
   }
 
-  public long getNextFileNumber() {
+  // TODO check this
+  /**
+   * must be called from compaction chain
+   */
+  public long getAndIncrementNextFileNumber() {
     return nextFileNumber.getAndIncrement();
   }
 
@@ -248,9 +252,7 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   public CompletionStage<LookupResult> get(final LookupKey key) {
-    final Version v = getCurrent();
-    // TODO check version holding
-    return v.get(key);
+    return getCurrent().get(key);
   }
 
   public long getLastSequence() {
@@ -261,13 +263,7 @@ public class VersionSet implements AsynchronousCloseable {
     return lastSequence.getAndAdd(delta);
   }
 
-  public void setLastSequence(final long newLastSequence) {
-    Preconditions.checkArgument(newLastSequence >= lastSequence.get(),
-        "Expected newLastSequence to be greater than or equal to current lastSequence");
-    this.lastSequence.set(newLastSequence);
-  }
-
-  public void logAndApply(final VersionEdit edit) {
+  public CompletionStage<Void> logAndApply(final VersionEdit edit) {
     final long nextFileNum = nextFileNumber.get();
     final long lastSequenceNum = lastSequence.get();
     final Version base = getCurrent();
@@ -290,11 +286,12 @@ public class VersionSet implements AsynchronousCloseable {
     // Update compaction pointers
     VersionEdit.mergeCompactPointers(edit.getCompactPointers(), compactPointers);
 
-    final FileInfo manifestFile = FileInfo.manifest(dbHandle, manifestFileNumber);
+    // TODO cycle manifest when size exceeds threshold
     final CompletionStage<Void> manifestWrite;
     // Initialize new descriptor log file if necessary by creating
     // a temporary file that contains a snapshot of the current version.
     if (descriptorLog == null) {
+      final FileInfo manifestFile = FileInfo.manifest(dbHandle, manifestFileNumber);
       manifestWrite = Logs.createLogWriter(manifestFile, manifestFileNumber, env)
           .thenCompose(logWriter -> CompletableFutures
               .composeOnException(writeSnapshot(descriptorLog = logWriter, base), exception -> {
@@ -310,7 +307,7 @@ public class VersionSet implements AsynchronousCloseable {
         new VersionBuilder(internalKeyComparator, tableCache, base.getFiles()).apply(edit).build();
 
     // Install the new version
-    manifestWrite.thenAccept(vodied -> {
+    return manifestWrite.thenAccept(vodied -> {
       appendVersion(base, version);
       logNumber = edit.getLogNumber().orElseThrow(IllegalStateException::new);
       prevLogNumber = edit.getPreviousLogNumber().orElseThrow(IllegalStateException::new);
@@ -588,6 +585,7 @@ public class VersionSet implements AsynchronousCloseable {
     private final TableCache tableCache;
     private final FileMetaData[][] baseFiles;
     private final LevelState[] levels = new LevelState[NUM_LEVELS];
+    private static final FileMetaData[] EMPTY_LEVEL = new FileMetaData[0];
 
     private VersionBuilder(final InternalKeyComparator internalKeyComparator,
         final TableCache tableCache, final FileMetaData[][] baseFiles) {
@@ -658,7 +656,7 @@ public class VersionSet implements AsynchronousCloseable {
         // Merge the set of added files with the set of pre-existing files.
         // Drop any deleted files
 
-        final FileMetaData[] levelFiles = baseFiles[level];
+        final FileMetaData[] levelFiles = level < baseFiles.length ? baseFiles[level] : EMPTY_LEVEL;
         int lfile = 0;
         // files must be added in sorted order so assertion check in maybeAddFile works
         for (final FileMetaData addedFile : levels[level].addedFiles) {

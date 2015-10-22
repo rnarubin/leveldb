@@ -190,7 +190,7 @@ public final class Table extends ReferenceCounted<Table> {
         + verifyChecksums + "]";
   }
 
-  public static final class TableIterator extends
+  public static class TableIterator extends
       TwoStageIterator<BlockIterator<InternalKey>, SeekingAsynchronousIterator<InternalKey, ByteBuffer>, ByteBuffer> {
     private final Table table;
 

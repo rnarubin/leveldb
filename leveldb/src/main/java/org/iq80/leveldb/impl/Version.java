@@ -365,8 +365,8 @@ final class Version {
         .thenApply(longStream -> longStream.mapToLong(Long::longValue).sum() + prelimResult);
   }
 
-  static final class LevelIterator extends
-      TwoStageIterator<ReverseSeekingIterator<InternalKey, FileMetaData>, TableIterator, FileMetaData> {
+  static class LevelIterator
+      extends TwoStageIterator<LevelIterator.FileIterator, TableIterator, FileMetaData> {
     private final TableCache tableCache;
 
     public LevelIterator(final TableCache tableCache, final FileMetaData[] files,
@@ -377,7 +377,7 @@ final class Version {
 
     @Override
     protected CompletionStage<TableIterator> getData(final FileMetaData file) {
-      return tableCache.tableIterator(file);
+      return tableCache.tableIterator(file.getNumber());
     }
 
     private static final class FileIterator

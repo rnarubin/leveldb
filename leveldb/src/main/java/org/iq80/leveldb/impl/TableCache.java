@@ -15,6 +15,7 @@
 package org.iq80.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Set;
@@ -26,6 +27,7 @@ import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.SeekingAsynchronousIterator;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.Table.TableIterator;
 import org.iq80.leveldb.util.CompletableFutures;
@@ -87,7 +89,8 @@ public class TableCache implements AsynchronousCloseable {
         });
   }
 
-  public CompletionStage<TableIterator> tableIterator(final FileMetaData file) {
+  public CompletionStage<? extends SeekingAsynchronousIterator<InternalKey, ByteBuffer>> tableIterator(
+      final FileMetaData file) {
     return tableIterator(file.getNumber());
   }
 

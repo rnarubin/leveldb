@@ -19,7 +19,6 @@ import static org.iq80.leveldb.util.Iterators.Direction.FORWARD;
 import static org.iq80.leveldb.util.Iterators.Direction.REVERSE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_BYTE;
 import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
-import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
@@ -37,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -192,13 +192,13 @@ public final class TestUtils {
   public static <K, V> void assertEntryEquals(final Entry<K, V> actual,
       final Entry<K, V> expected) {
     if (actual.getKey() instanceof InternalKey) {
-      assertEquals(actual.getKey(), expected.getKey());
+      Assert.assertEquals(actual.getKey(), expected.getKey());
       assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
     } else if (actual.getKey() instanceof ByteBuffer) {
       assertByteBufferEquals((ByteBuffer) actual.getKey(), (ByteBuffer) expected.getKey());
       assertByteBufferEquals((ByteBuffer) actual.getValue(), (ByteBuffer) expected.getValue());
     } else {
-      assertEquals(actual, expected);
+      Assert.assertEquals(actual, expected);
     }
   }
 
@@ -485,6 +485,30 @@ public final class TestUtils {
 
   public static AutoCloseable autoCloseable(final AsynchronousCloseable c) {
     return () -> c.asyncClose().toCompletableFuture().get();
+  }
+
+  public static class EqualableFileMetaData {
+    private final FileMetaData file;
+
+    public EqualableFileMetaData(final FileMetaData fmd) {
+      this.file = Objects.requireNonNull(fmd);
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+      if (!(o instanceof EqualableFileMetaData)) {
+        return false;
+      }
+      final EqualableFileMetaData that = (EqualableFileMetaData) o;
+      return this.file.getNumber() == that.file.getNumber()
+          && Objects.equals(this.file.getSmallest(), that.file.getSmallest())
+          && Objects.equals(this.file.getLargest(), that.file.getLargest());
+    }
+  }
+
+  public static void assertFileEquals(final FileMetaData actual, final FileMetaData expected) {
+    Assert
+        .assertTrue(new EqualableFileMetaData(actual).equals(new EqualableFileMetaData(expected)));
   }
 
   public static class StrictEnv extends DelegateEnv implements Closeable {
