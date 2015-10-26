@@ -16,11 +16,10 @@ package org.iq80.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 import org.iq80.leveldb.AsynchronousCloseable;
 import org.iq80.leveldb.Compression;
@@ -43,8 +42,8 @@ public class TableCache implements AsynchronousCloseable {
    * release (i.e. IOException on dispose) they remain in the set to throw an exception on the
    * TableCache's close
    */
-  private final Set<CompletionStage<Void>> pendingRemovals =
-      Collections.newSetFromMap(new ConcurrentHashMap<>());
+  private final Set<CompletionStage<Void>> pendingRemovals = new ConcurrentSkipListSet<>();
+  // TODO look into ben-manes/caffeine
   private final LoadingCache<Long, CompletionStage<Table>> cache;
 
   public TableCache(final DBHandle dbHandle, final int tableCacheSize,
@@ -55,18 +54,20 @@ public class TableCache implements AsynchronousCloseable {
     this.cache = CacheBuilder.newBuilder().maximumSize(tableCacheSize)
         .<Long, CompletionStage<Table>>removalListener(notification -> {
           notification.getValue().whenComplete((table, openException) -> {
-            if (openException != null) {
+            if (openException == null) {
               // table was originally opened successfully
-              final CompletionStage<Void> release = table.release();
-              pendingRemovals.add(release);
-              release.whenComplete((voided, closeException) -> {
-                if (closeException != null) {
-                  backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
-                      closeException);
-                } else {
-                  pendingRemovals.remove(release);
-                }
-              });
+              final CompletionStage<Void> release = table.releaseNulled();
+              if (release != null) {
+                pendingRemovals.add(release);
+                release.whenComplete((voided, closeException) -> {
+                  if (closeException != null) {
+                    backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
+                        closeException);
+                  } else {
+                    pendingRemovals.remove(release);
+                  }
+                });
+              }
             }
           });
         }).build(new CacheLoader<Long, CompletionStage<Table>>() {

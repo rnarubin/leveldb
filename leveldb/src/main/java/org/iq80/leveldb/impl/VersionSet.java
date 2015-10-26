@@ -157,8 +157,8 @@ public class VersionSet implements AsynchronousCloseable {
           long prevLogNumber = 0L;
         }
         final LongHolder vals = new LongHolder();
-        return CompletableFutures.composeUnconditionally(
-            CompletableFutures.<ByteBuffer, Void>flatMapIterator(manifestReader, record -> {
+        return CompletableFutures
+            .composeUnconditionally(CompletableFutures.flatMapIterator(manifestReader, record -> {
           final VersionEdit edit = new VersionEdit(record);
 
           final String editComparator = edit.getComparatorName();
@@ -182,8 +182,8 @@ public class VersionSet implements AsynchronousCloseable {
         new VersionSet(dbHandle, tableCache, internalKeyComparator, env, vals.nextFileNumber + 1,
             vals.nextFileNumber, vals.lastSequence, vals.logNumber, vals.prevLogNumber,
             versionBuilder.build(), compactedPointers)),
-            optVersionSet -> manifestReader.asyncClose()
-                .thenApply(voided -> optVersionSet.orElse(null)));
+                optVersionSet -> manifestReader.asyncClose()
+                    .thenApply(voided -> optVersionSet.orElse(null)));
       });
     });
   }
@@ -193,7 +193,7 @@ public class VersionSet implements AsynchronousCloseable {
     final StringBuilder builder = new StringBuilder();
     return env.openSequentialReadFile(fileInfo)
         .thenCompose(reader -> CompletableFutures.composeUnconditionally(
-            buildString(reader, builder, ByteBuffer.allocate(4096)), voided -> reader.asyncClose()))
+            buildString(reader, builder, ByteBuffer.allocate(1024)), voided -> reader.asyncClose()))
         .thenApply(voided -> builder.toString());
   }
 
@@ -541,7 +541,7 @@ public class VersionSet implements AsynchronousCloseable {
     final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> list =
         ImmutableList.builder();
     for (int which = 0; which < 2; which++) {
-      final List<FileMetaData> input = c.getInputs()[which];
+      final List<FileMetaData> input = c.input(which);
       if (!input.isEmpty()) {
         if (c.getLevel() + which == 0) {
           level0Iter = Version.newLevel0Iterator(input.stream(), tableCache, internalKeyComparator);

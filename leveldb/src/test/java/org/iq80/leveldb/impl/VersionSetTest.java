@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -187,7 +186,7 @@ public abstract class VersionSetTest extends EnvDependentTest {
   }
 
   @Test
-  public void testWeakReferenceGet() throws InterruptedException, ExecutionException {
+  public void testWeakReferenceGet() throws Exception {
     final FileMetaData file1 = new FileMetaData(1, 0, TestUtils.createInternalKey("a", 0),
         TestUtils.createInternalKey("c", 0));
 
@@ -206,40 +205,42 @@ public abstract class VersionSetTest extends EnvDependentTest {
     final VersionSet vs =
         VersionSet.newVersionSet(getHandle(), delayedTableCache, TestUtils.keyComparator, getEnv())
             .toCompletableFuture().get();
-    {
-      final VersionEdit edit = new VersionEdit();
-      edit.addFile(1, file1);
-      vs.logAndApply(edit).toCompletableFuture().get();
+    try (AutoCloseable c = TestUtils.autoCloseable(vs)) {
+      {
+        final VersionEdit edit = new VersionEdit();
+        edit.addFile(1, file1);
+        vs.logAndApply(edit).toCompletableFuture().get();
+      }
+
+      TestUtils.assertFileEquals(vs.getLiveFiles().findFirst().orElseThrow(AssertionError::new),
+          file1);
+
+      // lookup will block until semaphore released
+      final CompletableFuture<Void> lookup = new CompletableFuture<>();
+      new Thread(
+          () -> vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0))
+              .whenComplete((ok, exception) -> {
+                if (exception != null) {
+                  lookup.completeExceptionally(exception);
+                } else {
+                  lookup.complete(null);
+                }
+              })).start();
+
+      {
+        final VersionEdit edit = new VersionEdit();
+        edit.deleteFile(1, file1.getNumber());
+        vs.logAndApply(edit).toCompletableFuture().get();
+      }
+
+      System.gc();
+      TestUtils.assertFileEquals(vs.getLiveFiles().findFirst().orElseThrow(AssertionError::new),
+          file1);
+      blocker.release();
+      lookup.get();
+      System.gc();
+      Assert.assertFalse(vs.getLiveFiles().findFirst().isPresent());
     }
-
-    TestUtils.assertFileEquals(vs.getLiveFiles().findFirst().orElseThrow(AssertionError::new),
-        file1);
-
-    // lookup will block until semaphore released
-    final CompletableFuture<Void> lookup = new CompletableFuture<>();
-    new Thread(() -> vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0))
-        .whenComplete((ok, exception) -> {
-          if (exception != null) {
-            lookup.completeExceptionally(exception);
-          } else {
-            lookup.complete(null);
-          }
-        })).start();
-
-    {
-      final VersionEdit edit = new VersionEdit();
-      edit.deleteFile(1, file1.getNumber());
-      vs.logAndApply(edit).toCompletableFuture().get();
-    }
-
-    System.gc();
-    TestUtils.assertFileEquals(vs.getLiveFiles().findFirst().orElseThrow(AssertionError::new),
-        file1);
-    blocker.release();
-    lookup.get();
-    System.gc();
-    Assert.assertFalse(vs.getLiveFiles().findFirst().isPresent());
-
   }
 
   public static class FileVersionSetTest extends VersionSetTest implements FileEnvTestProvider {

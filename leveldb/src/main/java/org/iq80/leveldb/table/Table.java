@@ -20,6 +20,7 @@ import java.nio.ByteOrder;
 import java.util.Comparator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.Env.RandomReadFile;
@@ -29,14 +30,14 @@ import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.util.ByteBufferCrc32C;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.CompletableFutures;
-import org.iq80.leveldb.util.ReferenceCounted;
+import org.iq80.leveldb.util.Iterators;
 import org.iq80.leveldb.util.Snappy;
 import org.iq80.leveldb.util.TwoStageIterator;
 
 import com.google.common.base.Preconditions;
 
-public final class Table extends ReferenceCounted<Table> {
-
+public final class Table {
+  private final AtomicInteger refCount = new AtomicInteger(1);
   private final RandomReadFile file;
   private final Comparator<InternalKey> comparator;
   private final BlockHandle metaindexBlockHandle;
@@ -174,14 +175,36 @@ public final class Table extends ReferenceCounted<Table> {
     return metaindexBlockHandle.getOffset();
   }
 
-  @Override
-  protected final Table getThis() {
+  public Table retain() {
+    int count;
+    do {
+      count = refCount.get();
+      if (count == 0) {
+        // raced with a final release,
+        // force the caller to reacquire based on context
+        return null;
+      }
+    } while (!refCount.compareAndSet(count, count + 1));
     return this;
   }
 
-  @Override
-  protected final CompletionStage<Void> dispose() {
-    return file.asyncClose();
+  /**
+   * @returns null if not disposing
+   */
+  public CompletionStage<Void> releaseNulled() {
+    final int count = refCount.decrementAndGet();
+    if (count == 0) {
+      return file.asyncClose();
+    } else if (count < 0) {
+      throw new IllegalStateException("release called more than retain");
+    } else {
+      return null;
+    }
+  }
+
+  public CompletionStage<Void> release() {
+    final CompletionStage<Void> release = releaseNulled();
+    return release == null ? CompletableFuture.completedFuture(null) : release;
   }
 
   @Override
@@ -202,8 +225,7 @@ public final class Table extends ReferenceCounted<Table> {
     @Override
     protected CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> getData(
         final ByteBuffer blockHandle) {
-      return table.openBlock(blockHandle)
-          .thenApply(block -> org.iq80.leveldb.util.Iterators.async(block.iterator()));
+      return table.openBlock(blockHandle).thenApply(block -> Iterators.async(block.iterator()));
     }
 
     @Override

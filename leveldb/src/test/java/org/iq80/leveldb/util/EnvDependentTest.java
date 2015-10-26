@@ -21,26 +21,25 @@ import java.util.concurrent.ExecutionException;
 
 import org.iq80.leveldb.Env;
 import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.table.TestUtils.StrictEnv;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 
 public abstract class EnvDependentTest implements EnvTestProvider {
-  // private StrictEnv env;
-  private Env env;
+  private StrictEnv env;
   private DBHandle handle;
 
   @BeforeMethod
   public void setupEnvAndDB() throws Exception {
     final Entry<? extends Env, ? extends DBHandle> envAndDB = createTempDB();
-    // this.env = new StrictEnv(envAndDB.getKey());
-    this.env = envAndDB.getKey();
+    this.env = new StrictEnv(envAndDB.getKey());
     this.handle = envAndDB.getValue();
   }
 
   @AfterMethod
   public void tearDownDB() throws InterruptedException, ExecutionException, IOException {
     getEnv().deleteDB(getHandle()).toCompletableFuture().get();
-    // env.close();
+    env.close();
   }
 
   protected Env getEnv() {
