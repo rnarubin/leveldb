@@ -90,6 +90,10 @@ final class Version {
     return compactionScore;
   }
 
+  public InternalKeyComparator getInternalKeyComparator() {
+    return internalKeyComparator;
+  }
+
   public static CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> newLevel0Iterator(
       final Stream<FileMetaData> files, final TableCache tableCache,
       final Comparator<InternalKey> internalKeyComparator) {
