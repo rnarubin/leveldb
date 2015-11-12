@@ -33,11 +33,6 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import com.cleversafe.leveldb.FileInfo;
-import com.cleversafe.leveldb.impl.LogConstants;
-import com.cleversafe.leveldb.impl.LogMonitors;
-import com.cleversafe.leveldb.impl.LogReader;
-import com.cleversafe.leveldb.impl.LogWriter;
-import com.cleversafe.leveldb.impl.Logs;
 import com.cleversafe.leveldb.util.ByteBuffers;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.EnvDependentTest;
@@ -54,7 +49,7 @@ public abstract class LogTest extends EnvDependentTest {
   @BeforeMethod
   public void setUp() throws InterruptedException, ExecutionException {
     fileInfo = FileInfo.log(getHandle(), 42);
-    writer = Logs.createLogWriter(fileInfo, 42, getEnv()).toCompletableFuture().get();
+    writer = Logs.createLogWriter(fileInfo, getEnv()).toCompletableFuture().get();
     mustClose = true;
   }
 
@@ -168,7 +163,7 @@ public abstract class LogTest extends EnvDependentTest {
     try {
       LogReader.newLogReader(getEnv(), fileInfo, LogMonitors.throwExceptionMonitor(), true, 0)
           .thenCompose(logReader -> CompletableFutures.<Stream<Long>, Void>composeUnconditionally(
-              CompletableFutures.flatMapIterator(logReader,
+              CompletableFutures.mapAndCollapse(logReader,
                   record -> recordCounts.decrementAndGet(record), getEnv().getExecutor()),
               ignored -> logReader.asyncClose()))
           .toCompletableFuture().get(30, TimeUnit.SECONDS);

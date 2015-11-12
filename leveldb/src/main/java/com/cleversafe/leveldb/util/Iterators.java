@@ -18,6 +18,7 @@ package com.cleversafe.leveldb.util;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map.Entry;
@@ -40,6 +41,10 @@ public final class Iterators {
 
   public static <K, V> SeekingAsynchronousIterator<K, V> emptySeekingAsyncIterator() {
     return new EmptySeekingAsyncIterator<K, V>();
+  }
+
+  public static <T> AsynchronousIterator<T> async(final Iterator<T> iter) {
+    return new AsyncWrappedIterator<>(iter);
   }
 
   public static <K, V> SeekingAsynchronousIterator<K, V> async(
@@ -289,12 +294,32 @@ public final class Iterators {
     }
   }
 
-  private static class AsyncWrappedSeekingIterator<K, V>
+  private static class AsyncWrappedIterator<T> implements AsynchronousIterator<T> {
+    private final Iterator<T> iter;
+
+    public AsyncWrappedIterator(final Iterator<T> iter) {
+      this.iter = iter;
+    }
+
+    @Override
+    public CompletionStage<Optional<T>> next() {
+      return CompletableFuture
+          .completedFuture(iter.hasNext() ? Optional.of(iter.next()) : Optional.empty());
+    }
+
+    @Override
+    public String toString() {
+      return "AsyncWrapped [" + iter + "]";
+    }
+  }
+
+  private static class AsyncWrappedSeekingIterator<K, V> extends AsyncWrappedIterator<Entry<K, V>>
       implements SeekingAsynchronousIterator<K, V> {
 
     private final ReverseSeekingIterator<K, V> iter;
 
     public AsyncWrappedSeekingIterator(final ReverseSeekingIterator<K, V> iter) {
+      super(iter);
       this.iter = iter;
     }
 
@@ -302,12 +327,6 @@ public final class Iterators {
     public CompletionStage<Optional<Entry<K, V>>> prev() {
       return CompletableFuture
           .completedFuture(iter.hasPrev() ? Optional.of(iter.prev()) : Optional.empty());
-    }
-
-    @Override
-    public CompletionStage<Optional<Entry<K, V>>> next() {
-      return CompletableFuture
-          .completedFuture(iter.hasNext() ? Optional.of(iter.next()) : Optional.empty());
     }
 
     @Override
@@ -331,11 +350,6 @@ public final class Iterators {
     @Override
     public CompletionStage<Void> asyncClose() {
       return CompletableFuture.completedFuture(null);
-    }
-
-    @Override
-    public String toString() {
-      return "AsyncWrapped [" + iter + "]";
     }
   }
 
@@ -377,6 +391,5 @@ public final class Iterators {
     public CompletionStage<Void> asyncClose() {
       return CompletableFuture.completedFuture(null);
     }
-
   }
 }

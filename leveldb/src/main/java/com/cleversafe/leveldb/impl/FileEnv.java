@@ -63,35 +63,33 @@ public class FileEnv extends PathEnv {
   }
 
   @Override
-  protected CompletionStage<? extends ConcurrentWriteFile> openConcurrentWriteFile(
-      final Path path) {
+  protected CompletionStage<ConcurrentWriteFile> openConcurrentWriteFile(final Path path) {
     return submit(() -> new ConcurrentWriteFileImpl(path));
   }
 
   @Override
-  protected CompletionStage<? extends SequentialWriteFile> openSequentialWriteFile(
-      final Path path) {
+  protected CompletionStage<SequentialWriteFile> openSequentialWriteFile(final Path path) {
     return submit(() -> new SequentialWriteFileImpl(path));
   }
 
   @Override
-  protected CompletionStage<? extends TemporaryWriteFile> openTemporaryWriteFile(final Path temp,
+  protected CompletionStage<TemporaryWriteFile> openTemporaryWriteFile(final Path temp,
       final Path target) {
     return submit(() -> new TemporaryWriteFileImpl(temp, target));
   }
 
   @Override
-  protected CompletionStage<? extends SequentialReadFile> openSequentialReadFile(final Path path) {
+  protected CompletionStage<SequentialReadFile> openSequentialReadFile(final Path path) {
     return submit(() -> new SequentialReadFileImpl(path));
   }
 
   @Override
-  protected CompletionStage<? extends RandomReadFile> openRandomReadFile(final Path path) {
+  protected CompletionStage<RandomReadFile> openRandomReadFile(final Path path) {
     return submit(() -> new RandomReadFileImpl(path));
   }
 
   @Override
-  protected CompletionStage<? extends LockFile> lockFile(final Path path) {
+  protected CompletionStage<LockFile> lockFile(final Path path) {
     return submit(() -> new LockFileImpl(path));
   }
 
@@ -117,12 +115,12 @@ public class FileEnv extends PathEnv {
 
   @Override
   protected CompletionStage<Void> deleteDB(final Path path, final Predicate<Path> fileNameFilter) {
-    // instead of blindly deleting the entire directory, delete all files owned by the DB; if the
-    // dir is empty after those deletions, delete the dir
+    // instead of blindly deleting the entire directory, delete all files owned by the DB.
+    // if the dir is empty after those deletions, delete the dir
     // TODO(maybe) deletion default on interface, recurse with Y combinator
     return submit(() -> new DirectoryIterator<Path>(path, fileNameFilter, Function.identity()))
         .thenCompose(iter -> CompletableFutures.composeUnconditionally(
-            CompletableFutures.flatMapIterator(iter, this::deleteFile, getExecutor()).thenCompose(
+            CompletableFutures.mapAndCollapse(iter, this::deleteFile, getExecutor()).thenCompose(
                 deletions -> CompletableFutures.allOf(deletions).thenApply(voided -> null)),
             voided -> iter.asyncClose()))
         .thenCompose(voided -> submit(() -> !Files.list(path).findAny().isPresent())).thenCompose(
@@ -169,8 +167,8 @@ public class FileEnv extends PathEnv {
         public boolean block() {
           try {
             future.complete(call.call());
-          } catch (final Exception e) {
-            future.completeExceptionally(e);
+          } catch (final Throwable t) {
+            future.completeExceptionally(t);
           }
           return isDone = true;
         }
@@ -416,7 +414,7 @@ public class FileEnv extends PathEnv {
     }
 
     @Override
-    public CompletionStage<? extends WriteRegion> requestRegion(final LongToIntFunction getSize) {
+    public CompletionStage<WriteRegion> requestRegion(final LongToIntFunction getSize) {
       long regionPosition;
       int length;
       do {

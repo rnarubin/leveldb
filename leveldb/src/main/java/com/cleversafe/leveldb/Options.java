@@ -49,6 +49,7 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
   private boolean createIfMissing = true;
   private boolean errorIfExists = false;
   private int writeBufferSize = 4 << 20;
+  private int writeBufferLimit = 2;
   private int maxOpenFiles = 1000;
   private int blockRestartInterval = 16;
   private int blockSize = 4 * 1024;
@@ -60,6 +61,8 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
   private Env env = new FileEnv();
   private Compression compression = Snappy.instance();
 
+  // TODO bound primitive inputs
+
   /**
    * Comparator used to define the order of keys in the table. Defaults to a comparator that uses
    * lexicographic byte-wise ordering
@@ -67,12 +70,12 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
    * NOTE: The client must ensure that the comparator supplied here has the same name and orders
    * keys *exactly* the same as the comparator provided to previous open calls on the same DB.
    */
-  public Options bufferComparator(final DBComparator comparator) {
+  public Options comparator(final DBComparator comparator) {
     this.comparator = Objects.requireNonNull(comparator, "comparator cannot be null");
     return this;
   }
 
-  public DBComparator bufferComparator() {
+  public DBComparator comparator() {
     return comparator;
   }
 
@@ -131,10 +134,11 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
    * Amount of data, in bytes, to build up in memory (backed by an unsorted log on disk) before
    * converting to a sorted on-disk file.
    * <p>
-   * Larger values increase performance, especially during bulk loads. Up to two write buffers may
-   * be held in memory at the same time, so you may wish to adjust this parameter to control memory
-   * usage. Also, a larger write buffer will result in a longer recovery time the next time the
-   * database is opened.
+   * Larger values increase performance, especially during bulk loads. The maximum number of write
+   * buffers held in memory at the same time is configurable with the {@link writeBufferLimit()}
+   * option, so you may wish to adjust these two parameters to control memory usage as well as IO
+   * granularity. Also, a larger write buffer will result in a longer recovery time the next time
+   * the database is opened.
    */
   public Options writeBufferSize(final int writeBufferSize) {
     this.writeBufferSize = writeBufferSize;
@@ -143,6 +147,28 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
 
   public int writeBufferSize() {
     return writeBufferSize;
+  }
+
+  /**
+   * The number of flush-pending write buffers that may be held in memory before subsequent writes
+   * experience hard delays (rather than soft delays as those controlled by {@link throttleLevel0()}
+   * )
+   * <p>
+   * Larger values may be useful for non-sustained bulk loads. Adjusting this parameter may be
+   * favorable over {@link writeBufferSize()} to limit the size of files submitted to level 0. It
+   * may also be favorable to configure this parameter if faster startup times are desired during
+   * periods of sustainable writes (ones in which writes do not outpace flushing).
+   * <p>
+   * This limit does not include the mutable memTable; the maximum number of memTables held in
+   * memory at a given time will be this limit plus one
+   */
+  public Options writeBufferLimit(final int writeBufferLimit) {
+    this.writeBufferLimit = writeBufferLimit;
+    return this;
+  }
+
+  public int writeBufferLimit() {
+    return writeBufferLimit;
   }
 
   /**

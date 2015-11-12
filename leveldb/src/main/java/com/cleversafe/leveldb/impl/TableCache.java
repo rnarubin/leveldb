@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.Compression;
 import com.cleversafe.leveldb.Env;
-import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.Env.DBHandle;
+import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.Table.TableIterator;
 import com.cleversafe.leveldb.util.CompletableFutures;
@@ -55,7 +55,7 @@ public class TableCache implements AsynchronousCloseable {
           notification.getValue().whenComplete((table, openException) -> {
             if (openException == null) {
               // table was originally opened successfully
-              final CompletionStage<Void> release = table.releaseNulled();
+              final CompletionStage<Void> release = table.releaseNullable();
               if (release != null) {
                 pendingRemovals.add(release);
                 release.whenComplete((voided, closeException) -> {
@@ -72,19 +72,8 @@ public class TableCache implements AsynchronousCloseable {
         }).build(new CacheLoader<Long, CompletionStage<Table>>() {
           @Override
           public CompletionStage<Table> load(final Long fileNumber) {
-            return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
-                .thenCompose(file -> {
-              final CompletionStage<Table> table =
-                  Table.newTable(file, internalKeyComparator, verifyChecksums, compression);
-              return CompletableFutures.composeUnconditionally(table, optTable -> {
-                if (optTable.isPresent()) {
-                  return table;
-                } else {
-                  // error in initializing table
-                  return file.asyncClose().thenApply(voided -> null);
-                }
-              });
-            });
+            return loadTable(env, dbHandle, fileNumber, internalKeyComparator, verifyChecksums,
+                compression);
           }
         });
   }
@@ -122,5 +111,14 @@ public class TableCache implements AsynchronousCloseable {
   public CompletionStage<Void> asyncClose() {
     cache.invalidateAll();
     return CompletableFutures.allOfVoid(pendingRemovals.stream());
+  }
+
+  public static CompletionStage<Table> loadTable(final Env env, final DBHandle dbHandle,
+      final long fileNumber, final Comparator<InternalKey> internalKeyComparator,
+      final boolean verifyChecksums, final Compression compression) {
+    return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
+        .thenCompose(file -> CompletableFutures.composeOnException(
+            Table.newTable(file, internalKeyComparator, verifyChecksums, compression),
+            throwable -> file.asyncClose()));
   }
 }

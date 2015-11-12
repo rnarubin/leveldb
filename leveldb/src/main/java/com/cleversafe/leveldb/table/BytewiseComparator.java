@@ -22,7 +22,7 @@ import com.cleversafe.leveldb.util.ByteBuffers;
 public class BytewiseComparator implements DBComparator {
   private BytewiseComparator() {}
 
-  public static final BytewiseComparator INSTANCE = new BytewiseComparator();
+  private static final BytewiseComparator INSTANCE = new BytewiseComparator();
 
   public static BytewiseComparator instance() {
     return INSTANCE;

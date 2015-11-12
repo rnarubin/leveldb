@@ -52,7 +52,7 @@ public final class LogMonitors {
     return EXCEPTION;
   }
 
-  public static LogMonitor logMonitor() {
+  public static LogMonitor loggingMonitor() {
     return LOGGING;
   }
 }

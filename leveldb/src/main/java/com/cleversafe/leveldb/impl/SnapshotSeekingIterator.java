@@ -42,7 +42,7 @@ public final class SnapshotSeekingIterator
 
   public SnapshotSeekingIterator(
       final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator,
-      final SnapshotImpl snapshot, final Comparator<ByteBuffer> userComparator,
+      final Snapshots snapshot, final Comparator<ByteBuffer> userComparator,
       final Executor asyncExec) {
     this.iterator = iterator;
     this.sequence = snapshot.getLastSequence();

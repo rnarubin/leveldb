@@ -25,9 +25,9 @@ import com.cleversafe.leveldb.util.ByteBuffers;
 public final class Logs {
   private Logs() {}
 
-  public static CompletionStage<LogWriter> createLogWriter(final FileInfo fileInfo,
-      final long fileNumber, final Env env) {
-    return env.openConcurrentWriteFile(fileInfo).thenApply(file -> new LogWriter(file, fileNumber));
+  public static CompletionStage<LogWriter> createLogWriter(final FileInfo fileInfo, final Env env) {
+    return env.openConcurrentWriteFile(fileInfo)
+        .thenApply(file -> new LogWriter(file, fileInfo.getFileNumber()));
   }
 
   public static int getChunkChecksum(final int chunkTypeId, final ByteBuffer data) {

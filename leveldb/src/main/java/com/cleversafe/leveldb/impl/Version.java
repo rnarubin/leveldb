@@ -191,7 +191,7 @@ final class Version {
             readStats.setSeekFile(file);
             readStats.setSeekFileLevel(level);
           }
-          return CompletableFutures.composeUnconditionally(tableIter.seek(key.getInternalKey())
+          return CompletableFutures.closeAfter(tableIter.seek(key.getInternalKey())
               .thenCompose(voided -> tableIter.next()).thenApply(optNext -> {
             if (optNext.isPresent()) {
               final InternalKey internalKey = optNext.get().getKey();
@@ -209,7 +209,7 @@ final class Version {
               return null;
             }
             // TODO(optimization) overlap async close with next lookup
-          }), optLookup -> tableIter.asyncClose().thenApply(voided -> optLookup.orElse(null)));
+          }), tableIter);
         });
 
     return lookup.thenCompose(lookupResult -> lookupResult != null ? lookup

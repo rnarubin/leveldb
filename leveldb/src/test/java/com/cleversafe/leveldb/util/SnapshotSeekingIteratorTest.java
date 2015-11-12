@@ -31,7 +31,7 @@ import org.testng.annotations.Test;
 import com.cleversafe.leveldb.DBComparator;
 import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.InternalKeyComparator;
-import com.cleversafe.leveldb.impl.SnapshotImpl;
+import com.cleversafe.leveldb.impl.Snapshots;
 import com.cleversafe.leveldb.impl.SnapshotSeekingIterator;
 import com.cleversafe.leveldb.impl.TransientInternalKey;
 import com.cleversafe.leveldb.impl.ValueType;
@@ -126,7 +126,7 @@ public class SnapshotSeekingIteratorTest {
 
     final SnapshotSeekingIterator iter = new SnapshotSeekingIterator(
         Iterators.async(Iterators.reverseSeekingIterator(allEntries, keyComparator)),
-        new SnapshotImpl(sequence, null), userComparator, Runnable::run);
+        new Snapshots(sequence, null), userComparator, Runnable::run);
 
     TestUtils.testBufferIterator(iter, expectedEntries, Runnable::run);
   }

@@ -46,6 +46,7 @@ public final class Table {
    * this field really should be final, but initializing it requires a full block read which creates
    * very confusing code without a Table initialized. So don't mutate this outside of newTable!
    */
+  // TODO read static then
   private Block<InternalKey> indexBlock;
 
   private Table(final RandomReadFile file, final Comparator<InternalKey> comparator,
@@ -190,7 +191,7 @@ public final class Table {
   /**
    * @returns null if not disposing
    */
-  public CompletionStage<Void> releaseNulled() {
+  public CompletionStage<Void> releaseNullable() {
     final int count = refCount.decrementAndGet();
     if (count == 0) {
       return file.asyncClose();
@@ -202,7 +203,7 @@ public final class Table {
   }
 
   public CompletionStage<Void> release() {
-    final CompletionStage<Void> release = releaseNulled();
+    final CompletionStage<Void> release = releaseNullable();
     return release == null ? CompletableFuture.completedFuture(null) : release;
   }
 

@@ -31,14 +31,14 @@ public abstract class EnvDependentTest implements EnvTestProvider {
   private DBHandle handle;
 
   @BeforeMethod
-  public void setupEnvAndDB() throws Exception {
+  public final void setupEnvAndDB() throws Exception {
     final Entry<? extends Env, ? extends DBHandle> envAndDB = createTempDB();
     this.env = new StrictEnv(envAndDB.getKey());
     this.handle = envAndDB.getValue();
   }
 
   @AfterMethod
-  public void tearDownDB() throws InterruptedException, ExecutionException, IOException {
+  public final void tearDownDB() throws InterruptedException, ExecutionException, IOException {
     getEnv().deleteDB(getHandle()).toCompletableFuture().get();
     env.close();
   }

@@ -155,7 +155,7 @@ public final class TestUtils {
       final SeekingAsynchronousIterator<K, V> iter, final Direction direction,
       final Iterable<? extends Entry<K, V>> entries, final Executor asyncExec) {
     final Iterator<? extends Entry<K, V>> expected = entries.iterator();
-    return CompletableFutures.flatMapIterator(iter, direction, entry -> {
+    return CompletableFutures.mapAndCollapse(iter, direction, entry -> {
       assertTrue(expected.hasNext(), "iterator contained more entries than expected");
       assertEntryEquals(entry, expected.next());
       return entry;

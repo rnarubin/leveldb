@@ -41,9 +41,9 @@ import org.slf4j.LoggerFactory;
 
 import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.Env;
-import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.Env.SequentialReadFile;
+import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.GrowingBuffer;
@@ -115,13 +115,12 @@ public class VersionSet implements AsynchronousCloseable {
         edit.setNextFileNumber(2L);
         final GrowingBuffer record = edit.encode(MemoryManagers.heap());
 
-        return Logs.createLogWriter(FileInfo.manifest(dbHandle, manifestNum), manifestNum, env)
+        return Logs.createLogWriter(FileInfo.manifest(dbHandle, manifestNum), env)
             .thenCompose(logWriter -> CompletableFutures.composeUnconditionally(
                 logWriter.addRecord(record.get(), true),
-                voided -> logWriter.asyncClose().<Void>handle((close, closeException) -> {
-          record.close();
-          return null;
-        }))).thenCompose(voided -> setCurrentFile(env, dbHandle, manifestNum))
+                voided -> logWriter.asyncClose()
+                    .whenComplete((close, closeException) -> record.close())))
+            .thenCompose(voided -> setCurrentFile(env, dbHandle, manifestNum))
             .thenApply(voided -> new VersionSet(dbHandle, tableCache, internalKeyComparator, env,
                 2L, 1L, 0L, 0L, 0L,
                 new Version(new FileMetaData[][] {{}}, 0, 0, tableCache, internalKeyComparator),
@@ -158,7 +157,7 @@ public class VersionSet implements AsynchronousCloseable {
         }
         final LongHolder vals = new LongHolder();
         return CompletableFutures
-            .composeUnconditionally(CompletableFutures.flatMapIterator(manifestReader, record -> {
+            .closeAfter(CompletableFutures.mapAndCollapse(manifestReader, record -> {
           final VersionEdit edit = new VersionEdit(record);
 
           final String editComparator = edit.getComparatorName();
@@ -177,27 +176,22 @@ public class VersionSet implements AsynchronousCloseable {
           vals.logNumber = edit.getLogNumber().orElse(vals.logNumber);
           vals.prevLogNumber = edit.getPreviousLogNumber().orElse(vals.prevLogNumber);
           return null;
-        } , Runnable::run).thenApply(ignored ->
+        } , env.getExecutor()).thenApply(ignored ->
         // TODO call corruption if missing vals
         new VersionSet(dbHandle, tableCache, internalKeyComparator, env, vals.nextFileNumber + 1,
             vals.nextFileNumber, vals.lastSequence, vals.logNumber, vals.prevLogNumber,
-            versionBuilder.build(), compactedPointers)),
-                optVersionSet -> manifestReader.asyncClose()
-                    .thenApply(voided -> optVersionSet.orElse(null)));
+            versionBuilder.build(), compactedPointers)), manifestReader);
       });
     });
   }
 
   private static CompletionStage<String> readStringFromFile(final Env env,
       final FileInfo fileInfo) {
-    final StringBuilder builder = new StringBuilder();
-    return env.openSequentialReadFile(fileInfo)
-        .thenCompose(reader -> CompletableFutures.composeUnconditionally(
-            buildString(reader, builder, ByteBuffer.allocate(1024)), voided -> reader.asyncClose()))
-        .thenApply(voided -> builder.toString());
+    return env.openSequentialReadFile(fileInfo).thenCompose(reader -> CompletableFutures
+        .closeAfter(buildString(reader, new StringBuilder(), ByteBuffer.allocate(1024)), reader));
   }
 
-  private static CompletionStage<Void> buildString(final SequentialReadFile reader,
+  private static CompletionStage<String> buildString(final SequentialReadFile reader,
       final StringBuilder builder, final ByteBuffer buffer) {
     return reader.read(buffer).thenCompose(bytesRead -> {
       if (bytesRead > 0) {
@@ -208,7 +202,7 @@ public class VersionSet implements AsynchronousCloseable {
         buffer.clear();
         return buildString(reader, builder, buffer);
       } else {
-        return CompletableFuture.completedFuture(null);
+        return CompletableFuture.completedFuture(builder.toString());
       }
     });
   }
@@ -292,8 +286,8 @@ public class VersionSet implements AsynchronousCloseable {
     // a temporary file that contains a snapshot of the current version.
     if (descriptorLog == null) {
       final FileInfo manifestFile = FileInfo.manifest(dbHandle, manifestFileNumber);
-      manifestWrite = Logs.createLogWriter(manifestFile, manifestFileNumber, env)
-          .thenCompose(logWriter -> CompletableFutures
+      manifestWrite =
+          Logs.createLogWriter(manifestFile, env).thenCompose(logWriter -> CompletableFutures
               .composeOnException(writeSnapshot(descriptorLog = logWriter, base), exception -> {
                 descriptorLog = null;
                 return logWriter.asyncClose().thenCompose(voided -> env.deleteFile(manifestFile));

@@ -14,32 +14,22 @@
  */
 package com.cleversafe.leveldb;
 
-import java.io.Closeable;
-import java.util.Map;
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.util.concurrent.CompletionStage;
 
-import org.iq80.leveldb.DBException;
-import org.iq80.leveldb.DBIterator;
-import org.iq80.leveldb.Range;
-import org.iq80.leveldb.ReadOptions;
-import org.iq80.leveldb.Snapshot;
-import org.iq80.leveldb.WriteBatch;
-import org.iq80.leveldb.WriteOptions;
+public interface DB extends AsynchronousCloseable {
+  CompletionStage<ByteBuffer> get(ByteBuffer key);
 
-public interface DB extends Iterable<Map.Entry<byte[], byte[]>>, Closeable {
-  byte[] get(byte[] key) throws DBException;
+  CompletionStage<ByteBuffer> get(ByteBuffer key, ReadOptions options);
 
-  byte[] get(byte[] key, ReadOptions options) throws DBException;
+  CompletionStage<DBIterator> iterator(ReadOptions options);
 
-  @Override
-  DBIterator iterator();
+  CompletionStage<?> put(ByteBuffer key, ByteBuffer value);
 
-  DBIterator iterator(ReadOptions options);
+  CompletionStage<?> delete(ByteBuffer key);
 
-  void put(byte[] key, byte[] value) throws DBException;
-
-  void delete(byte[] key) throws DBException;
-
-  void write(WriteBatch updates) throws DBException;
+  CompletionStage<?> write(WriteBatch updates);
 
   WriteBatch createWriteBatch();
 
@@ -47,36 +37,37 @@ public interface DB extends Iterable<Map.Entry<byte[], byte[]>>, Closeable {
    * @return null if options.isSnapshot()==false otherwise returns a snapshot of the DB after this
    *         operation.
    */
-  Snapshot put(byte[] key, byte[] value, WriteOptions options) throws DBException;
+  CompletionStage<Snapshot> put(ByteBuffer key, ByteBuffer value, WriteOptions options);
 
   /**
    * @return null if options.isSnapshot()==false otherwise returns a snapshot of the DB after this
    *         operation.
    */
-  Snapshot delete(byte[] key, WriteOptions options) throws DBException;
+  CompletionStage<Snapshot> delete(ByteBuffer key, WriteOptions options);
 
   /**
    * @return null if options.isSnapshot()==false otherwise returns a snapshot of the DB after this
    *         operation.
    */
-  Snapshot write(WriteBatch updates, WriteOptions options) throws DBException;
+  CompletionStage<Snapshot> write(WriteBatch updates, WriteOptions options);
 
   Snapshot getSnapshot();
 
-  long[] getApproximateSizes(Range... ranges);
+  CompletionStage<Long> getApproximateSize(ByteBuffer begin, ByteBuffer end);
 
+  // TODO get these
   String getProperty(String name);
 
   /**
-   * Suspends any background compaction threads. This methods returns once the background
-   * compactions are suspended.
+   * Suspends any background compaction work. The future completes when the compactions have
+   * suspended
    */
-  void suspendCompactions() throws InterruptedException;
+  CompletionStage<Void> suspendCompactions();
 
   /**
-   * Resumes the background compaction threads.
+   * Resumes background compaction work after a suspension.
    */
-  void resumeCompactions();
+  CompletionStage<Void> resumeCompactions();
 
   /**
    * Force a compaction of the specified key range.
@@ -84,5 +75,9 @@ public interface DB extends Iterable<Map.Entry<byte[], byte[]>>, Closeable {
    * @param begin if null then compaction start from the first key
    * @param end if null then compaction ends at the last key
    */
-  void compactRange(byte[] begin, byte[] end) throws DBException;
+  CompletionStage<Void> compactRange(ByteBuffer begin, ByteBuffer end);
+
+  public interface DBFactory {
+    CompletionStage<? extends DB> open(Path path, Options options);
+  }
 }

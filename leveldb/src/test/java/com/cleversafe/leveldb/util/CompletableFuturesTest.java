@@ -15,14 +15,17 @@
 
 package com.cleversafe.leveldb.util;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import com.cleversafe.leveldb.util.CompletableFutures;
 
 public class CompletableFuturesTest {
 
@@ -67,6 +70,21 @@ public class CompletableFuturesTest {
      * instanceof DummySuppressedException); }
      */
   }
+
+  @Test
+  public void testAsyncFilter() throws InterruptedException, ExecutionException {
+    final Predicate<String> filter = s -> s.startsWith("a");
+    final List<String> unfiltered =
+        Arrays.asList("abc", "bat", "alpaca", "dog", "cow", "aardvark", "apple");
+    final List<String> expected = unfiltered.stream().filter(filter).collect(Collectors.toList());
+    final List<String> actual =
+        CompletableFutures
+            .filterMapAndCollapse(Iterators.async(unfiltered.iterator()), filter,
+                Function.identity(), Runnable::run)
+            .toCompletableFuture().get().collect(Collectors.toList());
+    Assert.assertEquals(actual, expected);
+  }
+
 }
 
 

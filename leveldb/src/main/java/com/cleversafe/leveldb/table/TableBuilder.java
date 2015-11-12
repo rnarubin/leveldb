@@ -1,6 +1,5 @@
 package com.cleversafe.leveldb.table;
 
-
 import static com.cleversafe.leveldb.impl.DbConstants.TARGET_FILE_SIZE;
 
 import java.io.Closeable;
@@ -187,7 +186,7 @@ public class TableBuilder implements Closeable {
           // write footer
           return file.write(footerEncoding)
               .thenApply(writePosition -> writePosition + Footer.ENCODED_LENGTH);
-        });
+        }).thenCompose(fileLength -> file.sync().thenApply(synced -> fileLength));
   }
 
   public void abandon() {}

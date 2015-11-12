@@ -30,14 +30,9 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import com.cleversafe.leveldb.FileInfo;
-import com.cleversafe.leveldb.impl.FileMetaData;
-import com.cleversafe.leveldb.impl.InternalKey;
-import com.cleversafe.leveldb.impl.LookupKey;
-import com.cleversafe.leveldb.impl.TableCache;
-import com.cleversafe.leveldb.impl.VersionEdit;
-import com.cleversafe.leveldb.impl.VersionSet;
 import com.cleversafe.leveldb.table.TestUtils;
 import com.cleversafe.leveldb.table.TestUtils.EqualableFileMetaData;
+import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.EnvDependentTest;
 import com.cleversafe.leveldb.util.FileEnvTestProvider;
 import com.cleversafe.leveldb.util.Iterators;
@@ -223,15 +218,9 @@ public abstract class VersionSetTest extends EnvDependentTest {
 
       // lookup will block until semaphore released
       final CompletableFuture<Void> lookup = new CompletableFuture<>();
-      new Thread(
-          () -> vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0))
-              .whenComplete((ok, exception) -> {
-                if (exception != null) {
-                  lookup.completeExceptionally(exception);
-                } else {
-                  lookup.complete(null);
-                }
-              })).start();
+      new Thread(() -> CompletableFutures.chain(
+          vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0)), lookup,
+          (result, _lookup) -> _lookup.complete(null))).start();
 
       {
         final VersionEdit edit = new VersionEdit();
