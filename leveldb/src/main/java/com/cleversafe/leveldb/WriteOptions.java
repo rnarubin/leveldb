@@ -57,6 +57,9 @@ public class WriteOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #sync(boolean)
+   */
   public boolean sync() {
     return sync;
   }
@@ -69,6 +72,9 @@ public class WriteOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #snapshot(boolean)
+   */
   public boolean snapshot() {
     return snapshot;
   }
@@ -87,6 +93,9 @@ public class WriteOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #disableLog(boolean)
+   */
   public boolean disableLog() {
     return disableLog;
   }

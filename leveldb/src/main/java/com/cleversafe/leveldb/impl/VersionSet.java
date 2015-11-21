@@ -66,6 +66,8 @@ public class VersionSet implements AsynchronousCloseable {
   private long logNumber;
   private long prevLogNumber;
   private final AtomicReference<Version> current = new AtomicReference<>(null);
+  private final AtomicReference<CompletionStage<Void>> logAndApplyMutex =
+      new AtomicReference<>(CompletableFuture.completedFuture(null));
 
   private final Set<Version> activeVersions =
       Collections.newSetFromMap(new MapMaker().weakKeys().makeMap());
@@ -146,18 +148,17 @@ public class VersionSet implements AsynchronousCloseable {
           .newLogReader(env, FileInfo.manifest(dbHandle, descriptorFileNumber(currentName)),
               LogMonitors.throwExceptionMonitor(), true, 0)
           .thenCompose(manifestReader -> {
-        final InternalKey[] compactedPointers = new InternalKey[NUM_LEVELS];
-        final VersionBuilder versionBuilder =
-            new VersionBuilder(internalKeyComparator, tableCache, new FileMetaData[][] {{}});
-        class LongHolder {
+        class ValStruct {
           long nextFileNumber = 1L;
           long lastSequence = 0L;
           long logNumber = 0L;
           long prevLogNumber = 0L;
+          final VersionBuilder versionBuilder =
+              new VersionBuilder(internalKeyComparator, tableCache, new FileMetaData[][] {{}});
+          final InternalKey[] compactedPointers = new InternalKey[NUM_LEVELS];
         }
-        final LongHolder vals = new LongHolder();
-        return CompletableFutures
-            .closeAfter(CompletableFutures.mapAndCollapse(manifestReader, record -> {
+        return CompletableFutures.<ValStruct>closeAfter(
+            manifestReader.<ValStruct>reduce(new ValStruct(), (vals, record) -> {
           final VersionEdit edit = new VersionEdit(record);
 
           final String editComparator = edit.getComparatorName();
@@ -167,20 +168,21 @@ public class VersionSet implements AsynchronousCloseable {
               "Expected user comparator %s to match existing database comparator %s",
               userComparator, editComparator);
 
-          VersionEdit.mergeCompactPointers(edit.getCompactPointers(), compactedPointers);
+          VersionEdit.mergeCompactPointers(edit.getCompactPointers(), vals.compactedPointers);
 
-          versionBuilder.apply(edit);
+          vals.versionBuilder.apply(edit);
 
           vals.nextFileNumber = edit.getNextFileNumber().orElse(vals.nextFileNumber);
           vals.lastSequence = edit.getLastSequenceNumber().orElse(vals.lastSequence);
           vals.logNumber = edit.getLogNumber().orElse(vals.logNumber);
           vals.prevLogNumber = edit.getPreviousLogNumber().orElse(vals.prevLogNumber);
-          return null;
-        } , env.getExecutor()).thenApply(ignored ->
-        // TODO call corruption if missing vals
-        new VersionSet(dbHandle, tableCache, internalKeyComparator, env, vals.nextFileNumber + 1,
-            vals.nextFileNumber, vals.lastSequence, vals.logNumber, vals.prevLogNumber,
-            versionBuilder.build(), compactedPointers)), manifestReader);
+
+          return vals;
+        }), manifestReader)
+            // TODO call corruption if missing vals
+            .thenApply(vals -> new VersionSet(dbHandle, tableCache, internalKeyComparator, env,
+                vals.nextFileNumber + 1, vals.nextFileNumber, vals.lastSequence, vals.logNumber,
+                vals.prevLogNumber, vals.versionBuilder.build(), vals.compactedPointers));
       });
     });
   }
@@ -258,6 +260,26 @@ public class VersionSet implements AsynchronousCloseable {
   }
 
   public CompletionStage<Void> logAndApply(final VersionEdit edit) {
+    // TODO measure/observe contention, maybe coalesce edits
+    final CompletableFuture<Void> attempt = new CompletableFuture<>();
+    logAndApplyStep(edit, attempt);
+    return attempt;
+  }
+
+  private void logAndApplyStep(final VersionEdit edit, final CompletableFuture<Void> attempt) {
+    final CompletionStage<Void> last = logAndApplyMutex.get();
+    last.whenComplete((success, exception) -> {
+      if (logAndApplyMutex.compareAndSet(last, attempt)) {
+        // successful acquire
+        CompletableFutures.compose(logAndApplyInternal(edit), attempt);
+      } else {
+        // someone else acquired, recurse and re-read mutex
+        logAndApplyStep(edit, attempt);
+      }
+    });
+  }
+
+  private CompletionStage<Void> logAndApplyInternal(final VersionEdit edit) {
     final long nextFileNum = nextFileNumber.get();
     final long lastSequenceNum = lastSequence.get();
     final Version base = getCurrent();
@@ -435,8 +457,7 @@ public class VersionSet implements AsynchronousCloseable {
     return setupOtherInputs(v, level, levelInputs);
   }
 
-  private Compaction setupOtherInputs(final Version v, final int level,
-      List<FileMetaData> levelInputs) {
+  Compaction setupOtherInputs(final Version v, final int level, List<FileMetaData> levelInputs) {
     Entry<InternalKey, InternalKey> range = getRange(levelInputs);
     InternalKey smallest = range.getKey();
     InternalKey largest = range.getValue();

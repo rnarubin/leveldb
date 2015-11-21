@@ -217,10 +217,10 @@ public abstract class VersionSetTest extends EnvDependentTest {
           file1);
 
       // lookup will block until semaphore released
-      final CompletableFuture<Void> lookup = new CompletableFuture<>();
-      new Thread(() -> CompletableFutures.chain(
-          vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0)), lookup,
-          (result, _lookup) -> _lookup.complete(null))).start();
+      final CompletableFuture<LookupResult> lookup = new CompletableFuture<>();
+      new Thread(() -> CompletableFutures.compose(
+          vs.get(new LookupKey(ByteBuffer.wrap("b".getBytes(StandardCharsets.UTF_8)), 0)), lookup))
+              .start();
 
       {
         final VersionEdit edit = new VersionEdit();

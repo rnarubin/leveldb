@@ -33,9 +33,6 @@ import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.TransientInternalKey;
 import com.cleversafe.leveldb.impl.ValueType;
 import com.cleversafe.leveldb.table.TestUtils;
-import com.cleversafe.leveldb.util.Iterators;
-import com.cleversafe.leveldb.util.MergingIterator;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.collect.Maps;
 
 public class MergingIteratorTest {
@@ -84,7 +81,7 @@ public class MergingIteratorTest {
         });
     entries.sort((o1, o2) -> keyComparator.compare(o1.getKey(), o2.getKey()));
 
-    TestUtils.testInternalKeyIterator(iter, entries, Runnable::run);
+    TestUtils.testInternalKeyIterator(iter, entries);
   }
 }
 

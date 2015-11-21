@@ -29,10 +29,16 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     OptionsUtil.copyFields(Options.class, that, this);
   }
 
+  /**
+   * @return a new Options instance with the default parameter set
+   */
   public static Options make() {
     return copy(DEFAULT_OPTIONS);
   }
 
+  /**
+   * @return a new Options instance with identical parameters as the given argument
+   */
   public static Options copy(final Options other) {
     try {
       return (Options) Objects.requireNonNull(other, "copy target cannot be null").clone();
@@ -50,7 +56,7 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
   private boolean errorIfExists = false;
   private int writeBufferSize = 4 << 20;
   private int writeBufferLimit = 2;
-  private int maxOpenFiles = 1000;
+  private int fileCacheSize = 1000;
   private int blockRestartInterval = 16;
   private int blockSize = 4 * 1024;
   private boolean verifyChecksums = true;
@@ -75,6 +81,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #comparator(DBComparator)
+   */
   public DBComparator comparator() {
     return comparator;
   }
@@ -87,6 +96,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #createIfMissing(boolean)
+   */
   public boolean createIfMissing() {
     return createIfMissing;
   }
@@ -99,6 +111,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #errorIfExists(boolean)
+   */
   public boolean errorIfExists() {
     return errorIfExists;
   }
@@ -114,6 +129,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #paranoidChecks(boolean)
+   */
   public boolean paranoidChecks() {
     return paranoidChecks;
   }
@@ -126,6 +144,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #env(Env)
+   */
   public Env env() {
     return env;
   }
@@ -135,16 +156,19 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
    * converting to a sorted on-disk file.
    * <p>
    * Larger values increase performance, especially during bulk loads. The maximum number of write
-   * buffers held in memory at the same time is configurable with the {@link writeBufferLimit()}
-   * option, so you may wish to adjust these two parameters to control memory usage as well as IO
-   * granularity. Also, a larger write buffer will result in a longer recovery time the next time
-   * the database is opened.
+   * buffers held in memory at one time is configurable with the {@link writeBufferLimit()} option,
+   * so you may wish to adjust these two parameters to control memory usage as well as IO
+   * granularity. Additionally, a larger write buffer will result in a longer recovery time the next
+   * time the database is opened.
    */
   public Options writeBufferSize(final int writeBufferSize) {
     this.writeBufferSize = writeBufferSize;
     return this;
   }
 
+  /**
+   * @see #writeBufferSize(int)
+   */
   public int writeBufferSize() {
     return writeBufferSize;
   }
@@ -167,6 +191,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #writeBufferLimit(int)
+   */
   public int writeBufferLimit() {
     return writeBufferLimit;
   }
@@ -174,13 +201,16 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
   /**
    * Number of open files that are cached by the DB.
    */
-  public Options maxOpenFiles(final int maxOpenFiles) {
-    this.maxOpenFiles = maxOpenFiles;
+  public Options fileCacheSize(final int fileCacheSize) {
+    this.fileCacheSize = fileCacheSize;
     return this;
   }
 
-  public int maxOpenFiles() {
-    return maxOpenFiles;
+  /**
+   * @see #fileCacheSize(int)
+   */
+  public int fileCacheSize() {
+    return fileCacheSize;
   }
 
   public Options cacheSize(final long cacheSize) {
@@ -204,6 +234,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #blockSize(int)
+   */
   public int blockSize() {
     return blockSize;
   }
@@ -217,6 +250,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #blockRestartInterval(int)
+   */
   public int blockRestartInterval() {
     return blockRestartInterval;
   }
@@ -236,6 +272,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #compression(Compression)
+   */
   public Compression compression() {
     return compression;
   }
@@ -249,14 +288,17 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #verifyChecksums(boolean)
+   */
   public boolean verifyChecksums() {
     return verifyChecksums;
   }
 
   /**
-   * If true, puts and deletes submitted to the DB will be throttled, and eventually blocked, if the
-   * size of level 0 exceeds an internal threshold (i.e. writes are being submitted faster than
-   * compaction can consolidate level 0 files)
+   * If true, writes submitted to the DB will be throttled, and eventually blocked, if the size of
+   * level 0 exceeds an internal threshold (i.e. writes are being submitted faster than compaction
+   * can consolidate level 0 files)
    * <p>
    * Defaults to true; set to false if willing to degrade read and iteration performance in order to
    * improve high-throughput write performance
@@ -266,6 +308,9 @@ public class Options implements Cloneable // shallow field-for-field Object.clon
     return this;
   }
 
+  /**
+   * @see #throttleLevel0(boolean)
+   */
   public boolean throttleLevel0() {
     return throttleLevel0;
   }

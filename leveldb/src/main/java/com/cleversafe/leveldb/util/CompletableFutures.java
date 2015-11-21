@@ -19,14 +19,11 @@ import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import com.cleversafe.leveldb.AsynchronousCloseable;
-import com.cleversafe.leveldb.AsynchronousIterator;
-import com.cleversafe.leveldb.util.Iterators.Direction;
 
 public final class CompletableFutures {
   private CompletableFutures() {}
@@ -44,53 +41,6 @@ public final class CompletableFutures {
           return t;
         }), iter.next()).thenApply(ignored -> builder.build());
   }
-
-  public static <T, U> CompletionStage<Stream<U>> mapAndCollapse(final AsynchronousIterator<T> iter,
-      final Function<T, U> mapper, final Executor asyncExec) {
-    return filterMapAndCollapse(iter, always -> true, mapper, asyncExec);
-  }
-
-  public static <T, U> CompletionStage<Stream<U>> mapAndCollapse(
-      final ReverseAsynchronousIterator<T> iter, final Direction direction,
-      final Function<T, U> mapper, final Executor asyncExec) {
-    return filterMapAndCollapse(iter, direction, always -> true, mapper, asyncExec);
-  }
-
-  public static <T, U> CompletionStage<Stream<U>> filterMapAndCollapse(
-      final AsynchronousIterator<T> iter, final Predicate<T> filter, final Function<T, U> mapper,
-      final Executor asyncExec) {
-    return filterMapAndCollapse(new ReverseAsynchronousIterator<T>() {
-      @Override
-      public CompletionStage<Optional<T>> next() {
-        return iter.next();
-      }
-
-      @Override
-      public CompletionStage<Optional<T>> prev() {
-        throw new UnsupportedOperationException();
-      }
-
-    }, Direction.FORWARD, filter, mapper, asyncExec);
-  }
-
-  public static <T, U> CompletionStage<Stream<U>> filterMapAndCollapse(
-      final ReverseAsynchronousIterator<T> iter, final Direction direction,
-      final Predicate<T> filter, final Function<T, U> mapper, final Executor asyncExec) {
-    return filterMapCollapseStep(iter, direction, Stream.builder(), filter, mapper, asyncExec);
-  }
-
-  private static <T, U> CompletionStage<Stream<U>> filterMapCollapseStep(
-      final ReverseAsynchronousIterator<T> iter, final Direction direction,
-      final Stream.Builder<U> builder, final Predicate<T> filter, final Function<T, U> mapper,
-      final Executor asyncExec) {
-    // TODO safe recursion
-    return direction.asyncAdvance(iter).thenComposeAsync(
-        optNext -> optNext.map(next -> filterMapCollapseStep(iter, direction,
-            filter.test(next) ? builder.add(mapper.apply(next)) : builder, filter, mapper,
-            asyncExec)).orElseGet(() -> CompletableFuture.completedFuture(builder.build())),
-        asyncExec);
-  }
-
 
   /**
    * used to prevent unbounded stack growth in recursive async calls

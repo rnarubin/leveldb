@@ -50,7 +50,7 @@ public class OptionsTest {
     Assert.assertEquals(o.createIfMissing(), false);
     Assert.assertEquals(o.errorIfExists(), true);
     Assert.assertEquals(o.writeBufferSize(), 123);
-    Assert.assertEquals(o.maxOpenFiles(), 456);
+    Assert.assertEquals(o.fileCacheSize(), 456);
     Assert.assertEquals(r.verifyChecksums(), true);
     Assert.assertEquals(w.sync(), true);
 
@@ -72,7 +72,7 @@ public class OptionsTest {
     Assert.assertEquals(o.createIfMissing(), true);
     Assert.assertEquals(o.errorIfExists(), false);
     Assert.assertEquals(o.writeBufferSize(), 4 << 20);
-    Assert.assertEquals(o.maxOpenFiles(), 1000);
+    Assert.assertEquals(o.fileCacheSize(), 1000);
     Assert.assertEquals(r.verifyChecksums(), false);
     Assert.assertEquals(w.sync(), false);
   }

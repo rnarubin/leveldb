@@ -23,7 +23,10 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.cleversafe.leveldb.Compression;
+import com.cleversafe.leveldb.Env;
+import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.Env.RandomReadFile;
+import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.impl.EncodedInternalKey;
 import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.util.ByteBufferCrc32C;
@@ -41,6 +44,7 @@ public final class Table {
   private final Comparator<InternalKey> comparator;
   private final BlockHandle metaindexBlockHandle;
   private final Compression compression;
+  // TODO checksums should be per read, not in constructor
   private final boolean verifyChecksums;
   /**
    * this field really should be final, but initializing it requires a full block read which creates
@@ -62,6 +66,15 @@ public final class Table {
     this.comparator = comparator;
 
     this.metaindexBlockHandle = metaindexBlockHandle;
+  }
+
+  public static CompletionStage<Table> load(final Env env, final DBHandle dbHandle,
+      final long fileNumber, final Comparator<InternalKey> internalKeyComparator,
+      final boolean verifyChecksums, final Compression compression) {
+    return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
+        .thenCompose(file -> CompletableFutures.composeOnException(
+            Table.newTable(file, internalKeyComparator, verifyChecksums, compression),
+            throwable -> file.asyncClose()));
   }
 
   public static CompletionStage<Table> newTable(final RandomReadFile file,

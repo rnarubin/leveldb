@@ -41,8 +41,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
@@ -69,11 +67,7 @@ import com.cleversafe.leveldb.impl.SequenceNumber;
 import com.cleversafe.leveldb.impl.TableCache;
 import com.cleversafe.leveldb.impl.TransientInternalKey;
 import com.cleversafe.leveldb.impl.ValueType;
-import com.cleversafe.leveldb.table.BlockEntry;
-import com.cleversafe.leveldb.table.BytewiseComparator;
-import com.cleversafe.leveldb.table.TableBuilder;
 import com.cleversafe.leveldb.util.ByteBuffers;
-import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.Iterators;
 import com.cleversafe.leveldb.util.Iterators.Direction;
 import com.cleversafe.leveldb.util.MemoryManagers;
@@ -140,34 +134,34 @@ public final class TestUtils {
   }
 
   public static <K, V> CompletionStage<?> assertSequence(
-      final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries,
-      final Executor asyncExec) {
-    return assertSequence(iter, Direction.FORWARD, entries, asyncExec);
+      final SeekingAsynchronousIterator<K, V> iter, final Iterable<? extends Entry<K, V>> entries) {
+    return assertSequence(iter, Direction.FORWARD, entries);
   }
 
   public static <K, V> CompletionStage<?> assertReverseSequence(
       final SeekingAsynchronousIterator<K, V> iter,
-      final Iterable<? extends Entry<K, V>> reversedEntries, final Executor asyncExec) {
-    return assertSequence(iter, Direction.REVERSE, reversedEntries, asyncExec);
+      final Iterable<? extends Entry<K, V>> reversedEntries) {
+    return assertSequence(iter, Direction.REVERSE, reversedEntries);
   }
 
   public static <K, V> CompletionStage<?> assertSequence(
       final SeekingAsynchronousIterator<K, V> iter, final Direction direction,
-      final Iterable<? extends Entry<K, V>> entries, final Executor asyncExec) {
+      final Iterable<? extends Entry<K, V>> entries) {
     final Iterator<? extends Entry<K, V>> expected = entries.iterator();
-    return CompletableFutures.mapAndCollapse(iter, direction, entry -> {
-      assertTrue(expected.hasNext(), "iterator contained more entries than expected");
-      assertEntryEquals(entry, expected.next());
-      return entry;
-    } , asyncExec).thenApply(stream -> {
-      assertFalse(expected.hasNext(), "iterator did not contain all expected entries");
-      try {
-        assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());
-      } catch (final Exception e) {
-        throw new AssertionError(e);
-      }
-      return null;
-    });
+    return (direction == Direction.REVERSE ? iter.descending() : iter)
+        .reduce(null, (ignored, entry) -> {
+          assertTrue(expected.hasNext(), "iterator contained more entries than expected");
+          assertEntryEquals(entry, expected.next());
+          return null;
+        }).thenApply(ignored -> {
+          assertFalse(expected.hasNext(), "iterator did not contain all expected entries");
+          try {
+            assertFalse(direction.asyncAdvance(iter).toCompletableFuture().get().isPresent());
+          } catch (final Exception e) {
+            throw new AssertionError(e);
+          }
+          return null;
+        });
   }
 
   public static <K, V> void assertReverseSequence(
@@ -294,46 +288,43 @@ public final class TestUtils {
 
   public static void testBufferIterator(
       final SeekingAsynchronousIterator<ByteBuffer, ByteBuffer> iter,
-      final List<Entry<ByteBuffer, ByteBuffer>> entries, final Executor... asyncExec) {
+      final List<Entry<ByteBuffer, ByteBuffer>> entries) {
     testIterator(iter, entries, ByteBuffer.wrap(new byte[] {0}),
         ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
-        TestUtils::before, TestUtils::after,
-        asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
+        TestUtils::before, TestUtils::after);
   }
 
 
   public static void testInternalKeyIterator(
       final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter,
-      final List<Entry<InternalKey, ByteBuffer>> entries, final Executor... asyncExec) {
+      final List<Entry<InternalKey, ByteBuffer>> entries) {
     testIterator(iter, entries,
         new TransientInternalKey(ByteBuffer.wrap(new byte[] {0}), Long.MAX_VALUE, ValueType.VALUE),
         new TransientInternalKey(
             ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}), 0,
             ValueType.VALUE),
-        TestUtils::before, TestUtils::after,
-        asyncExec.length > 0 ? asyncExec[0] : ForkJoinPool.commonPool());
+        TestUtils::before, TestUtils::after);
   }
 
   private static <K, V> void testIterator(final SeekingAsynchronousIterator<K, V> iter,
       final List<Entry<K, V>> entries, final K first, final K end, final UnaryOperator<K> before,
-      final UnaryOperator<K> after, final Executor asyncExec) {
+      final UnaryOperator<K> after) {
     final List<Entry<K, V>> reverseEntries = new ArrayList<>(entries);
     Collections.reverse(reverseEntries);
 
     try {
       iter.seekToFirst()
-          .thenCompose(
-              voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
-          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList()))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries))
           .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
-          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList()))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries))
           .thenCompose(voided -> iter.seekToFirst())
-          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries))
           .thenCompose(voided -> iter.seekToEnd())
-          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries))
           .toCompletableFuture().get();
 
       {
@@ -345,22 +336,21 @@ public final class TestUtils {
               reverseEntries.subList(entries.size() - i, entries.size());
 
           iter.seek(entry.getKey())
-              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries))
               .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
-              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertSequence(iter, nextEntries))
               .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
               .thenCompose(voided -> TestUtils.assertSequence(iter,
-                  nextEntries.subList(1, nextEntries.size()), asyncExec))
+                  nextEntries.subList(1, nextEntries.size())))
               .toCompletableFuture().get();
 
           iter.seek(entry.getKey())
-              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries))
               .thenCompose(voided -> iter.seek(before.apply(entry.getKey())))
-              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries, asyncExec))
+              .thenCompose(voided -> TestUtils.assertReverseSequence(iter, prevEntries))
               .thenCompose(voided -> iter.seek(after.apply(entry.getKey())))
               .thenCompose(voided -> TestUtils.assertReverseSequence(iter,
-                  Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries),
-                  asyncExec))
+                  Iterables.concat(Collections.singleton(nextEntries.get(0)), prevEntries)))
               .toCompletableFuture().get();
 
           i++;
@@ -384,18 +374,16 @@ public final class TestUtils {
       }
 
       iter.seek(first)
-          .thenCompose(
-              voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, Collections.emptyList()))
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries))
           .thenCompose(voided -> iter.seek(first))
-          .thenCompose(voided -> TestUtils.assertSequence(iter, entries, asyncExec))
-          .toCompletableFuture().get();
+          .thenCompose(voided -> TestUtils.assertSequence(iter, entries)).toCompletableFuture()
+          .get();
 
-      iter.seek(end)
-          .thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList(), asyncExec))
-          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
+      iter.seek(end).thenCompose(voided -> TestUtils.assertSequence(iter, Collections.emptyList()))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries))
           .thenCompose(voided -> iter.seek(end))
-          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries, asyncExec))
+          .thenCompose(voided -> TestUtils.assertReverseSequence(iter, reverseEntries))
           .toCompletableFuture().get();
 
       iter.asyncClose().toCompletableFuture().get();

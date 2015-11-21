@@ -19,28 +19,28 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
-public class DeletionQueue<T> {
+public class DeletionQueue<T> implements Iterable<T> {
   private final Deque<T> deque = new ConcurrentLinkedDeque<>();
 
-  public DeletionHandle insertFirst(final T t) {
+  public DeletionHandle<T> insertFirst(final T t) {
     deque.addFirst(t);
     return getHandle(deque.iterator(), t);
   }
 
-  public DeletionHandle insert(final T t) {
+  public DeletionHandle<T> insert(final T t) {
     // TODO(maybe) reduce contention by random first/last
     return insertFirst(t);
   }
 
-  private static <T> DeletionHandle getHandle(final Iterator<T> iter, final T target) {
+  private static <T> DeletionHandle<T> getHandle(final Iterator<T> iter, final T target) {
     T next;
     do {
       assert iter.hasNext();
       next = iter.next();
     } while (next != target);
-    return new DeletionHandle() {
+    return new DeletionHandle<T>(target) {
       @Override
-      protected void delete() {
+      public void close() {
         iter.remove();
       }
     };
@@ -50,11 +50,23 @@ public class DeletionQueue<T> {
     return deque.peekLast();
   }
 
-  public void delete(final DeletionHandle h) {
-    h.delete();
+  @Override
+  public Iterator<T> iterator() {
+    return deque.iterator();
   }
 
-  public abstract static class DeletionHandle {
-    protected abstract void delete();
+  public Object[] toArray() {
+    return deque.toArray();
+  }
+
+  public static abstract class DeletionHandle<T> implements AutoCloseable {
+    public final T item;
+
+    public DeletionHandle(final T t) {
+      this.item = t;
+    }
+
+    @Override
+    public abstract void close();
   }
 }

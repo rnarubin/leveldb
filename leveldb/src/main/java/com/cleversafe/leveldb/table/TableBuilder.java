@@ -3,7 +3,6 @@ package com.cleversafe.leveldb.table;
 import static com.cleversafe.leveldb.impl.DbConstants.TARGET_FILE_SIZE;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Comparator;
@@ -19,7 +18,6 @@ import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.InternalKeyComparator;
 import com.cleversafe.leveldb.util.ByteBufferCrc32C;
 import com.cleversafe.leveldb.util.ByteBuffers;
-import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.MemoryManagers;
 
 
@@ -30,11 +28,10 @@ public class TableBuilder implements Closeable {
   private final int blockRestartInterval;
   private final int blockSize;
   private final Compression compression;
-
-  private final SequentialWriteFile file;
   private final BlockBuilder dataBlockBuilder;
   private final BlockBuilder indexBlockBuilder;
   private final Comparator<InternalKey> internalKeyComparator;
+  public final SequentialWriteFile file;
 
   private BlockHandle pendingHandle;
   private long position;
@@ -199,8 +196,9 @@ public class TableBuilder implements Closeable {
   }
 
   @Override
-  public void close() throws IOException {
-    Closeables.closeIO(dataBlockBuilder, indexBlockBuilder);
+  public void close() {
+    dataBlockBuilder.close();
+    indexBlockBuilder.close();
   }
 
   private static final class PositionedHandle extends BlockHandle {

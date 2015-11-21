@@ -24,7 +24,8 @@ import java.util.concurrent.Executor;
 import java.util.function.LongToIntFunction;
 
 import com.cleversafe.leveldb.Env.ConcurrentWriteFile.WriteRegion;
-import com.cleversafe.leveldb.util.AsynchronousIterator;
+import com.cleversafe.leveldb.util.CompletableFutures;
+import com.cleversafe.leveldb.util.Iterators;
 
 /**
  * An Env is an interface used by the leveldb implementation to access operating system
@@ -110,7 +111,11 @@ public interface Env {
   /**
    * Deletes the specified database and all files associated with it
    */
-  CompletionStage<Void> deleteDB(final DBHandle handle);
+  default CompletionStage<Void> deleteDB(final DBHandle handle) {
+    return getOwnedFiles(handle).thenCompose(fileIter -> CompletableFutures
+        .closeAfter(Iterators.toStream(fileIter.map(this::deleteFile)), fileIter)
+        .thenCompose(CompletableFutures::allOfVoid));
+  }
 
   /**
    * Returns an {@link AsynchronousIterator} over the files owned by the given database

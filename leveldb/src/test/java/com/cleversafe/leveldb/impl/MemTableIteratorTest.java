@@ -59,7 +59,7 @@ public class MemTableIteratorTest {
     Assert.assertTrue(
         Ordering.from(Comparator.comparing(Entry<InternalKey, ?>::getKey, TestUtils.keyComparator))
             .isOrdered(entries));
-    TestUtils.testInternalKeyIterator(memtable.iterator(), entries, Runnable::run);
+    TestUtils.testInternalKeyIterator(memtable.iterator(), entries);
   }
 
 }

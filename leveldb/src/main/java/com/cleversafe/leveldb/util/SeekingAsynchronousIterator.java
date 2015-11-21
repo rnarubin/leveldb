@@ -27,17 +27,17 @@ public interface SeekingAsynchronousIterator<K, V>
    * positions the iterator such that the next element's key will be greater than or equal to the
    * given key (based on the given implementation's comparator)
    */
-  public CompletionStage<Void> seek(K key);
+  CompletionStage<Void> seek(K key);
 
   /**
    * positions the iterator at its beginning, where there are no preceding elements
    */
-  public CompletionStage<Void> seekToFirst();
+  CompletionStage<Void> seekToFirst();
 
   /**
    * positions the iterator at its end, where there are no successive elements
    */
-  public CompletionStage<Void> seekToEnd();
+  CompletionStage<Void> seekToEnd();
 }
 
 

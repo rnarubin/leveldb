@@ -18,12 +18,21 @@ package com.cleversafe.leveldb.util;
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
+import com.cleversafe.leveldb.AsynchronousIterator;
+
 public interface ReverseAsynchronousIterator<T> extends AsynchronousIterator<T> {
   /**
    * advance the iterator in reverse, returning an {@link Optional} containing the previous element,
    * or {@link Optional#empty()} if there are no more preceding elements
    */
-  public CompletionStage<Optional<T>> prev();
+  CompletionStage<Optional<T>> prev();
+
+  /**
+   * @return an {@link AsynchronousIterator} that traverses this iterator in the reverse direction
+   */
+  default AsynchronousIterator<T> descending() {
+    return () -> prev();
+  }
 
 }
 

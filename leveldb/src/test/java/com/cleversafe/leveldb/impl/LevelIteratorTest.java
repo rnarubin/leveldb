@@ -29,9 +29,6 @@ import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import com.cleversafe.leveldb.impl.FileMetaData;
-import com.cleversafe.leveldb.impl.InternalKey;
-import com.cleversafe.leveldb.impl.TableCache;
 import com.cleversafe.leveldb.impl.Version.LevelIterator;
 import com.cleversafe.leveldb.table.TestUtils;
 import com.cleversafe.leveldb.util.EnvDependentTest;
@@ -97,7 +94,7 @@ public abstract class LevelIteratorTest extends EnvDependentTest {
         final LevelIterator iter =
             new LevelIterator(tableCache, tables.getValue(), TestUtils.keyComparator);
 
-        TestUtils.testInternalKeyIterator(iter, expected, Runnable::run);
+        TestUtils.testInternalKeyIterator(iter, expected);
       }
     } catch (final Exception e) {
       throw new AssertionError(e);

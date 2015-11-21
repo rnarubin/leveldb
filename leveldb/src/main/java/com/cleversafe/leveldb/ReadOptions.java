@@ -55,6 +55,9 @@ public class ReadOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #snapshot(Snapshot)
+   */
   public Snapshot snapshot() {
     return snapshot;
   }
@@ -68,6 +71,9 @@ public class ReadOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #fillCache(boolean)
+   */
   public boolean fillCache() {
     return fillCache;
   }
@@ -81,6 +87,9 @@ public class ReadOptions implements Cloneable {
     return this;
   }
 
+  /**
+   * @see #verifyChecksums(boolean)
+   */
   public boolean verifyChecksums() {
     return verifyChecksums;
   }

@@ -14,32 +14,38 @@
  */
 package com.cleversafe.leveldb.impl;
 
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.cleversafe.leveldb.Snapshot;
+import com.cleversafe.leveldb.util.DeletionQueue;
+import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
 
 public class Snapshots {
-  private final Queue<Long> openSnapshots = new ConcurrentLinkedQueue<>();
+  private final DeletionQueue<SnapshotImpl> openSnapshots = new DeletionQueue<>();
 
   public SnapshotImpl newSnapshot(final long lastSequence) {
-    openSnapshots.add(lastSequence);
-    return new SnapshotImpl(lastSequence);
+    final SnapshotImpl snapshot = new SnapshotImpl(lastSequence);
+    snapshot.handle = openSnapshots.insertFirst(snapshot);
+    return snapshot;
+  }
+
+  public long getOldestSequence() {
+    return openSnapshots.peekLast().lastSequence;
   }
 
   public class SnapshotImpl implements Snapshot {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final long lastSequence;
+    private DeletionHandle<?> handle;
 
-    public SnapshotImpl(final long lastSequence) {
+    private SnapshotImpl(final long lastSequence) {
       this.lastSequence = lastSequence;
     }
 
     @Override
     public void close() {
       if (closed.compareAndSet(false, true)) {
-        openSnapshots.remove(lastSequence);
+        handle.close();
       }
     }
 

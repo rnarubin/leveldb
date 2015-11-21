@@ -138,7 +138,7 @@ public class DbImplTest
     {
         try (StrictEnv env = new StrictEnv(getEnv())) {
             Options options = Options.make().env(env).memoryManager(env.strictMemory);
-            options.maxOpenFiles(100);
+            options.fileCacheSize(100);
             options.createIfMissing(true);
             try (DbImpl db = new DbImpl(options, this.databaseDir)) {
                 Random random = new Random(301);

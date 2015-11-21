@@ -14,18 +14,18 @@
  */
 package com.cleversafe.leveldb.impl;
 
-import static com.cleversafe.leveldb.impl.DbConstants.NUM_LEVELS;
 import static com.cleversafe.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static com.cleversafe.leveldb.impl.ValueType.DELETION;
 import static com.cleversafe.leveldb.impl.ValueType.VALUE;
 import static com.cleversafe.leveldb.util.CompletableFutures.closeAfter;
-import static com.cleversafe.leveldb.util.CompletableFutures.filterMapAndCollapse;
 import static com.cleversafe.leveldb.util.SizeOf.SIZE_OF_INT;
 import static com.cleversafe.leveldb.util.SizeOf.SIZE_OF_LONG;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -42,7 +42,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -51,6 +50,7 @@ import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.DB;
 import com.cleversafe.leveldb.DBIterator;
 import com.cleversafe.leveldb.Env;
@@ -66,6 +66,7 @@ import com.cleversafe.leveldb.WriteBatch;
 import com.cleversafe.leveldb.WriteOptions;
 import com.cleversafe.leveldb.impl.Snapshots.SnapshotImpl;
 import com.cleversafe.leveldb.impl.WriteBatchImpl.Handler;
+import com.cleversafe.leveldb.table.Footer;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.TableBuilder;
 import com.cleversafe.leveldb.util.ByteBuffers;
@@ -73,9 +74,10 @@ import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.DeletionQueue;
 import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
-import com.cleversafe.leveldb.util.InternalIterator;
-import com.cleversafe.leveldb.util.MergingIterator;
+import com.cleversafe.leveldb.util.Iterators;
+import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 
 public class DbImpl implements DB {
 
@@ -91,14 +93,14 @@ public class DbImpl implements DB {
   private final TableCache tableCache;
   private final InternalKeyComparator internalKeyComparator;
   private final ExceptionHandler exceptionHandler;
-  private final AtomicReference<CompletionStage<Void>> bgCompaction;
   private final MemTables memTables;
 
   private final Snapshots snapshots = new Snapshots();
   private final AtomicBoolean shuttingDown = new AtomicBoolean();
+  private final AtomicReference<CompletionStage<Void>> bgCompaction = new AtomicReference<>(null);
+  private final DeletionQueue<CompletableFuture<?>> openOperations = new DeletionQueue<>();
+  // TODO deletionqueue?
   private final Collection<Long> pendingOutputs = new ConcurrentLinkedQueue<>();
-
-  private final DeletionQueue<CompletionStage<?>> openOperations = new DeletionQueue<>();
 
   DbImpl(final Options options, final DBHandle dbHandle, final LockFile dbLock,
       final VersionSet versions, final TableCache tableCache,
@@ -112,8 +114,7 @@ public class DbImpl implements DB {
     this.internalKeyComparator = internalKeyComparator;
     this.exceptionHandler = exceptionHandler;
     this.memTables = new MemTables(memlog);
-    this.bgCompaction = new AtomicReference<>(versions.needsCompaction() ? scheduleCompaction()
-        : CompletableFuture.completedFuture(null));
+    maybeScheduleCompaction();
   }
 
   @Override
@@ -133,7 +134,7 @@ public class DbImpl implements DB {
     return env.createDB(Optional.ofNullable(userHandle)).thenCompose(dbHandle -> {
       final ExceptionHandler exceptionHandler = new ExceptionHandler(dbHandle);
       // Reserve ten files or so for other uses and give the rest to TableCache
-      final int tableCacheSize = options.maxOpenFiles() - 10;
+      final int tableCacheSize = options.fileCacheSize() - 10;
       final TableCache tableCache = new TableCache(dbHandle, tableCacheSize, internalKeyComparator,
           env, options.verifyChecksums(), options.compression(), exceptionHandler);
 
@@ -168,17 +169,14 @@ public class DbImpl implements DB {
 
             final VersionEdit edit = new VersionEdit();
 
-            return env
-                .getOwnedFiles(
-                    dbHandle)
+            return env.getOwnedFiles(dbHandle)
                 .thenCompose(
                     fileIter -> closeAfter(
-                        filterMapAndCollapse(fileIter,
-                            fileInfo -> fileInfo.getFileType() == FileInfo.FileType.LOG
+                        Iterators.toStream(fileIter
+                            .filter(fileInfo -> fileInfo.getFileType() == FileInfo.FileType.LOG
                                 && ((fileInfo.getFileNumber() >= minLogNumber)
-                                    || (fileInfo.getFileNumber() == previousLogNumber)),
-                            Function.identity(), env.getExecutor()),
-                        fileIter))
+                                    || (fileInfo.getFileNumber() == previousLogNumber)))),
+                fileIter))
                 .thenCompose(logStream -> CompletableFutures
                     .mapSequential(
                         logStream.sorted(Comparator.comparingLong(FileInfo::getFileNumber)),
@@ -345,6 +343,12 @@ public class DbImpl implements DB {
     return null;
   }
 
+  private CompletionStage<Void> deleteObsoleteFiles() {
+    return deleteObsoleteFiles(versions.getLiveFiles(), pendingOutputs.stream(),
+        versions.getLogNumber(), versions.getPrevLogNumber(), versions.getManifestFileNumber(),
+        tableCache, options.env(), dbHandle);
+  }
+
   private static CompletionStage<Void> deleteObsoleteFiles(final Stream<FileMetaData> liveFiles,
       final Stream<Long> pendingOutputs, final long logNumber, final long prevLogNumber,
       final long manifestNumber, final TableCache tableCache, final Env env,
@@ -353,6 +357,7 @@ public class DbImpl implements DB {
     final Set<Long> live = Stream.concat(liveFiles.map(FileMetaData::getNumber), pendingOutputs)
         .collect(Collectors.toSet());
 
+    @SuppressWarnings("deprecation")
     final Predicate<FileInfo> shouldKeep = fileInfo -> {
       final long number = fileInfo.getFileNumber();
       switch (fileInfo.getFileType()) {
@@ -379,273 +384,62 @@ public class DbImpl implements DB {
     };
 
     return env.getOwnedFiles(dbHandle).thenCompose(fileIter -> closeAfter(
-        filterMapAndCollapse(fileIter, shouldKeep.negate(), (final FileInfo fileInfo) -> {
+        Iterators.toStream(fileIter.filter(shouldKeep.negate()).map(fileInfo -> {
           if (fileInfo.getFileType() == FileType.TABLE) {
             tableCache.evict(fileInfo.getFileNumber());
           }
           LOGGER.debug("{} delete type={} #{}", dbHandle, fileInfo.getFileType(),
               fileInfo.getFileNumber());
-          return env.deleteFile(fileInfo);
-        } , env.getExecutor()), fileIter))
-        .thenCompose(deletionStream -> CompletableFutures.allOfVoid(deletionStream));
-  }
-
-  public void flushMemTable() {
-    makeRoomForWrite(options.writeBufferSize()).release();
-
-    // todo bg_error code
-    // TODO manual flush not thread safe wrt close?
-    MemTables tables;
-    while ((tables = memTables).immutableExists()) {
-      tables.waitForImmutableCompaction();
-    }
-    checkBackgroundException();
-  }
-
-  public void compactRange(final int level, final ByteBuffer start, final ByteBuffer end) {
-    // TODO not thread safe
-    Preconditions.checkArgument(level >= 0, "level is negative");
-    Preconditions.checkArgument(level + 1 < NUM_LEVELS, "level is greater than or equal to %s",
-        NUM_LEVELS);
-    Preconditions.checkNotNull(start, "start is null");
-    Preconditions.checkNotNull(end, "end is null");
-
-    mutex.lock();
-    try {
-      while (this.manualCompaction != null) {
-        backgroundCondition.awaitUninterruptibly();
-      }
-      final ManualCompaction manualCompaction = new ManualCompaction(level, start, end);
-      this.manualCompaction = manualCompaction;
-
-      old_scheduleCompaction();
-
-      while (this.manualCompaction == manualCompaction) {
-        backgroundCondition.awaitUninterruptibly();
-      }
-    } finally {
-      mutex.unlock();
-    }
-  }
-
-  private void maybeScheduleCompaction() {
-    if (!shuttingDown.get() && (memTables.immutableExists() || manualCompaction != null
-        || versions.needsCompaction())) {
-      old_scheduleCompaction();
-    }
-  }
-
-  private CompletionStage<Void> scheduleCompaction() {
-    // FIXME
-    return null;
-  }
-
-  private void old_scheduleCompaction() {
-    if (backgroundCompaction.offer(new Runnable() {
-      @Override
-      public void run() {
-        mutex.lock();
-        try {
-          if (!shuttingDown.get()) {
-            backgroundCompaction();
-          }
-        } catch (final DatabaseShutdownException ignored) {
-        } catch (final Throwable e) {
-          setBackgroundException(e);
-        } finally {
-          try {
-            maybeScheduleCompaction();
-          } finally {
-            backgroundCondition.signalAll();
-            mutex.unlock();
-          }
-        }
-      }
-    })) {
-      LOGGER.debug("{} scheduled compaction", this);
-      /*
-       * inserting into the blocking queue directly means that it is possible for a compaction to be
-       * running in the pool while another is waiting in the queue (rather than the previous
-       * implementation that limited to a total of 1 compaction either running or queued). This is a
-       * compromise made to facilitate thread safety, in which compactions may be over-scheduled, in
-       * favor of possibly missing a compaction of the immutable memtable
-       */
-    } else {
-      LOGGER.trace("{} foregoing compaction, queue full", this);
-    }
-  }
-
-  private void setBackgroundException(final Throwable t) {
-    backgroundExceptionHandler.uncaughtException(Thread.currentThread(), t);
+          return deleteIgnoringFileNotFound(env, fileInfo);
+        })), fileIter).thenCompose(CompletableFutures::allOfVoid));
   }
 
   public void checkBackgroundException() {
-    final Throwable e = backgroundException;
-    if (e != null) {
-      throw new BackgroundProcessingException(e);
-    }
+    // TODO
   }
-
-  private void backgroundCompaction() throws IOException {
-    LOGGER.debug("{} beginning compaction", this);
-
-    compactMemTableInternal();
-
-    Compaction compaction;
-    if (manualCompaction != null) {
-      compaction = versions.compactRange(manualCompaction.level,
-          new TransientInternalKey(manualCompaction.begin, MAX_SEQUENCE_NUMBER, ValueType.VALUE),
-          new TransientInternalKey(manualCompaction.end, 0L, ValueType.DELETION));
-    } else {
-      compaction = versions.pickCompaction();
-    }
-
-    if (compaction == null) {
-      // no compaction
-    } else if (manualCompaction == null && compaction.isTrivialMove()) {
-      // Move file to next level
-      Preconditions.checkState(compaction.getLevelInputs().size() == 1);
-      final FileMetaData fileMetaData = compaction.getLevelInputs().get(0);
-      compaction.getEdit().deleteFile(compaction.getLevel(), fileMetaData.getNumber());
-      compaction.getEdit().addFile(compaction.getLevel() + 1, fileMetaData);
-      versions.logAndApply(compaction.getEdit());
-      // log
-    } else {
-      final CompactionState compactionState = new CompactionState(compaction);
-      doCompactionWork(compactionState);
-      cleanupCompaction(compactionState);
-    }
-
-    // manual compaction complete
-    if (manualCompaction != null) {
-      manualCompaction = null;
-    }
-  }
-
-  private void cleanupCompaction(final CompactionState compactionState) throws IOException {
-    if (compactionState.builder != null) {
-      compactionState.builder.abandon();
-      Closeables.closeIO(compactionState.builder, compactionState.outfile);
-    } else {
-      Preconditions.checkArgument(compactionState.outfile == null);
-    }
-
-    for (final FileMetaData output : compactionState.outputs) {
-      pendingOutputs.remove(output.getNumber());
-    }
-  }
-
 
   @Override
   public CompletionStage<ByteBuffer> get(final ByteBuffer key) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<ByteBuffer> get(final ByteBuffer key, final ReadOptions options) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public byte[] get(final byte[] key) throws DBException {
     return get(key, DEFAULT_READ_OPTIONS);
   }
 
   @Override
-  public byte[] get(final byte[] key, final ReadOptions readOptions) throws DBException {
-    final LookupResult res = getInternal(ByteBuffer.wrap(key), readOptions);
-    ByteBuffer b;
-    if (res == null || (b = res.getValue()) == null) {
-      return null;
-    }
-    final byte[] ret = ByteBuffers.toArray(ByteBuffers.duplicate(b));
-    if (res.needsFreeing()) {
-      options.memoryManager().free(b);
-    }
-    return ret;
-  }
-
-  @Override
-  public ByteBuffer get(final ByteBuffer key) throws DBException {
-    return get(key, DEFAULT_READ_OPTIONS);
-  }
-
-  @Override
-  public ByteBuffer get(final ByteBuffer key, final ReadOptions readOptions) {
-    return getInternal(key, readOptions).getValue();
-  }
-
-  public LookupResult getInternal(final ByteBuffer key, final ReadOptions readOptions)
-      throws DBException {
+  public CompletionStage<ByteBuffer> get(final ByteBuffer key, final ReadOptions readOptions) {
     checkBackgroundException();
-    LookupResult lookupResult;
-    LookupKey lookupKey;
-    final SnapshotImpl snapshot = getSnapshot(readOptions);
-    lookupKey = new LookupKey(key, snapshot.getLastSequence());
-    do {
-      final MemTables tables = memTables;
+    final DeletionHandle<CompletableFuture<?>> readOperation =
+        openOperations.insert(new CompletableFuture<>());
 
-      // First look in the memtable, then in the immutable memtable (if
-      // any).
-      {
-        // no need to acquire memlog semaphore; closing memlog doesn't
-        // matter to a get because we only care that the skiplist is
-        // reachable
-        final MemTable memtable = tables.mutable.memTable.retain();
-        if (memtable == null) {
-          // raced with memtable release, reacquire tables
-          continue;
-        }
-        try {
-          lookupResult = memtable.get(lookupKey);
-          if (lookupResult != null) {
-            return lookupResult;
-          }
-        } finally {
-          memtable.release();
-        }
-      }
-      if (tables.immutableExists()) {
-        final MemTable immutable = tables.immutable.memTable.retain();
-        if (immutable != null) {
-          try {
-            lookupResult = immutable.get(lookupKey);
-            if (lookupResult != null) {
-              return lookupResult;
-            }
-          } finally {
-            immutable.release();
-          }
+    return getInternal(key, readOptions.verifyChecksums(), readOptions.fillCache(),
+        readOptions.snapshot() != null ? ((SnapshotImpl) readOptions.snapshot()).getLastSequence()
+            : versions.getLastSequence()).whenComplete((success, exception) -> {
+              // don't communicate read failures to the operation future as it's only used for close
+              readOperation.close();
+              readOperation.item.complete(null);
+            });
+  }
 
-        }
-      }
-      break;
-    } while (true);
+  private CompletionStage<ByteBuffer> getInternal(final ByteBuffer key,
+      final boolean verifyChecksums, final boolean fillCache, final long snapshot) {
+    if (shuttingDown.get()) {
+      return CompletableFutures.exceptionalFuture(
+          new DatabaseShutdownException("attempted to read while shutting down database"));
+    }
+
+    final LookupKey lookupKey = new LookupKey(key, snapshot);
+
+    final LookupResult memTableLookup = memTables.get(lookupKey);
+    if (memTableLookup != null) {
+      return CompletableFuture.completedFuture(memTableLookup.getValue());
+    }
 
     // Not in memTables; try live files in level order
-    try {
-      lookupResult = versions.get(lookupKey);
-    } catch (final IOException e) {
-      throw new DBException(e);
-    }
-
-    // schedule compaction if necessary
-    // TODO check mutex
-    mutex.lock();
-    try {
-      if (versions.needsCompaction()) {
-        old_scheduleCompaction();
-      }
-    } finally {
-      mutex.unlock();
-    }
-
-    return lookupResult;
+    // TODO checksums and cache down to tables
+    return versions.get(lookupKey).thenApply(lookupResult -> {
+      // possibly necessitated seek threshold compaction
+      maybeScheduleCompaction();
+      return lookupResult.getValue();
+    });
   }
-
-
 
   @Override
   // TODO measure cost of cast instead of wildcard
@@ -685,50 +479,37 @@ public class DbImpl implements DB {
       final WriteOptions writeOptions) {
     checkBackgroundException();
 
-    final CompletableFuture<Snapshot> write = new CompletableFuture<>();
-    final DeletionHandle pendingHandle = openOperations.insert(write);
-
-    if (shuttingDown.get()) {
-      write.complete(null);
-      openOperations.delete(pendingHandle);
-      return CompletableFutures.exceptionalFuture(
-          new DatabaseShutdownException("attempted to write while database is shutting down"));
-    }
-
-    if (updates.size() == 0) {
-      openOperations.delete(pendingHandle);
-      write.complete(writeOptions.snapshot() ? getSnapshot() : null);
+    if (updates.size() == 0 || updates.getApproximateSize() == 0) {
+      return CompletableFuture.completedFuture(writeOptions.snapshot() ? getSnapshot() : null);
     } else {
       // TODO throttleWritesIfNecessary();
 
-      class Box {
-        MemTable memTable;
-        long sequenceBegin;
-      }
-      final Box box = new Box();
-      memTables.makeRoomForWrite(updates.getApproximateSize()).thenCompose(memlog -> {
-        box.memTable = memlog.memTable;
-        box.sequenceBegin = versions.getAndAddLastSequence(updates.size()) + 1;
+      return memTables.makeRoomForWrite(updates.getApproximateSize()).thenCompose(entry -> {
+        final DeletionHandle<CompletableFuture<Snapshot>> writeOperation = entry.getKey();
+        final MemTableAndLog memlog = entry.getValue();
+        final long sequenceBegin = versions.getAndAddLastSequence(updates.size()) + 1;
+        final CompletionStage<Void> logWrite;
         if (writeOptions.disableLog()) {
           memlog.markUnpersisted();
-          return CompletableFuture.completedFuture(null);
+          logWrite = CompletableFuture.completedFuture(null);
         } else {
-          return memlog.log.addRecord(writeWriteBatch(updates, box.sequenceBegin),
-              writeOptions.sync());
+          logWrite =
+              memlog.log.addRecord(writeWriteBatch(updates, sequenceBegin), writeOptions.sync());
         }
-      }).whenComplete((successVoid, exception) -> {
-        if (exception == null) {
-          updates.forEach(new InsertIntoHandler(box.memTable, box.sequenceBegin));
-          openOperations.delete(pendingHandle);
-          write.complete(writeOptions.snapshot()
-              ? snapshots.newSnapshot(box.sequenceBegin + updates.size() - 1) : null);
-        } else {
-          openOperations.delete(pendingHandle);
-          write.completeExceptionally(exception);
-        }
+        logWrite.whenComplete((voidSuccess, exception) -> {
+          if (exception == null) {
+            updates.forEach(new InsertIntoHandler(memlog.memTable, sequenceBegin));
+            writeOperation.close();
+            writeOperation.item.complete(writeOptions.snapshot()
+                ? snapshots.newSnapshot(sequenceBegin + updates.size() - 1) : null);
+          } else {
+            writeOperation.close();
+            writeOperation.item.completeExceptionally(exception);
+          }
+        });
+        return writeOperation.item;
       });
     }
-    return write;
   }
 
   /*
@@ -751,151 +532,97 @@ public class DbImpl implements DB {
   }
 
   @Override
-  public SeekingIteratorAdapter iterator() {
-    final SeekingIteratorAdapter iter = iterator(DEFAULT_READ_OPTIONS);
-    iter.seekToFirst();
-    return iter;
-  }
-
-  @Override
-  public SeekingIteratorAdapter iterator(final ReadOptions readOptions) {
-    checkBackgroundException();
-    mutex.lock();
-    try {
-      final MergingIterator rawIterator = internalIterator();
-
-      // filter any entries not visible in our snapshot
-      final SnapshotImpl snapshot = getSnapshot(readOptions);
-      final SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator,
-          snapshot, internalKeyComparator.getUserComparator());
-      return new SeekingIteratorAdapter(snapshotIterator);
-    } catch (final IOException e) {
-      throw new DBException(e);
-    } finally {
-      mutex.unlock();
-    }
-  }
-
-  MergingIterator internalIterator() throws IOException {
-    // TODO check mutex
-    mutex.lock();
-    try {
-      // merge together the memTable, immutableMemTable, and tables in version set
-      final List<InternalIterator> iterators = new ArrayList<>();
-      MemTable immutable = null, mutable;
-      do {
-        final MemTables tables = memTables;
-        if (tables.immutableExists() && (immutable = tables.immutable.memTable.retain()) == null) {
-          continue;
-        }
-        if ((mutable = tables.mutable.memTable.retain()) == null) {
-          Closeables.closeIO(immutable);
-          continue;
-        }
-        break;
-      } while (true);
-
-      try {
-        if (immutable != null) {
-          iterators.add(immutable.iterator());
-        }
-        iterators.add(mutable.iterator());
-      } finally {
-        Closeables.closeIO(mutable, immutable);
-      }
-
-      final Version current = versions.getCurrent();
-      iterators.addAll(current.getLevel0Files());
-      iterators.addAll(current.getLevelIterators());
-      return new MergingIterator(iterators, internalKeyComparator);
-    } finally {
-      mutex.unlock();
-    }
-  }
-
-  @Override
   public SnapshotImpl getSnapshot() {
     return snapshots.newSnapshot(versions.getLastSequence());
   }
 
-  private SnapshotImpl getSnapshot(final ReadOptions options) {
-    SnapshotImpl snapshot;
-    if (options.snapshot() != null) {
-      snapshot = (SnapshotImpl) options.snapshot();
-    } else {
-      // FIXME we do have to retain, wrap this in a conditional closeable maybe?
-      snapshot = new SnapshotImpl(versions.getCurrent(), versions.getLastSequence());
-      snapshot.close(); // To avoid holding the snapshot active..
-    }
-    return snapshot;
-  }
-
-  public void compactMemTable() throws IOException {
-    compactMemTableInternal();
-  }
-
-  private void compactMemTableInternal() throws IOException {
-    final MemTables tables = this.memTables;
-    if (!tables.claimedForFlush.compareAndSet(false, true)) {
-      return;
-    }
-
-    // Save the contents of the memtable as a new Table
-
-    // block until pending writes have finished
-    final MemTableAndLog immutable = tables.immutable.acquireAll();
-    try {
-      immutable.log.close();
-      final VersionEdit edit = new VersionEdit();
-      final Version base = versions.getCurrent();
-      LOGGER.debug("{} flushing {}", this, immutable.memTable);
-      writeLevel0Table(immutable.memTable, edit, base);
-
-      if (shuttingDown.get()) {
-        throw new DatabaseShutdownException("Database shutdown during memtable compaction");
-      }
-
-      edit.setPreviousLogNumber(0);
-      edit.setLogNumber(immutable.log.getFileNumber()); // Earlier logs no longer needed
-      versions.logAndApply(edit);
-
-      this.memTables = new MemTables(this.memTables.mutable, null);
-      immutable.memTable.release();
-    } finally {
-      try {
-        tables.finishCompaction();
-      } finally {
-        immutable.releaseAll();
+  private static WriteBatchImpl readWriteBatch(final ByteBuffer record, final int updateSize)
+      throws IOException {
+    @SuppressWarnings("resource")
+    final WriteBatchImpl writeBatch = new WriteBatchImpl.WriteBatchMulti();
+    int entries = 0;
+    while (record.hasRemaining()) {
+      entries++;
+      final ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
+      if (valueType == VALUE) {
+        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
+        final ByteBuffer value = ByteBuffers.readLengthPrefixedBytes(record);
+        writeBatch.put(key, value);
+      } else if (valueType == DELETION) {
+        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
+        writeBatch.delete(key);
+      } else {
+        throw new IllegalStateException("Unexpected value type " + valueType);
       }
     }
 
-    deleteObsoleteFiles();
-  }
-
-  private CompletionStage<VersionEdit> writeLevel0Table(final MemTable mem) {
-    // skip empty mem table
-    if (mem.isEmpty()) {
-      return CompletableFuture.completedFuture(new VersionEdit());
+    if (entries != updateSize) {
+      throw new IOException(String.format("Expected %d entries in log record but found %s entries",
+          updateSize, entries));
     }
 
-    // write the memtable to a new sstable
-    final long fileNumber = versions.getAndIncrementNextFileNumber();
-    pendingOutputs.add(fileNumber);
-    return buildTable(mem.entryIterable(), fileNumber, internalKeyComparator, dbHandle, options)
-        .whenComplete((meta, exception) -> pendingOutputs.remove(fileNumber)).thenApply(meta -> {
-          final VersionEdit edit = new VersionEdit();
-          // Note that if file size is zero, the file has been deleted and
-          // should not be added to the manifest.
-          if (meta != null && meta.getFileSize() > 0) {
-            final ByteBuffer minUserKey = meta.getSmallest().getUserKey();
-            final ByteBuffer maxUserKey = meta.getLargest().getUserKey();
-            final int level =
-                // TODO harden this against concurrent compactions
-                // base != null ? base.pickLevelForMemTableOutput(minUserKey, maxUserKey) :
-                0;
-            edit.addFile(level, meta);
+    return writeBatch;
+  }
+
+  private ByteBuffer writeWriteBatch(final WriteBatchImpl updates, final long sequenceBegin) {
+    // TODO send write batch straight down to logs, rework LogWriter as necessary
+    final ByteBuffer record =
+        ByteBuffer.allocate(SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize())
+            .order(ByteOrder.LITTLE_ENDIAN);
+    record.mark();
+    record.putLong(sequenceBegin);
+    record.putInt(updates.size());
+    updates.forEach(new Handler() {
+      @Override
+      public void put(final ByteBuffer key, final ByteBuffer value) {
+        record.put(VALUE.getPersistentId());
+        ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
+
+        ByteBuffers.writeLengthPrefixedBytesTransparent(record, value);
+      }
+
+      @Override
+      public void delete(final ByteBuffer key) {
+        record.put(DELETION.getPersistentId());
+        ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
+      }
+    });
+    record.limit(record.position()).reset();
+    return record;
+  }
+
+  @Override
+  public CompletionStage<DBIterator> iterator(final ReadOptions options) {
+    // TODO Auto-generated method stub
+    return null;
+  }
+
+  @Override
+  public CompletionStage<Long> getApproximateSize(final ByteBuffer begin, final ByteBuffer end) {
+    final Version v = versions.getCurrent();
+    return v
+        .getApproximateOffsetOf(
+            new TransientInternalKey(begin, SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE))
+        .thenCompose(
+            startOffset -> v
+                .getApproximateOffsetOf(new TransientInternalKey(end,
+                    SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE))
+            .thenApply(
+                limitOffset -> (limitOffset >= startOffset ? limitOffset - startOffset : 0L)));
+  }
+
+  /**
+   * ignore file not found in case of concurrent deletion
+   */
+  private static CompletionStage<Void> deleteIgnoringFileNotFound(final Env env,
+      final FileInfo fileInfo) {
+    return CompletableFutures.<Void, Void>handleExceptional(env.deleteFile(fileInfo),
+        (voidSuccess, exception) -> {
+          if (exception == null || exception instanceof FileNotFoundException) {
+            return null;
+          } else {
+            throw exception;
           }
-          return edit;
         });
   }
 
@@ -932,102 +659,159 @@ public class DbImpl implements DB {
     }
     final InternalKey largest = entry.getKey();
     return chain.thenCompose(voided -> builder.finish())
-        .thenCompose(fileSize -> TableCache
+        .whenComplete((success, exception) -> builder.close())
+        .thenCompose(fileSize -> Table
             // verify table can be opened
-            .loadTable(options.env(), dbHandle, fileNumber, internalKeyComparator,
+            .load(options.env(), dbHandle, fileNumber, internalKeyComparator,
                 options.verifyChecksums(), options.compression())
             .thenCompose(Table::release)
             .thenApply(voided -> new FileMetaData(fileNumber, fileSize, smallest, largest)));
   }
 
+  public CompletionStage<?> flushMemTable() {
+    return memTables.makeRoomForWrite(options.writeBufferSize()).thenAccept(entry -> {
+      final DeletionHandle<CompletableFuture<Snapshot>> operation = entry.getKey();
+      operation.close();
+      operation.item.complete(null);
+    });
+  }
 
-  private void doCompactionWork(final CompactionState compactionState) throws IOException {
-    Preconditions.checkState(mutex.isHeldByCurrentThread());
-    Preconditions.checkArgument(
-        versions.numberOfBytesInLevel(compactionState.getCompaction().getLevel()) > 0);
-    Preconditions.checkArgument(compactionState.builder == null);
-    Preconditions.checkArgument(compactionState.outfile == null);
+  @Override
+  public CompletionStage<Void> suspendCompactions() {
+    // TODO Auto-generated method stub
+    return null;
+  }
 
-    // todo track snapshots
-    compactionState.smallestSnapshot = versions.getLastSequence();
+  @Override
+  public CompletionStage<Void> resumeCompactions() {
+    // TODO Auto-generated method stub
+    return null;
+  }
 
-    // Release mutex while we're actually doing the compaction work
-    mutex.unlock();
+  @Override
+  public CompletionStage<Void> compactRange(final ByteBuffer begin, final ByteBuffer end) {
+    // TODO Auto-generated method stub
+    return null;
+  }
+
+  private void maybeScheduleCompaction() {
+    final CompletableFuture<Void> compactionFuture;
+    if (!shuttingDown.get() && versions.needsCompaction()
+        && bgCompaction.compareAndSet(null, compactionFuture = new CompletableFuture<>())) {
+      // only schedule if needed and one isn't already running
+      options.env().getExecutor().execute(() -> {
+        final DeletionHandle<CompletableFuture<?>> compactionOperation =
+            openOperations.insert(compactionFuture);
+        backgroundCompaction(versions.pickCompaction()).whenComplete((success, exception) -> {
+          // TODO exception
+          bgCompaction.compareAndSet(compactionFuture, null);
+          compactionOperation.close();
+          compactionOperation.item.complete(null);
+          maybeScheduleCompaction();
+        });
+      });
+    }
+  }
+
+  private CompletionStage<Void> backgroundCompaction(final Compaction c) {
+    if (c == null) {
+      return CompletableFuture.completedFuture(null);
+    }
+    LOGGER.debug("{} beginning compaction", this);
+    if (c.isTrivialMove()) {
+      final FileMetaData fileMetaData = c.input(0, 0);
+      c.getEdit().deleteFile(c.getLevel(), fileMetaData.getNumber());
+      c.getEdit().addFile(c.getLevel() + 1, fileMetaData);
+      return versions.logAndApply(c.getEdit());
+    }
+    return versions.makeInputIterator(c).thenCompose(iter -> {
+      final CompactionState compactionState = new CompactionState(c, snapshots.getOldestSequence());
+      return closeAfter(closeAfter(doCompactionWork(compactionState, iter), iter)
+          .thenCompose(optCompactionState -> optCompactionState.map(CompactionState::installResults)
+              .orElseGet(() -> CompletableFuture.completedFuture(null))),
+          compactionState);
+    });
+  }
+
+  /**
+   * @return empty if terminated before completion
+   */
+  private CompletionStage<Optional<CompactionState>> doCompactionWork(
+      final CompactionState compactionState,
+      final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter) {
     try {
-      try (MergingIterator iterator = versions.makeInputIterator(compactionState.compaction)) {
 
-        ByteBuffer currentUserKey = null;
-        boolean hasCurrentUserKey = false;
+      ByteBuffer currentUserKey = null;
+      boolean hasCurrentUserKey = false;
 
-        long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-        while (iterator.hasNext() && !shuttingDown.get()) {
-          // always give priority to compacting the current mem table
-          compactMemTableInternal();
+      long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
+      while (iterator.hasNext() && !shuttingDown.get()) {
+        // always give priority to compacting the current mem table
+        compactMemTableInternal();
 
-          final InternalKey key = iterator.peek().getKey();
-          if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
+        final InternalKey key = iterator.peek().getKey();
+        if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
+          finishCompactionOutputFile(compactionState);
+        }
+
+        // Handle key/value, add to state, etc.
+        boolean drop = false;
+        // todo if key doesn't parse (it is corrupted),
+        /*
+         * if (false //!ParseInternalKey(key, &ikey)) { // do not hide error keys currentUserKey =
+         * null; hasCurrentUserKey = false; lastSequenceForKey = MAX_SEQUENCE_NUMBER; } else
+         */
+        {
+          if (!hasCurrentUserKey || internalKeyComparator.getUserComparator()
+              .compare(key.getUserKey(), currentUserKey) != 0) {
+            // First occurrence of this user key
+            currentUserKey = ByteBuffers.heapCopy(key.getUserKey());
+            hasCurrentUserKey = true;
+            lastSequenceForKey = MAX_SEQUENCE_NUMBER;
+          }
+
+          if (lastSequenceForKey <= compactionState.smallestSnapshot) {
+            // Hidden by an newer entry for same user key
+            drop = true; // (A)
+          } else if (key.getValueType() == ValueType.DELETION
+              && key.getSequenceNumber() <= compactionState.smallestSnapshot
+              && compactionState.compaction.isBaseLevelForKey(key.getUserKey())) {
+
+            // For this user key:
+            // (1) there is no data in higher levels
+            // (2) data in lower levels will have larger sequence numbers
+            // (3) data in layers that are being compacted here and have
+            // smaller sequence numbers will be dropped in the next
+            // few iterations of this loop (by rule (A) above).
+            // Therefore this deletion marker is obsolete and can be dropped.
+            drop = true;
+          }
+
+          lastSequenceForKey = key.getSequenceNumber();
+        }
+
+        if (!drop) {
+          // Open output file if necessary
+          if (compactionState.builder == null) {
+            openCompactionOutputFile(compactionState);
+          }
+          if (compactionState.builder.getEntryCount() == 0) {
+            compactionState.currentSmallest = key.heapCopy();
+          }
+          compactionState.currentLargest = key;
+          compactionState.builder.add(key, iterator.peek().getValue());
+
+          // Close output file if it is big enough
+          if (compactionState.builder.getFileSize() >= compactionState.compaction
+              .getMaxOutputFileSize()) {
+            compactionState.currentLargest = compactionState.currentLargest.heapCopy();
             finishCompactionOutputFile(compactionState);
           }
-
-          // Handle key/value, add to state, etc.
-          boolean drop = false;
-          // todo if key doesn't parse (it is corrupted),
-          /*
-           * if (false //!ParseInternalKey(key, &ikey)) { // do not hide error keys currentUserKey =
-           * null; hasCurrentUserKey = false; lastSequenceForKey = MAX_SEQUENCE_NUMBER; } else
-           */
-          {
-            if (!hasCurrentUserKey || internalKeyComparator.getUserComparator()
-                .compare(key.getUserKey(), currentUserKey) != 0) {
-              // First occurrence of this user key
-              currentUserKey = ByteBuffers.heapCopy(key.getUserKey());
-              hasCurrentUserKey = true;
-              lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-            }
-
-            if (lastSequenceForKey <= compactionState.smallestSnapshot) {
-              // Hidden by an newer entry for same user key
-              drop = true; // (A)
-            } else if (key.getValueType() == ValueType.DELETION
-                && key.getSequenceNumber() <= compactionState.smallestSnapshot
-                && compactionState.compaction.isBaseLevelForKey(key.getUserKey())) {
-
-              // For this user key:
-              // (1) there is no data in higher levels
-              // (2) data in lower levels will have larger sequence numbers
-              // (3) data in layers that are being compacted here and have
-              // smaller sequence numbers will be dropped in the next
-              // few iterations of this loop (by rule (A) above).
-              // Therefore this deletion marker is obsolete and can be dropped.
-              drop = true;
-            }
-
-            lastSequenceForKey = key.getSequenceNumber();
-          }
-
-          if (!drop) {
-            // Open output file if necessary
-            if (compactionState.builder == null) {
-              openCompactionOutputFile(compactionState);
-            }
-            if (compactionState.builder.getEntryCount() == 0) {
-              compactionState.currentSmallest = key.heapCopy();
-            }
-            compactionState.currentLargest = key;
-            compactionState.builder.add(key, iterator.peek().getValue());
-
-            // Close output file if it is big enough
-            if (compactionState.builder.getFileSize() >= compactionState.compaction
-                .getMaxOutputFileSize()) {
-              compactionState.currentLargest = compactionState.currentLargest.heapCopy();
-              finishCompactionOutputFile(compactionState);
-            }
-          }
-          iterator.next();
         }
-        if (compactionState.currentLargest != null) {
-          compactionState.currentLargest = compactionState.currentLargest.heapCopy();
-        }
+        iterator.next();
+      }
+      if (compactionState.currentLargest != null) {
+        compactionState.currentLargest = compactionState.currentLargest.heapCopy();
       }
 
       if (shuttingDown.get()) {
@@ -1046,155 +830,96 @@ public class DbImpl implements DB {
       mutex.lock();
     }
 
-    // todo port CompactionStats code
-
-    installCompactionResults(compactionState);
-  }
-
-  private void openCompactionOutputFile(final CompactionState compactionState) throws IOException {
-    Preconditions.checkNotNull(compactionState, "compactionState is null");
-    Preconditions.checkArgument(compactionState.builder == null,
-        "compactionState builder is not null");
-
-    mutex.lock();
-    try {
-      final long fileNumber = versions.getNextFileNumber();
-      pendingOutputs.add(fileNumber);
-      compactionState.currentFileNumber = fileNumber;
-      compactionState.currentFileSize = 0;
-      compactionState.currentSmallest = null;
-      compactionState.currentLargest = null;
-
-      compactionState.outfile =
-          options.env().openSequentialWriteFile(FileInfo.table(dbHandle, fileNumber));
-      compactionState.builder =
-          new TableBuilder(options, compactionState.outfile, internalKeyComparator);
-    } finally {
-      mutex.unlock();
-    }
-  }
-
-  private void finishCompactionOutputFile(final CompactionState compactionState)
-      throws IOException {
-    Preconditions.checkNotNull(compactionState, "compactionState is null");
-    Preconditions.checkArgument(compactionState.outfile != null);
-    Preconditions.checkArgument(compactionState.builder != null);
-
-    final long outputNumber = compactionState.currentFileNumber;
-    Preconditions.checkArgument(outputNumber != 0);
-
-    final long currentEntries = compactionState.builder.getEntryCount();
-    compactionState.builder.finish();
-
-    final long currentBytes = compactionState.builder.getFileSize();
-    compactionState.currentFileSize = currentBytes;
-    // compactionState.totalBytes += currentBytes;
-
-    final FileMetaData currentFileMetaData =
-        new FileMetaData(compactionState.currentFileNumber, compactionState.currentFileSize,
-            compactionState.currentSmallest, compactionState.currentLargest);
-    compactionState.outputs.add(currentFileMetaData);
-
-    compactionState.builder.close();
-    compactionState.builder = null;
-
-    compactionState.outfile.sync();
-    compactionState.outfile.close();
-    compactionState.outfile = null;
-
-    if (currentEntries > 0) {
-      // Verify that the table is usable
-      tableCache.newIterator(outputNumber).close();
-    }
-  }
-
-  private void installCompactionResults(final CompactionState compact) {
-    Preconditions.checkState(mutex.isHeldByCurrentThread());
-
-    // Add compaction outputs
-    compact.compaction.addInputDeletions(compact.compaction.getEdit());
-    final int level = compact.compaction.getLevel();
-    for (final FileMetaData output : compact.outputs) {
-      compact.compaction.getEdit().addFile(level + 1, output);
-      pendingOutputs.remove(output.getNumber());
-    }
-
-    try {
-      versions.logAndApply(compact.compaction.getEdit());
-      deleteObsoleteFiles();
-    } catch (final IOException e) {
-      LOGGER.debug("{} compaction failed due to {}. will try again later", this, e.toString());
-      // Compaction failed for some reason. Simply discard the work and try again later.
-
-      // Discard any files we may have created during this failed compaction
-      for (final FileMetaData output : compact.outputs) {
-        try {
-          options.env().deleteFile(FileInfo.table(dbHandle, output.getNumber()));
-        } catch (final IOException deleteFailed) {
-          LOGGER.warn("{} failed to delete file {}", this, output, deleteFailed);
-        }
-      }
-      compact.outputs.clear();
-    }
+    // TODO port CompactionStats code
   }
 
   int numberOfFilesInLevel(final int level) {
     return versions.getCurrent().numberOfFilesInLevel(level);
   }
 
-  @Override
-  public long[] getApproximateSizes(final Range... ranges) {
-    Preconditions.checkNotNull(ranges, "ranges is null");
-    final long[] sizes = new long[ranges.length];
-    for (int i = 0; i < ranges.length; i++) {
-      final Range range = ranges[i];
-      sizes[i] = getApproximateSizes(range);
-    }
-    return sizes;
-  }
-
-  public long getApproximateSizes(final Range range) {
-    final Version v = versions.getCurrent();
-
-    final InternalKey startKey = new TransientInternalKey(ByteBuffer.wrap(range.start()),
-        SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-    final InternalKey limitKey = new TransientInternalKey(ByteBuffer.wrap(range.limit()),
-        SequenceNumber.MAX_SEQUENCE_NUMBER, ValueType.VALUE);
-    final long startOffset = v.getApproximateOffsetOf(startKey);
-    final long limitOffset = v.getApproximateOffsetOf(limitKey);
-
-    return (limitOffset >= startOffset ? limitOffset - startOffset : 0);
-  }
-
   public long getMaxNextLevelOverlappingBytes() {
     return versions.getMaxNextLevelOverlappingBytes();
   }
 
-  private static class CompactionState {
+  private class CompactionState implements AsynchronousCloseable {
     private final Compaction compaction;
-
-    private final List<FileMetaData> outputs = newArrayList();
-
-    private long smallestSnapshot;
-
-    // State kept for output being generated
-    private SequentialWriteFile outfile;
-    private TableBuilder builder;
+    private final List<FileMetaData> outputs = new ArrayList<>();
+    private final long smallestSequence;
 
     // Current file being generated
-    private long currentFileNumber;
-    private long currentFileSize;
+    private TableBuilder builder;
+    private long currentFileNumber = -1;
     private InternalKey currentSmallest;
     private InternalKey currentLargest;
 
     // private long totalBytes;
 
-    private CompactionState(final Compaction compaction) {
+    private CompactionState(final Compaction compaction, final long smallestSeqeuence) {
       this.compaction = compaction;
+      this.smallestSequence = smallestSeqeuence;
     }
 
-    public Compaction getCompaction() {
-      return compaction;
+    @Override
+    public CompletionStage<Void> asyncClose() {
+      final CompletionStage<Void> fileClose;
+      if (builder != null) {
+        builder.abandon();
+        builder.close();
+        fileClose = builder.file.asyncClose();
+      } else {
+        fileClose = CompletableFuture.completedFuture(null);
+      }
+
+      pendingOutputs
+          .removeAll(outputs.stream().map(FileMetaData::getNumber).collect(Collectors.toSet()));
+      return fileClose;
+    }
+
+    public CompletionStage<Void> openCompactionOutputFile() {
+      assert builder == null;
+
+      final long fileNumber = versions.getAndIncrementNextFileNumber();
+      pendingOutputs.add(fileNumber);
+      currentFileNumber = fileNumber;
+      currentSmallest = null;
+      currentLargest = null;
+
+      return options.env().openSequentialWriteFile(FileInfo.table(dbHandle, fileNumber))
+          .thenAccept(writeFile -> builder = new TableBuilder(options.blockRestartInterval(),
+              options.blockSize(), options.compression(), writeFile, internalKeyComparator));
+    }
+
+    public CompletionStage<Void> finishCompactionOutputFile() {
+      assert builder != null;
+      assert currentFileNumber > 0;
+
+      return closeAfter(builder.finish(), builder.file).thenCompose(fileSize -> {
+        outputs.add(new FileMetaData(currentFileNumber, fileSize, currentSmallest, currentLargest));
+        builder = null;
+        if (fileSize > Footer.ENCODED_LENGTH) {
+          return Table.load(options.env(), dbHandle, currentFileNumber, internalKeyComparator,
+              options.verifyChecksums(), options.compression()).thenCompose(Table::release);
+        } else {
+          return CompletableFuture.completedFuture(null);
+        }
+      });
+    }
+
+    public CompletionStage<Void> installResults() {
+      // Add compaction outputs
+      compaction.addInputDeletions(compaction.getEdit());
+      final int level = compaction.getLevel();
+      for (final FileMetaData output : outputs) {
+        compaction.getEdit().addFile(level + 1, output);
+      }
+
+      return CompletableFutures
+          .composeOnException(versions.logAndApply(compaction.getEdit()), exception -> {
+            LOGGER.debug("{} compaction failed due to {}. will try again later", DbImpl.this,
+                exception.toString());
+            return CompletableFutures.allOfVoid(outputs.stream().map(fileMetaData -> options.env()
+                .deleteFile(FileInfo.table(dbHandle, fileMetaData.getNumber()))));
+          }).thenCompose(voided -> deleteObsoleteFiles());
     }
   }
 
@@ -1210,58 +935,199 @@ public class DbImpl implements DB {
     }
   }
 
-  private static WriteBatchImpl readWriteBatch(final ByteBuffer record, final int updateSize)
-      throws IOException {
-    @SuppressWarnings("resource")
-    final WriteBatchImpl writeBatch = new WriteBatchImpl.WriteBatchMulti();
-    int entries = 0;
-    while (record.hasRemaining()) {
-      entries++;
-      final ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
-      if (valueType == VALUE) {
-        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
-        final ByteBuffer value = ByteBuffers.readLengthPrefixedBytes(record);
-        writeBatch.put(key, value);
-      } else if (valueType == DELETION) {
-        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
-        writeBatch.delete(key);
-      } else {
-        throw new IllegalStateException("Unexpected value type " + valueType);
-      }
+  private static class MemTableAndLog {
+    // group the memtable and its accompanying log so that concurrent writes
+    // can't be split between structures and subsequently lost in crash
+    final MemTable memTable;
+    final LogWriter log;
+    DeletionHandle<?> immutableQueueHandle;
+    final CompletableFuture<Void> flush = new CompletableFuture<>();
+    final CompletableFuture<Void> swap = new CompletableFuture<>();
+    final DeletionQueue<CompletableFuture<Snapshot>> pendingWriters = new DeletionQueue<>();
+    volatile boolean requiresFlush = false;
+
+    public MemTableAndLog(final MemTable memTable, final LogWriter log) {
+      this.memTable = memTable;
+      this.log = log;
     }
 
-    if (entries != updateSize) {
-      throw new IOException(String.format("Expected %d entries in log record but found %s entries",
-          updateSize, entries));
+    public void markUnpersisted() {
+      this.requiresFlush = true;
     }
 
-    return writeBatch;
+    public boolean isUnpersisted() {
+      return this.requiresFlush;
+    }
   }
 
-  private ByteBuffer writeWriteBatch(final WriteBatchImpl updates, final long sequenceBegin) {
-    // TODO send write batch straight down to logs, rework LogWriter as necessary
-    final ByteBuffer record =
-        options.memoryManager().allocate(SIZE_OF_LONG + SIZE_OF_INT + updates.getApproximateSize());
-    record.mark();
-    record.putLong(sequenceBegin);
-    record.putInt(updates.size());
-    updates.forEach(new Handler() {
-      @Override
-      public void put(final ByteBuffer key, final ByteBuffer value) {
-        record.put(VALUE.getPersistentId());
-        ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
+  private class MemTables {
+    private final DeletionQueue<MemTableAndLog> immutableTables = new DeletionQueue<>();
+    private volatile MemTableAndLog mutable;
+    private final AtomicInteger pendingCount = new AtomicInteger(0);
 
-        ByteBuffers.writeLengthPrefixedBytesTransparent(record, value);
+    private MemTables(final MemTableAndLog first) {
+      this.mutable = first;
+    }
+
+    public LookupResult get(final LookupKey key) {
+      LookupResult result;
+      if ((result = mutable.memTable.get(key)) != null) {
+        return result;
       }
 
-      @Override
-      public void delete(final ByteBuffer key) {
-        record.put(DELETION.getPersistentId());
-        ByteBuffers.writeLengthPrefixedBytesTransparent(record, key);
+      for (final MemTableAndLog memlog : immutableTables) {
+        if ((result = memlog.memTable.get(key)) != null) {
+          return result;
+        }
       }
-    });
-    record.limit(record.position()).reset();
-    return record;
+      return null;
+    }
+
+    CompletionStage<Entry<DeletionHandle<CompletableFuture<Snapshot>>, MemTableAndLog>> makeRoomForWrite(
+        final int writeUsageSize) {
+      assert writeUsageSize > 0;
+      final int memtableMax = options.writeBufferSize();
+
+      final MemTableAndLog current = mutable;
+      final DeletionHandle<CompletableFuture<Snapshot>> writeOperation =
+          current.pendingWriters.insert(new CompletableFuture<>());
+      if (shuttingDown.get()) {
+        // inserted before shutdown check to avoid race
+        writeOperation.close();
+        writeOperation.item.complete(null);
+        return CompletableFutures.exceptionalFuture(
+            new DatabaseShutdownException("attempted to write while database is shutting down"));
+      }
+
+      final long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
+      if (previousUsage <= memtableMax) {
+        if (previousUsage + writeUsageSize > memtableMax) {
+          /*
+           * this condition can only be true for one writer. this writer is the one which exceeded
+           * the memtable buffer limit first, so here we swap the memtables
+           */
+          return swapTables(current)
+              .thenApply(voided -> Maps.immutableEntry(writeOperation, current));
+        } else {
+          // this write can fit into the memtable
+          return CompletableFuture.completedFuture(Maps.immutableEntry(writeOperation, current));
+        }
+      } else {
+        /*
+         * the write exceeds the memtable usage limit, but it was not the first to do so. wait for
+         * the new memtable to be created. incidentally, this means that the memtable's memory usage
+         * was incremented superfluously; it won't receive any further writes, however, and the
+         * usage changes are only relevant to this function
+         */
+        writeOperation.close();
+        writeOperation.item.complete(null);
+        return current.swap.thenCompose(voided -> makeRoomForWrite(writeUsageSize));
+      }
+    }
+
+    private CompletionStage<Void> swapTables(final MemTableAndLog memlog) {
+      int count;
+      do {
+        count = pendingCount.get();
+        if (count >= options.writeBufferLimit()) {
+          // TODO safe recursion
+          return immutableTables.peekLast().flush.thenCompose(voided -> swapTables(memlog));
+        }
+      } while (pendingCount.compareAndSet(count, count + 1));
+
+      // we are under limit, safe to start a new table and to insert the immutable
+      final CompletionStage<Void> createAndSwap =
+          Logs.createLogWriter(FileInfo.log(dbHandle, versions.getAndIncrementNextFileNumber()),
+              options.env()).thenAccept(logWriter -> {
+                final MemTable newTable = new MemTable(internalKeyComparator);
+                // there is a brief period of time between the next two calls during which the
+                // current memlog exists in both the immutable table list and the mutable variable
+                // TODO measure performance cost of fixing this with unified list
+                memlog.immutableQueueHandle = immutableTables.insertFirst(memlog);
+                mutable = new MemTableAndLog(newTable, logWriter);
+              });
+
+      // declare the swap successful, allowing writers waiting on a new table to proceed
+      CompletableFutures.chain(createAndSwap, memlog.swap);
+
+      // perform the memlog flush in the background while swapping the tables
+      options.env().getExecutor()
+          .execute(() -> CompletableFutures.chain(writeLevel0Table(memlog), memlog.flush));
+
+      // after the flush is successful, remove the immutable table from the pending list and
+      // decrement the count. we must ensure that this is done after the new table is created, as
+      // that's when we insert into the immutable list and populate the handle
+
+      // TODO check exceptions around flush
+      createAndSwap.runAfterBoth(memlog.flush, () -> {
+        memlog.immutableQueueHandle.close();
+        pendingCount.decrementAndGet();
+      });
+      return createAndSwap;
+    }
+
+    private CompletionStage<Void> writeLevel0Table(final MemTableAndLog memlog) {
+      // TODO check on suspended compaction
+      return CompletableFuture.allOf((CompletableFuture[]) memlog.pendingWriters.toArray())
+          .thenCompose(writersFinished -> {
+            // skip empty mem table
+            if (memlog.memTable.isEmpty()) {
+              return CompletableFuture.completedFuture(null);
+            }
+
+            // write the memtable to a new sstable
+            final long fileNumber = versions.getAndIncrementNextFileNumber();
+            pendingOutputs.add(fileNumber);
+            return buildTable(memlog.memTable.entryIterable(), fileNumber, internalKeyComparator,
+                dbHandle, options)
+                    .whenComplete((meta, exception) -> pendingOutputs.remove(fileNumber))
+                    .thenCompose(meta -> {
+              final VersionEdit edit = new VersionEdit();
+              // Note that if file size is zero, the file has been deleted and
+              // should not be added to the manifest.
+              if (meta != null && meta.getFileSize() > 0) {
+                final ByteBuffer minUserKey = meta.getSmallest().getUserKey();
+                final ByteBuffer maxUserKey = meta.getLargest().getUserKey();
+                final int level =
+                    // TODO harden this against concurrent compactions
+                    // base != null ? base.pickLevelForMemTableOutput(minUserKey, maxUserKey) :
+                    0;
+                edit.addFile(level, meta);
+              }
+              edit.setPreviousLogNumber(0);
+              edit.setLogNumber(memlog.log.getFileNumber()); // Earlier logs no longer needed
+              return versions.logAndApply(edit);
+            }).thenCompose(version -> {
+              maybeScheduleCompaction();
+              return deleteIgnoringFileNotFound(options.env(),
+                  FileInfo.log(dbHandle, memlog.log.getFileNumber()));
+            });
+          });
+    }
+  }
+
+  private static class ExceptionHandler implements UncaughtExceptionHandler {
+    // TODO this might be overkill, reconsider tablecache and compaction exceptions
+
+    private final DBHandle dbHandle;
+    private final Queue<Throwable> backgroundExceptions = new ConcurrentLinkedQueue<>();
+
+    ExceptionHandler(final DBHandle dbHandle) {
+      this.dbHandle = dbHandle;
+    }
+
+    @Override
+    public void uncaughtException(final Thread t, final Throwable e) {
+      LOGGER.error("{} error in background thread", dbHandle, e);
+      backgroundExceptions.add(e);
+    }
+
+    public void checkBackgroundException() throws Throwable {
+      final Throwable t = backgroundExceptions.poll();
+      if (t != null) {
+        throw t;
+      }
+    }
   }
 
   private static class InsertIntoHandler implements Handler {
@@ -1312,232 +1178,6 @@ public class DbImpl implements DB {
 
     public DBException(final String message) {
       super(message);
-    }
-  }
-
-  private final Object suspensionMutex = new Object();
-  private int suspensionCounter = 0;
-
-  @Override
-  public void suspendCompactions() throws InterruptedException {
-    compactionExecutor.execute(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          synchronized (suspensionMutex) {
-            suspensionCounter++;
-            suspensionMutex.notifyAll();
-            while (suspensionCounter > 0 && !compactionExecutor.isShutdown()) {
-              suspensionMutex.wait(500);
-            }
-          }
-        } catch (final InterruptedException e) {
-        }
-      }
-    });
-    synchronized (suspensionMutex) {
-      while (suspensionCounter < 1) {
-        suspensionMutex.wait();
-      }
-    }
-  }
-
-  @Override
-  public void resumeCompactions() {
-    synchronized (suspensionMutex) {
-      suspensionCounter--;
-      suspensionMutex.notifyAll();
-    }
-  }
-
-  @Override
-  public void compactRange(final byte[] begin, final byte[] end) throws DBException {
-    throw new UnsupportedOperationException("Not yet implemented");
-  }
-
-  @Override
-  public CompletionStage<DBIterator> iterator(final ReadOptions options) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<Long> getApproximateSize(final ByteBuffer begin, final ByteBuffer end) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<Void> suspendCompactions() {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<Void> resumeCompactions() {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<Void> compactRange(final ByteBuffer begin, final ByteBuffer end) {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  private static class MemTableAndLog {
-    // group the memtable and its accompanying log so that concurrent writes
-    // can't be split between structures and subsequently lost in crash
-    final MemTable memTable;
-    final LogWriter log;
-    final CompletableFuture<?> flush = new CompletableFuture<>();
-    final CompletableFuture<?> swap = new CompletableFuture<>();
-    DeletionHandle deletionHandle;
-    volatile boolean requiresFlush = false;
-
-    public MemTableAndLog(final MemTable memTable, final LogWriter log) {
-      this.memTable = memTable;
-      this.log = log;
-    }
-
-    public void markUnpersisted() {
-      this.requiresFlush = true;
-    }
-
-    public boolean isUnpersisted() {
-      return this.requiresFlush;
-    }
-  }
-
-  private class MemTables {
-    private final DeletionQueue<MemTableAndLog> immutableTables = new DeletionQueue<>();
-    private volatile MemTableAndLog mutable;
-    private final AtomicInteger pendingCount = new AtomicInteger(0);
-
-    private MemTables(final MemTableAndLog first) {
-      this.mutable = first;
-    }
-
-    private CompletionStage<?> submitImmutableTable(final MemTableAndLog memlog) {
-      int count;
-      do {
-        count = pendingCount.get();
-        if (count >= options.writeBufferLimit()) {
-          // TODO safe recursion
-          return immutableTables.peekLast().flush
-              .thenCompose(voided -> submitImmutableTable(memlog));
-        }
-      } while (pendingCount.compareAndSet(count, count + 1));
-
-      // we are under limit, safe to insert
-      final CompletionStage<CompletionStage<?>> schedule =
-          CompletableFuture.supplyAsync(() -> /* flush */null, options.env().getExecutor());
-      CompletableFutures.chain(schedule, memlog.flush,
-          (scheduledFlush, memlogFlush) -> CompletableFutures.chain(scheduledFlush, memlogFlush,
-              (flushSuccess, memlogFlush_) -> {
-                immutableTables.delete(memlog.deletionHandle);
-                memlogFlush_.complete(null);
-              }));
-      return schedule;
-    }
-
-    public LookupResult lookup(final LookupKey key) {
-      return null;
-    }
-
-    private CompletionStage<MemTableAndLog> makeRoomForWrite(final int writeUsageSize) {
-      final int memtableMax = options.writeBufferSize();
-      MemTableAndLog current;
-      do {
-        current = mutable;
-
-        final long previousUsage = current.memTable.getAndAddApproximateMemoryUsage(writeUsageSize);
-        if (previousUsage <= memtableMax && previousUsage + writeUsageSize > memtableMax) {
-          // this condition can only be true for one writer
-          // this writer is the one which exceeded the memtable buffer limit first
-          // so here we swap the memtables
-
-          // if the previous memtable hasn't been flushed yet, we must wait
-          MemTables tables;
-          while ((tables = this.memTables).immutableExists()) {
-            current.acquireUpgraded(); // block other writers that might be spinning in wait for a
-                                       // new
-                                       // memtable
-            try {
-              tables.waitForImmutableCompaction();
-              checkBackgroundException();
-            } catch (final Throwable e) {
-              current.memTable.release();
-              current.release();
-              throw e;
-            } finally {
-              current.releaseDowngraded();
-            }
-          }
-
-          final long logNumber = versions.getNextFileNumber();
-          try {
-            this.memTables = new MemTables(
-                new MemTableAndLog(
-                    new MemTable(internalKeyComparator, userOptions.specifiedMemoryManager(),
-                        options.memoryManager()),
-                    Logs.createLogWriter(FileInfo.log(dbHandle, logNumber), logNumber, options)),
-                current);
-          } catch (final IOException e) {
-            // we've failed to create a new memtable and update mutable/immutable
-            // other writers trying to acquire it (those spinning in this loop, or new writers)
-            // should
-            // be fail
-            setBackgroundException(e);
-            current.memTable.release();
-            current.release();
-            throw new DBException(e);
-          }
-
-          old_scheduleCompaction();
-          break;
-        } else if (previousUsage < memtableMax) {
-          // this write can fit into the memtable
-          break;
-        } else {
-          // the write exceeds the memtable usage limit, but it was not the first to do so
-          // loop back and acquire the new memtable.
-          // incidentally, this means that the memtable's memory usage was incremented superfluously
-          // it won't receive any further writes, however, and the usage changes are only relevant
-          // to
-          // this function
-
-          current.memTable.release();
-          current.release();
-          checkBackgroundException();
-        }
-      } while (true);
-
-      return current;
-    }
-  }
-
-  private static class ExceptionHandler implements UncaughtExceptionHandler {
-    // TODO this might be overkill, reconsider tablecache and compaction exceptions
-
-    private final DBHandle dbHandle;
-    private final Queue<Throwable> backgroundExceptions = new ConcurrentLinkedQueue<>();
-
-    ExceptionHandler(final DBHandle dbHandle) {
-      this.dbHandle = dbHandle;
-    }
-
-    @Override
-    public void uncaughtException(final Thread t, final Throwable e) {
-      LOGGER.error("{} error in background thread", dbHandle, e);
-      backgroundExceptions.add(e);
-    }
-
-    public void checkBackgroundException() throws Throwable {
-      final Throwable t = backgroundExceptions.poll();
-      if (t != null) {
-        throw t;
-      }
     }
   }
 }

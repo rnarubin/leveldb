@@ -25,7 +25,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
@@ -162,10 +161,9 @@ public abstract class LogTest extends EnvDependentTest {
 
     try {
       LogReader.newLogReader(getEnv(), fileInfo, LogMonitors.throwExceptionMonitor(), true, 0)
-          .thenCompose(logReader -> CompletableFutures.<Stream<Long>, Void>composeUnconditionally(
-              CompletableFutures.mapAndCollapse(logReader,
-                  record -> recordCounts.decrementAndGet(record), getEnv().getExecutor()),
-              ignored -> logReader.asyncClose()))
+          .thenCompose(logReader -> CompletableFutures.closeAfter(
+              logReader.reduce(null, (ignored, record) -> recordCounts.decrementAndGet(record)),
+              logReader))
           .toCompletableFuture().get(30, TimeUnit.SECONDS);
     } catch (InterruptedException | ExecutionException | TimeoutException e) {
       throw new AssertionError(e);

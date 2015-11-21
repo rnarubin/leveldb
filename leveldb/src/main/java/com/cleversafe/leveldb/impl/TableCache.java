@@ -25,7 +25,6 @@ import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.Compression;
 import com.cleversafe.leveldb.Env;
 import com.cleversafe.leveldb.Env.DBHandle;
-import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.Table.TableIterator;
 import com.cleversafe.leveldb.util.CompletableFutures;
@@ -41,6 +40,7 @@ public class TableCache implements AsynchronousCloseable {
    * release (i.e. IOException on dispose) they remain in the set to throw an exception on the
    * TableCache's close
    */
+  // TODO deletion quueue
   private final Set<CompletionStage<Void>> pendingRemovals = new ConcurrentSkipListSet<>();
   // TODO look into ben-manes/caffeine
   private final LoadingCache<Long, CompletionStage<Table>> cache;
@@ -72,7 +72,7 @@ public class TableCache implements AsynchronousCloseable {
         }).build(new CacheLoader<Long, CompletionStage<Table>>() {
           @Override
           public CompletionStage<Table> load(final Long fileNumber) {
-            return loadTable(env, dbHandle, fileNumber, internalKeyComparator, verifyChecksums,
+            return Table.load(env, dbHandle, fileNumber, internalKeyComparator, verifyChecksums,
                 compression);
           }
         });
@@ -111,14 +111,5 @@ public class TableCache implements AsynchronousCloseable {
   public CompletionStage<Void> asyncClose() {
     cache.invalidateAll();
     return CompletableFutures.allOfVoid(pendingRemovals.stream());
-  }
-
-  public static CompletionStage<Table> loadTable(final Env env, final DBHandle dbHandle,
-      final long fileNumber, final Comparator<InternalKey> internalKeyComparator,
-      final boolean verifyChecksums, final Compression compression) {
-    return env.openRandomReadFile(FileInfo.table(dbHandle, fileNumber))
-        .thenCompose(file -> CompletableFutures.composeOnException(
-            Table.newTable(file, internalKeyComparator, verifyChecksums, compression),
-            throwable -> file.asyncClose()));
   }
 }

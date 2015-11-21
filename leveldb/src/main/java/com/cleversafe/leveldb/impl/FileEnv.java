@@ -46,6 +46,7 @@ import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.util.ByteBuffers;
 import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.CompletableFutures;
+import com.cleversafe.leveldb.util.Iterators;
 import com.cleversafe.leveldb.util.MemoryManagers;
 import com.cleversafe.leveldb.util.ObjectPool.PooledObject;
 import com.cleversafe.leveldb.util.ObjectPools;
@@ -115,14 +116,11 @@ public class FileEnv extends PathEnv {
 
   @Override
   protected CompletionStage<Void> deleteDB(final Path path, final Predicate<Path> fileNameFilter) {
-    // instead of blindly deleting the entire directory, delete all files owned by the DB.
-    // if the dir is empty after those deletions, delete the dir
-    // TODO(maybe) deletion default on interface, recurse with Y combinator
+    // if the dir is empty after deleting all owned files, delete the dir
     return submit(() -> new DirectoryIterator<Path>(path, fileNameFilter, Function.identity()))
-        .thenCompose(iter -> CompletableFutures.composeUnconditionally(
-            CompletableFutures.mapAndCollapse(iter, this::deleteFile, getExecutor()).thenCompose(
-                deletions -> CompletableFutures.allOf(deletions).thenApply(voided -> null)),
-            voided -> iter.asyncClose()))
+        .thenCompose(fileIter -> CompletableFutures
+            .closeAfter(Iterators.toStream(fileIter.map(this::deleteFile)), fileIter)
+            .thenCompose(CompletableFutures::allOfVoid))
         .thenCompose(voided -> submit(() -> !Files.list(path).findAny().isPresent())).thenCompose(
             isEmpty -> isEmpty ? deleteFile(path) : CompletableFuture.completedFuture(null));
   }
