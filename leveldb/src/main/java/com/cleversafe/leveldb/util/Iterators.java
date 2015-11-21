@@ -25,7 +25,9 @@ import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.stream.Stream;
 
+import com.cleversafe.leveldb.AsynchronousIterator;
 import com.cleversafe.leveldb.impl.ReverseIterator;
 import com.cleversafe.leveldb.impl.ReversePeekingIterator;
 import com.cleversafe.leveldb.impl.ReverseSeekingIterator;
@@ -50,6 +52,10 @@ public final class Iterators {
   public static <K, V> SeekingAsynchronousIterator<K, V> async(
       final ReverseSeekingIterator<K, V> iter) {
     return new AsyncWrappedSeekingIterator<>(iter);
+  }
+
+  public static <T> CompletionStage<Stream<T>> toStream(final AsynchronousIterator<T> iter) {
+    return iter.reduce(Stream.<T>builder(), Stream.Builder::add).thenApply(Stream.Builder::build);
   }
 
   public static <T> ListReverseIterator<T> listReverseIterator(final ListIterator<T> listIter) {

@@ -18,9 +18,11 @@ package com.cleversafe.leveldb.util;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -78,10 +80,19 @@ public class CompletableFuturesTest {
         Arrays.asList("abc", "bat", "alpaca", "dog", "cow", "aardvark", "apple");
     final List<String> expected = unfiltered.stream().filter(filter).collect(Collectors.toList());
     final List<String> actual =
-        CompletableFutures
-            .filterMapAndCollapse(Iterators.async(unfiltered.iterator()), filter,
-                Function.identity(), Runnable::run)
+        Iterators.toStream(Iterators.async(unfiltered.iterator()).filter(filter))
             .toCompletableFuture().get().collect(Collectors.toList());
+    Assert.assertEquals(actual, expected);
+  }
+
+  @Test
+  public void testUnroll() throws InterruptedException, ExecutionException, TimeoutException {
+    final int expected = 100_000;
+
+    final CompletionStage<Integer> c = CompletableFutures.unrollImmediate(i -> i < expected,
+        i -> CompletableFuture.completedFuture(i + 1), 0);
+    final int actual = c.toCompletableFuture().get(5, TimeUnit.SECONDS);
+
     Assert.assertEquals(actual, expected);
   }
 
