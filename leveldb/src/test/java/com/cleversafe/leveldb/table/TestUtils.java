@@ -423,9 +423,9 @@ public final class TestUtils {
         new TableBuilder(blockRestartInterval, blockSize, compression, writeFile, keyComparator);
         final AutoCloseable c = autoCloseable(writeFile)) {
 
-      CompletionStage<Void> last = CompletableFuture.completedFuture(null);
+      CompletionStage<?> last = CompletableFuture.completedFuture(null);
       for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-        last = last.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
+        last = last.thenCompose(voided -> builder.add(entry));
       }
 
       final long fileSize =

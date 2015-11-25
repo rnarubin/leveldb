@@ -14,7 +14,6 @@
  */
 package com.cleversafe.leveldb.impl;
 
-import static com.cleversafe.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
 import static com.cleversafe.leveldb.impl.ValueType.DELETION;
 import static com.cleversafe.leveldb.impl.ValueType.VALUE;
 import static com.cleversafe.leveldb.util.CompletableFutures.closeAfter;
@@ -27,7 +26,7 @@ import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -37,6 +36,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -51,12 +51,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.cleversafe.leveldb.AsynchronousCloseable;
+import com.cleversafe.leveldb.AsynchronousIterator;
 import com.cleversafe.leveldb.DB;
 import com.cleversafe.leveldb.DBIterator;
 import com.cleversafe.leveldb.Env;
 import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.Env.LockFile;
-import com.cleversafe.leveldb.Env.SequentialWriteFile;
 import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.FileInfo.FileType;
 import com.cleversafe.leveldb.Options;
@@ -75,7 +75,6 @@ import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.DeletionQueue;
 import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
 import com.cleversafe.leveldb.util.Iterators;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 
@@ -94,13 +93,12 @@ public class DbImpl implements DB {
   private final InternalKeyComparator internalKeyComparator;
   private final ExceptionHandler exceptionHandler;
   private final MemTables memTables;
-
+  private final Compactions compactions = new Compactions();
   private final Snapshots snapshots = new Snapshots();
   private final AtomicBoolean shuttingDown = new AtomicBoolean();
-  private final AtomicReference<CompletionStage<Void>> bgCompaction = new AtomicReference<>(null);
   private final DeletionQueue<CompletableFuture<?>> openOperations = new DeletionQueue<>();
-  // TODO deletionqueue?
-  private final Collection<Long> pendingOutputs = new ConcurrentLinkedQueue<>();
+
+  private final Set<Long> pendingOutputs = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   DbImpl(final Options options, final DBHandle dbHandle, final LockFile dbLock,
       final VersionSet versions, final TableCache tableCache,
@@ -114,7 +112,7 @@ public class DbImpl implements DB {
     this.internalKeyComparator = internalKeyComparator;
     this.exceptionHandler = exceptionHandler;
     this.memTables = new MemTables(memlog);
-    maybeScheduleCompaction();
+    compactions.maybeScheduleVersionCompaction();
   }
 
   @Override
@@ -349,6 +347,7 @@ public class DbImpl implements DB {
         tableCache, options.env(), dbHandle);
   }
 
+  // FIXME this isn't concurrently safe
   private static CompletionStage<Void> deleteObsoleteFiles(final Stream<FileMetaData> liveFiles,
       final Stream<Long> pendingOutputs, final long logNumber, final long prevLogNumber,
       final long manifestNumber, final TableCache tableCache, final Env env,
@@ -395,7 +394,7 @@ public class DbImpl implements DB {
   }
 
   public void checkBackgroundException() {
-    // TODO
+    exceptionHandler.checkBackgroundException();
   }
 
   @Override
@@ -436,7 +435,7 @@ public class DbImpl implements DB {
     // TODO checksums and cache down to tables
     return versions.get(lookupKey).thenApply(lookupResult -> {
       // possibly necessitated seek threshold compaction
-      maybeScheduleCompaction();
+      compactions.maybeScheduleVersionCompaction();
       return lookupResult.getValue();
     });
   }
@@ -632,40 +631,36 @@ public class DbImpl implements DB {
       final Options options) {
     final Env env = options.env();
     final FileInfo fileInfo = FileInfo.table(dbHandle, fileNumber);
-    return CompletableFutures.composeOnException(
-        env.openSequentialWriteFile(fileInfo)
-            .thenCompose(file -> closeAfter(buildTableStep(data.iterator(), fileNumber, file,
-                options, internalKeyComparator, dbHandle), file)),
-        buildFailedException -> env.fileExists(fileInfo).thenCompose(
-            exists -> exists ? env.deleteFile(fileInfo) : CompletableFuture.completedFuture(null)));
-  }
+    return CompletableFutures
+        .composeOnException(env.openSequentialWriteFile(fileInfo).thenCompose(file -> {
 
-  private static final CompletionStage<FileMetaData> buildTableStep(
-      final Iterator<Entry<InternalKey, ByteBuffer>> data, final long fileNumber,
-      final SequentialWriteFile file, final Options options,
-      final InternalKeyComparator internalKeyComparator, final DBHandle dbHandle) {
-    Preconditions.checkArgument(data.hasNext(), "cannot build from empty table");
+          final Iterator<Entry<InternalKey, ByteBuffer>> dataIter = data.iterator();
+          Preconditions.checkArgument(dataIter.hasNext(), "cannot build from empty table");
+          final Entry<InternalKey, ByteBuffer> first = dataIter.next();
+          final InternalKey smallest = first.getKey();
 
-    final TableBuilder builder = new TableBuilder(options.blockRestartInterval(),
-        options.blockSize(), options.compression(), file, internalKeyComparator);
-    Entry<InternalKey, ByteBuffer> entry = data.next();
-    final InternalKey smallest = entry.getKey();
-
-    // TODO consider recursion if prohibitive for huge memtables
-    CompletionStage<Void> chain = builder.add(entry.getKey(), entry.getValue());
-    while (data.hasNext()) {
-      entry = data.next();
-      chain = builder.add(entry.getKey(), entry.getValue());
-    }
-    final InternalKey largest = entry.getKey();
-    return chain.thenCompose(voided -> builder.finish())
-        .whenComplete((success, exception) -> builder.close())
-        .thenCompose(fileSize -> Table
-            // verify table can be opened
+          final TableBuilder builder = new TableBuilder(options.blockRestartInterval(),
+              options.blockSize(), options.compression(), file, internalKeyComparator);
+          return closeAfter(
+              // TODO coalesce deletions and writes
+              CompletableFutures
+                  .unrollImmediate(
+                      ignored -> dataIter
+                          .hasNext(),
+                      builder::add, first)
+                  .thenCompose(largestEntry -> builder.finish()
+                      .whenComplete((success, exception) -> builder.close())
+                      .thenApply(fileSize -> new FileMetaData(fileNumber, fileSize,
+                          smallest.heapCopy(), largestEntry.getKey().heapCopy()))),
+              file);
+        }), buildFailedException -> env.fileExists(fileInfo)
+            .thenCompose(fileExists -> fileExists ? env.deleteFile(fileInfo)
+                : CompletableFuture.completedFuture(null)))
+        // verify table can be opened
+        .thenCompose(fileMetaData -> Table
             .load(options.env(), dbHandle, fileNumber, internalKeyComparator,
                 options.verifyChecksums(), options.compression())
-            .thenCompose(Table::release)
-            .thenApply(voided -> new FileMetaData(fileNumber, fileSize, smallest, largest)));
+            .thenCompose(Table::release).thenApply(voided -> fileMetaData));
   }
 
   public CompletionStage<?> flushMemTable() {
@@ -677,13 +672,7 @@ public class DbImpl implements DB {
   }
 
   @Override
-  public CompletionStage<Void> suspendCompactions() {
-    // TODO Auto-generated method stub
-    return null;
-  }
-
-  @Override
-  public CompletionStage<Void> resumeCompactions() {
+  public CompletionStage<CompactionSuspension> suspendCompactions() {
     // TODO Auto-generated method stub
     return null;
   }
@@ -694,245 +683,12 @@ public class DbImpl implements DB {
     return null;
   }
 
-  private void maybeScheduleCompaction() {
-    final CompletableFuture<Void> compactionFuture;
-    if (!shuttingDown.get() && versions.needsCompaction()
-        && bgCompaction.compareAndSet(null, compactionFuture = new CompletableFuture<>())) {
-      // only schedule if needed and one isn't already running
-      options.env().getExecutor().execute(() -> {
-        final DeletionHandle<CompletableFuture<?>> compactionOperation =
-            openOperations.insert(compactionFuture);
-        backgroundCompaction(versions.pickCompaction()).whenComplete((success, exception) -> {
-          // TODO exception
-          bgCompaction.compareAndSet(compactionFuture, null);
-          compactionOperation.close();
-          compactionOperation.item.complete(null);
-          maybeScheduleCompaction();
-        });
-      });
-    }
-  }
-
-  private CompletionStage<Void> backgroundCompaction(final Compaction c) {
-    if (c == null) {
-      return CompletableFuture.completedFuture(null);
-    }
-    LOGGER.debug("{} beginning compaction", this);
-    if (c.isTrivialMove()) {
-      final FileMetaData fileMetaData = c.input(0, 0);
-      c.getEdit().deleteFile(c.getLevel(), fileMetaData.getNumber());
-      c.getEdit().addFile(c.getLevel() + 1, fileMetaData);
-      return versions.logAndApply(c.getEdit());
-    }
-    return versions.makeInputIterator(c).thenCompose(iter -> {
-      final CompactionState compactionState = new CompactionState(c, snapshots.getOldestSequence());
-      return closeAfter(closeAfter(doCompactionWork(compactionState, iter), iter)
-          .thenCompose(optCompactionState -> optCompactionState.map(CompactionState::installResults)
-              .orElseGet(() -> CompletableFuture.completedFuture(null))),
-          compactionState);
-    });
-  }
-
-  /**
-   * @return empty if terminated before completion
-   */
-  private CompletionStage<Optional<CompactionState>> doCompactionWork(
-      final CompactionState compactionState,
-      final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter) {
-    try {
-
-      ByteBuffer currentUserKey = null;
-      boolean hasCurrentUserKey = false;
-
-      long lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-      while (iterator.hasNext() && !shuttingDown.get()) {
-        // always give priority to compacting the current mem table
-        compactMemTableInternal();
-
-        final InternalKey key = iterator.peek().getKey();
-        if (compactionState.compaction.shouldStopBefore(key) && compactionState.builder != null) {
-          finishCompactionOutputFile(compactionState);
-        }
-
-        // Handle key/value, add to state, etc.
-        boolean drop = false;
-        // todo if key doesn't parse (it is corrupted),
-        /*
-         * if (false //!ParseInternalKey(key, &ikey)) { // do not hide error keys currentUserKey =
-         * null; hasCurrentUserKey = false; lastSequenceForKey = MAX_SEQUENCE_NUMBER; } else
-         */
-        {
-          if (!hasCurrentUserKey || internalKeyComparator.getUserComparator()
-              .compare(key.getUserKey(), currentUserKey) != 0) {
-            // First occurrence of this user key
-            currentUserKey = ByteBuffers.heapCopy(key.getUserKey());
-            hasCurrentUserKey = true;
-            lastSequenceForKey = MAX_SEQUENCE_NUMBER;
-          }
-
-          if (lastSequenceForKey <= compactionState.smallestSnapshot) {
-            // Hidden by an newer entry for same user key
-            drop = true; // (A)
-          } else if (key.getValueType() == ValueType.DELETION
-              && key.getSequenceNumber() <= compactionState.smallestSnapshot
-              && compactionState.compaction.isBaseLevelForKey(key.getUserKey())) {
-
-            // For this user key:
-            // (1) there is no data in higher levels
-            // (2) data in lower levels will have larger sequence numbers
-            // (3) data in layers that are being compacted here and have
-            // smaller sequence numbers will be dropped in the next
-            // few iterations of this loop (by rule (A) above).
-            // Therefore this deletion marker is obsolete and can be dropped.
-            drop = true;
-          }
-
-          lastSequenceForKey = key.getSequenceNumber();
-        }
-
-        if (!drop) {
-          // Open output file if necessary
-          if (compactionState.builder == null) {
-            openCompactionOutputFile(compactionState);
-          }
-          if (compactionState.builder.getEntryCount() == 0) {
-            compactionState.currentSmallest = key.heapCopy();
-          }
-          compactionState.currentLargest = key;
-          compactionState.builder.add(key, iterator.peek().getValue());
-
-          // Close output file if it is big enough
-          if (compactionState.builder.getFileSize() >= compactionState.compaction
-              .getMaxOutputFileSize()) {
-            compactionState.currentLargest = compactionState.currentLargest.heapCopy();
-            finishCompactionOutputFile(compactionState);
-          }
-        }
-        iterator.next();
-      }
-      if (compactionState.currentLargest != null) {
-        compactionState.currentLargest = compactionState.currentLargest.heapCopy();
-      }
-
-      if (shuttingDown.get()) {
-        throw new DatabaseShutdownException("DB shutdown during compaction");
-      }
-      if (compactionState.builder != null) {
-        finishCompactionOutputFile(compactionState);
-      }
-    } catch (final Throwable t) {
-      try {
-        cleanupCompaction(compactionState);
-      } catch (final Throwable ignored) {
-      }
-      throw t;
-    } finally {
-      mutex.lock();
-    }
-
-    // TODO port CompactionStats code
-  }
-
   int numberOfFilesInLevel(final int level) {
     return versions.getCurrent().numberOfFilesInLevel(level);
   }
 
   public long getMaxNextLevelOverlappingBytes() {
     return versions.getMaxNextLevelOverlappingBytes();
-  }
-
-  private class CompactionState implements AsynchronousCloseable {
-    private final Compaction compaction;
-    private final List<FileMetaData> outputs = new ArrayList<>();
-    private final long smallestSequence;
-
-    // Current file being generated
-    private TableBuilder builder;
-    private long currentFileNumber = -1;
-    private InternalKey currentSmallest;
-    private InternalKey currentLargest;
-
-    // private long totalBytes;
-
-    private CompactionState(final Compaction compaction, final long smallestSeqeuence) {
-      this.compaction = compaction;
-      this.smallestSequence = smallestSeqeuence;
-    }
-
-    @Override
-    public CompletionStage<Void> asyncClose() {
-      final CompletionStage<Void> fileClose;
-      if (builder != null) {
-        builder.abandon();
-        builder.close();
-        fileClose = builder.file.asyncClose();
-      } else {
-        fileClose = CompletableFuture.completedFuture(null);
-      }
-
-      pendingOutputs
-          .removeAll(outputs.stream().map(FileMetaData::getNumber).collect(Collectors.toSet()));
-      return fileClose;
-    }
-
-    public CompletionStage<Void> openCompactionOutputFile() {
-      assert builder == null;
-
-      final long fileNumber = versions.getAndIncrementNextFileNumber();
-      pendingOutputs.add(fileNumber);
-      currentFileNumber = fileNumber;
-      currentSmallest = null;
-      currentLargest = null;
-
-      return options.env().openSequentialWriteFile(FileInfo.table(dbHandle, fileNumber))
-          .thenAccept(writeFile -> builder = new TableBuilder(options.blockRestartInterval(),
-              options.blockSize(), options.compression(), writeFile, internalKeyComparator));
-    }
-
-    public CompletionStage<Void> finishCompactionOutputFile() {
-      assert builder != null;
-      assert currentFileNumber > 0;
-
-      return closeAfter(builder.finish(), builder.file).thenCompose(fileSize -> {
-        outputs.add(new FileMetaData(currentFileNumber, fileSize, currentSmallest, currentLargest));
-        builder = null;
-        if (fileSize > Footer.ENCODED_LENGTH) {
-          return Table.load(options.env(), dbHandle, currentFileNumber, internalKeyComparator,
-              options.verifyChecksums(), options.compression()).thenCompose(Table::release);
-        } else {
-          return CompletableFuture.completedFuture(null);
-        }
-      });
-    }
-
-    public CompletionStage<Void> installResults() {
-      // Add compaction outputs
-      compaction.addInputDeletions(compaction.getEdit());
-      final int level = compaction.getLevel();
-      for (final FileMetaData output : outputs) {
-        compaction.getEdit().addFile(level + 1, output);
-      }
-
-      return CompletableFutures
-          .composeOnException(versions.logAndApply(compaction.getEdit()), exception -> {
-            LOGGER.debug("{} compaction failed due to {}. will try again later", DbImpl.this,
-                exception.toString());
-            return CompletableFutures.allOfVoid(outputs.stream().map(fileMetaData -> options.env()
-                .deleteFile(FileInfo.table(dbHandle, fileMetaData.getNumber()))));
-          }).thenCompose(voided -> deleteObsoleteFiles());
-    }
-  }
-
-  private static class ManualCompaction {
-    private final int level;
-    private final ByteBuffer begin;
-    private final ByteBuffer end;
-
-    private ManualCompaction(final int level, final ByteBuffer begin, final ByteBuffer end) {
-      this.level = level;
-      this.begin = begin;
-      this.end = end;
-    }
   }
 
   private static class MemTableAndLog {
@@ -983,7 +739,7 @@ public class DbImpl implements DB {
       return null;
     }
 
-    CompletionStage<Entry<DeletionHandle<CompletableFuture<Snapshot>>, MemTableAndLog>> makeRoomForWrite(
+    public CompletionStage<Entry<DeletionHandle<CompletableFuture<Snapshot>>, MemTableAndLog>> makeRoomForWrite(
         final int writeUsageSize) {
       assert writeUsageSize > 0;
       final int memtableMax = options.writeBufferSize();
@@ -1030,8 +786,8 @@ public class DbImpl implements DB {
       do {
         count = pendingCount.get();
         if (count >= options.writeBufferLimit()) {
-          // TODO safe recursion
-          return immutableTables.peekLast().flush.thenCompose(voided -> swapTables(memlog));
+          return immutableTables.peekLast().flush.thenComposeAsync(voided -> swapTables(memlog),
+              options.env().getExecutor());
         }
       } while (pendingCount.compareAndSet(count, count + 1));
 
@@ -1048,11 +804,11 @@ public class DbImpl implements DB {
               });
 
       // declare the swap successful, allowing writers waiting on a new table to proceed
-      CompletableFutures.chain(createAndSwap, memlog.swap);
+      CompletableFutures.compose(createAndSwap, memlog.swap);
 
       // perform the memlog flush in the background while swapping the tables
       options.env().getExecutor()
-          .execute(() -> CompletableFutures.chain(writeLevel0Table(memlog), memlog.flush));
+          .execute(() -> CompletableFutures.compose(writeLevel0Table(memlog), memlog.flush));
 
       // after the flush is successful, remove the immutable table from the pending list and
       // decrement the count. we must ensure that this is done after the new table is created, as
@@ -1098,11 +854,235 @@ public class DbImpl implements DB {
               edit.setLogNumber(memlog.log.getFileNumber()); // Earlier logs no longer needed
               return versions.logAndApply(edit);
             }).thenCompose(version -> {
-              maybeScheduleCompaction();
+              compactions.maybeScheduleVersionCompaction();
               return deleteIgnoringFileNotFound(options.env(),
                   FileInfo.log(dbHandle, memlog.log.getFileNumber()));
             });
           });
+    }
+  }
+
+  private class Compactions {
+    // TODO in the interests of getting a viable product working, forget manual and suspended
+    // compactions for now
+    private final AtomicReference<CompletableFuture<?>> bgCompaction = new AtomicReference<>();
+
+    public void maybeScheduleVersionCompaction() {
+      final CompletableFuture<Void> compactionFuture;
+      if (!shuttingDown.get() && versions.needsCompaction()
+          && bgCompaction.compareAndSet(null, compactionFuture = new CompletableFuture<>())) {
+        // only schedule if needed and one isn't already running
+        options.env().getExecutor().execute(() -> {
+          final DeletionHandle<CompletableFuture<?>> compactionOperation =
+              openOperations.insert(compactionFuture);
+          backgroundCompaction(versions.pickCompaction()).whenComplete((success, exception) -> {
+            if (exception != null) {
+              exceptionHandler.uncaughtException(Thread.currentThread(), exception);
+            }
+            bgCompaction.compareAndSet(compactionFuture, null);
+            compactionOperation.close();
+            compactionOperation.item.complete(null);
+            maybeScheduleVersionCompaction();
+          });
+        });
+      }
+    }
+
+    private CompletionStage<Void> backgroundCompaction(final Compaction c) {
+      if (c == null) {
+        return CompletableFuture.completedFuture(null);
+      }
+      LOGGER.debug("{} beginning compaction", this);
+      if (c.isTrivialMove()) {
+        final FileMetaData fileMetaData = c.input(0, 0);
+        c.getEdit().deleteFile(c.getLevel(), fileMetaData.getNumber());
+        c.getEdit().addFile(c.getLevel() + 1, fileMetaData);
+        return versions.logAndApply(c.getEdit());
+      }
+      return versions.makeInputIterator(c).thenCompose(iter -> {
+        final CompactionState compactionState =
+            new CompactionState(c, snapshots.getOldestSequence());
+        return closeAfter(closeAfter(doCompactionWork(compactionState, iter), iter).thenCompose(
+            optCompactionState -> optCompactionState.map(CompactionState::installResults)
+                .orElseGet(() -> CompletableFuture.completedFuture(null))),
+            compactionState);
+      });
+    }
+
+    /**
+     * @return empty if terminated before completion
+     */
+    private CompletionStage<Optional<CompactionState>> doCompactionWork(
+        final CompactionState compactionState,
+        final AsynchronousIterator<Entry<InternalKey, ByteBuffer>> iter) {
+      return CompletableFutures
+          .unroll(state -> state.currentEntry.isPresent() && !shuttingDown.get(), state -> {
+            final Entry<InternalKey, ByteBuffer> entry = state.currentEntry.get();
+
+            if (state.compaction.shouldStopBefore(entry.getKey()) && state.builder != null) {
+              return state.finishCompactionOutputFile()
+                  .thenCompose(voided -> addIfNecessary(state, entry));
+            } else {
+              return addIfNecessary(state, entry);
+            }
+          } , iter.next().thenApply(optNext -> {
+            compactionState.currentEntry = optNext;
+            return compactionState;
+          })).thenCompose(state -> {
+            if (shuttingDown.get()) {
+              return CompletableFuture.completedFuture(Optional.empty());
+            } else if (state.builder != null) {
+              return state.finishCompactionOutputFile().thenApply(voided -> Optional.of(state));
+            } else {
+              return CompletableFuture.completedFuture(Optional.of(state));
+            }
+          });
+
+      // TODO port CompactionStats code
+    }
+
+    private CompletionStage<CompactionState> addIfNecessary(final CompactionState state,
+        final Entry<InternalKey, ByteBuffer> entry) {
+      final InternalKey key = entry.getKey();
+      if (state.currentUserKey == null || internalKeyComparator.getUserComparator()
+          .compare(key.getUserKey(), state.currentUserKey) != 0) {
+        // First occurrence of this user key
+        state.currentUserKey = key.getUserKey();
+        state.lastSequenceForKey = SequenceNumber.MAX_SEQUENCE_NUMBER;
+      }
+
+      final boolean drop;
+      if (state.lastSequenceForKey <= state.smallestSnapshot) {
+        // Hidden by an newer entry for same user key
+        drop = true; // (A)
+      } else if (key.getValueType() == ValueType.DELETION
+          && key.getSequenceNumber() <= state.smallestSnapshot
+          && state.compaction.isBaseLevelForKey(key.getUserKey())) {
+
+        // For this user key:
+        // (1) there is no data in higher levels
+        // (2) data in lower levels will have larger sequence numbers
+        // (3) data in layers that are being compacted here and have
+        // smaller sequence numbers will be dropped in the next
+        // few iterations of this loop (by rule (A) above).
+        // Therefore this deletion marker is obsolete and can be dropped.
+        drop = true;
+      } else {
+        drop = false;
+      }
+      state.lastSequenceForKey = key.getSequenceNumber();
+
+      if (drop) {
+        return CompletableFuture.completedFuture(state);
+      } else {
+        // Open output file if necessary
+        if (state.builder == null) {
+          return state.openCompactionOutputFile(key).thenCompose(voided -> add(state, entry));
+        } else {
+          return add(state, entry);
+        }
+      }
+    }
+
+    private CompletionStage<CompactionState> add(final CompactionState state,
+        final Entry<InternalKey, ByteBuffer> entry) {
+      state.currentLargest = entry.getKey();
+      state.builder.add(entry);
+
+      // Close output file if it is big enough
+      if (state.builder.getFileSizeEstimate() >= state.compaction.getMaxOutputFileSize()) {
+        return state.finishCompactionOutputFile().thenApply(voided -> state);
+      } else {
+        return CompletableFuture.completedFuture(state);
+      }
+    }
+
+    private class CompactionState implements AsynchronousCloseable {
+      final List<FileMetaData> outputs = new ArrayList<>();
+      final Compaction compaction;
+      final long smallestSnapshot;
+
+      // Current file being generated
+      TableBuilder builder = null;
+      long currentFileNumber = -1;
+      InternalKey currentSmallest = null;
+      InternalKey currentLargest = null;
+
+      // Current operation underway
+      Optional<Entry<InternalKey, ByteBuffer>> currentEntry = null;
+      ByteBuffer currentUserKey = null;
+      long lastSequenceForKey;
+
+      // private long totalBytes;
+
+      private CompactionState(final Compaction compaction, final long smallestSeqeuence) {
+        this.compaction = compaction;
+        this.smallestSnapshot = smallestSeqeuence;
+      }
+
+      @Override
+      public CompletionStage<Void> asyncClose() {
+        final CompletionStage<Void> fileClose;
+        if (builder != null) {
+          builder.abandon();
+          builder.close();
+          fileClose = builder.file.asyncClose();
+        } else {
+          fileClose = CompletableFuture.completedFuture(null);
+        }
+
+        pendingOutputs
+            .removeAll(outputs.stream().map(FileMetaData::getNumber).collect(Collectors.toSet()));
+        return fileClose;
+      }
+
+      public CompletionStage<Void> openCompactionOutputFile(final InternalKey newSmallest) {
+        assert builder == null;
+
+        final long fileNumber = versions.getAndIncrementNextFileNumber();
+        pendingOutputs.add(fileNumber);
+        currentFileNumber = fileNumber;
+        currentSmallest = newSmallest;
+        currentLargest = null;
+
+        return options.env().openSequentialWriteFile(FileInfo.table(dbHandle, fileNumber))
+            .thenAccept(writeFile -> builder = new TableBuilder(options.blockRestartInterval(),
+                options.blockSize(), options.compression(), writeFile, internalKeyComparator));
+      }
+
+      public CompletionStage<Void> finishCompactionOutputFile() {
+        assert builder != null;
+        assert currentFileNumber > 0;
+
+        return closeAfter(builder.finish(), builder.file).thenCompose(fileSize -> {
+          outputs.add(new FileMetaData(currentFileNumber, fileSize, currentSmallest.heapCopy(),
+              currentLargest.heapCopy()));
+          builder = null;
+          if (fileSize > Footer.ENCODED_LENGTH) {
+            return Table.load(options.env(), dbHandle, currentFileNumber, internalKeyComparator,
+                options.verifyChecksums(), options.compression()).thenCompose(Table::release);
+          } else {
+            return CompletableFuture.completedFuture(null);
+          }
+        });
+      }
+
+      public CompletionStage<Void> installResults() {
+        // Add compaction outputs
+        compaction.addInputDeletions(compaction.getEdit());
+        final int level = compaction.getLevel();
+        for (final FileMetaData output : outputs) {
+          compaction.getEdit().addFile(level + 1, output);
+        }
+
+        return CompletableFutures
+            .composeOnException(versions.logAndApply(compaction.getEdit()), exception -> {
+              LOGGER.debug("{} compaction failed due to {}. will try again later", DbImpl.this,
+                  exception.toString());
+              return CompletableFutures.allOfVoid(outputs.stream().map(fileMetaData -> options.env()
+                  .deleteFile(FileInfo.table(dbHandle, fileMetaData.getNumber()))));
+            }).thenCompose(voided -> deleteObsoleteFiles());
+      }
     }
   }
 

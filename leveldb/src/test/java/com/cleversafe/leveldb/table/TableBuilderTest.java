@@ -25,12 +25,11 @@ import java.util.stream.Collectors;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.Env.SequentialWriteFile;
+import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.TransientInternalKey;
 import com.cleversafe.leveldb.impl.ValueType;
-import com.cleversafe.leveldb.table.TableBuilder;
 import com.cleversafe.leveldb.util.EnvDependentTest;
 import com.cleversafe.leveldb.util.FileEnvTestProvider;
 import com.cleversafe.leveldb.util.SizeOf;
@@ -62,7 +61,7 @@ public abstract class TableBuilderTest extends EnvDependentTest {
       Assert.assertEquals(builder.getFileSizeEstimate(), SizeOf.SIZE_OF_INT);
 
       final Entry<InternalKey, ByteBuffer> firstEntry = entries.poll();
-      CompletionStage<Void> chain = builder.add(firstEntry.getKey(), firstEntry.getValue());
+      CompletionStage<?> chain = builder.add(firstEntry);
       chain.toCompletableFuture().get();
       final int firstSize = 200 // key + value
           + SizeOf.SIZE_OF_BYTE * 3 // varint shared, nonshared, value
@@ -72,7 +71,7 @@ public abstract class TableBuilderTest extends EnvDependentTest {
 
       Assert.assertEquals(builder.getFileSizeEstimate(), firstSize);
       for (final Entry<InternalKey, ByteBuffer> entry : entries) {
-        chain = chain.thenCompose(voided -> builder.add(entry.getKey(), entry.getValue()));
+        chain = chain.thenCompose(voided -> builder.add(entry));
       }
       chain.toCompletableFuture().get();
       Assert.assertEquals(builder.getFileSizeEstimate(), 54228);

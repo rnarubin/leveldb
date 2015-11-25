@@ -59,20 +59,36 @@ public interface DB extends AsynchronousCloseable {
   String getProperty(String name);
 
   /**
-   * Suspends any background compaction work. The future completes when the compactions have
-   * suspended
+   * Suspends any background compaction work and prevents any new compactions from beginning. The
+   * returned stage completes when all running compactions have completed.
+   * <p>
+   * Once suspended, and after any pending write operations have completed and are no longer
+   * submitted by the application, the DB will be in a 'frozen' state. No underlying files will be
+   * changed during this time. This may be suitable for performing back-ups or live introspection
+   * <p>
+   * Only one suspension may be active at any time. Attempting to suspend compactions while one is
+   * active will throw an IllegalStateException
+   *
+   * @throws IllegalStateException if a suspension is already active
    */
-  CompletionStage<Void> suspendCompactions();
+  CompletionStage<CompactionSuspension> suspendCompactions() throws IllegalStateException;
 
   /**
-   * Resumes background compaction work after a suspension.
+   * An object representing suspended background compactions. Background processing may be resumed
+   * by calling {@link #resume()}
    */
-  CompletionStage<Void> resumeCompactions();
+  public interface CompactionSuspension {
+    /**
+     * Allows the DB to resume any compactions that were underway at the time of suspension, and to
+     * schedule new compactions as necessary
+     */
+    void resume();
+  }
 
   /**
    * Force a compaction of the specified key range.
    *
-   * @param begin if null then compaction start from the first key
+   * @param begin if null then compaction starts from the first key
    * @param end if null then compaction ends at the last key
    */
   CompletionStage<Void> compactRange(ByteBuffer begin, ByteBuffer end);

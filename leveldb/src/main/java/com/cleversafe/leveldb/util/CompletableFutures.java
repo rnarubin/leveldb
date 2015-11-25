@@ -254,4 +254,6 @@ public final class CompletableFutures {
     void accept(final T t, final U u) throws Throwable;
   }
 
+  // TODO CompletedFutures
+
 }

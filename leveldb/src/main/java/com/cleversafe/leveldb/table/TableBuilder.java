@@ -6,6 +6,7 @@ import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Comparator;
+import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -65,7 +66,10 @@ public class TableBuilder implements Closeable {
     return position + dataBlockBuilder.currentSizeEstimate();
   }
 
-  public CompletionStage<Void> add(final InternalKey key, final ByteBuffer value) {
+  public CompletionStage<Entry<InternalKey, ByteBuffer>> add(
+      final Entry<InternalKey, ByteBuffer> entry) {
+    final InternalKey key = entry.getKey();
+    final ByteBuffer value = entry.getValue();
     assert key != null;
     assert value != null;
     assert lastKey == null
@@ -90,10 +94,11 @@ public class TableBuilder implements Closeable {
     lastKey = key;
 
     final int estimatedBlockSize = dataBlockBuilder.currentSizeEstimate();
-    return estimatedBlockSize >= blockSize ? writeBlock(dataBlockBuilder).thenAccept(handle -> {
+    return estimatedBlockSize >= blockSize ? writeBlock(dataBlockBuilder).thenApply(handle -> {
       pendingHandle = handle;
       position = handle.getEndPosition();
-    }) : CompletableFuture.completedFuture(null);
+      return entry;
+    }) : CompletableFuture.completedFuture(entry);
   }
 
   private CompletionStage<PositionedHandle> writeBlock(final BlockBuilder blockBuilder) {

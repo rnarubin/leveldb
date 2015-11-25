@@ -18,10 +18,10 @@ package com.cleversafe.leveldb.util;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletionStage;
 
-import com.cleversafe.leveldb.AsynchronousCloseable;
+import com.cleversafe.leveldb.Env.AsynchronousCloseableIterator;
 
 public interface SeekingAsynchronousIterator<K, V>
-    extends ReverseAsynchronousIterator<Entry<K, V>>, AsynchronousCloseable {
+    extends ReverseAsynchronousIterator<Entry<K, V>>, AsynchronousCloseableIterator<Entry<K, V>> {
 
   /**
    * positions the iterator such that the next element's key will be greater than or equal to the

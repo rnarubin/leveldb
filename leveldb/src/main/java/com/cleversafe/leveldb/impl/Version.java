@@ -212,6 +212,7 @@ final class Version {
           }), tableIter);
         });
 
+    // TODO test with large level 0, then probably unroll
     return lookup.thenCompose(lookupResult -> lookupResult != null ? lookup
         : lookup(key, level, fileIter, file, readStats));
   }
