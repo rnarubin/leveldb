@@ -74,13 +74,13 @@ public interface AsynchronousIterator<T> {
    * @return a reduction of the elements of this iterator performed using the given identity and
    *         accumulator function
    */
-  default <U> CompletionStage<U> reduce(final U identity,
+  default <U> CompletionStage<U> reduce(final U seed,
       final BiFunction<U, ? super T, U> accumulator) {
     return CompletableFutures
         .<Entry<Optional<T>, U>>unroll(pair -> pair.getKey().isPresent(),
             pair -> next().thenApply(optNext -> Maps.immutableEntry(optNext,
                 accumulator.apply(pair.getValue(), pair.getKey().get()))),
-        next().thenApply(optNext -> Maps.immutableEntry(optNext, identity)))
+        next().thenApply(optNext -> Maps.immutableEntry(optNext, seed)))
         .thenApply(Entry::getValue);
   }
 }

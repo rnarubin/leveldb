@@ -26,8 +26,11 @@ import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
@@ -42,9 +45,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.LongConsumer;
+import java.util.function.LongPredicate;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -76,7 +83,9 @@ import com.cleversafe.leveldb.util.DeletionQueue;
 import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
 import com.cleversafe.leveldb.util.Iterators;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 
 public class DbImpl implements DB {
 
@@ -271,6 +280,9 @@ public class DbImpl implements DB {
 
   @Override
   public CompletionStage<Void> asyncClose() {
+    if (shuttingDown.getAndSet(true)) {
+      return CompletableFuture.completedFuture(null);
+    }
     // TODO Auto-generated method stub
     return null;
   }
@@ -337,64 +349,110 @@ public class DbImpl implements DB {
 
   @Override
   public String getProperty(final String name) {
-    checkBackgroundException();
+    final Throwable t = checkBackgroundException();
+    if (t != null) {
+      Throwables.propagate(t);
+    }
     return null;
   }
 
   private CompletionStage<Void> deleteObsoleteFiles() {
-    return deleteObsoleteFiles(versions.getLiveFiles(), pendingOutputs.stream(),
-        versions.getLogNumber(), versions.getPrevLogNumber(), versions.getManifestFileNumber(),
-        tableCache, options.env(), dbHandle);
+    return deleteObsoleteFiles(versions, pendingOutputs, versions.getLogNumber(),
+        versions.getPrevLogNumber(), versions.getManifestFileNumber(), tableCache, options.env(),
+        dbHandle);
   }
 
-  // FIXME this isn't concurrently safe
-  private static CompletionStage<Void> deleteObsoleteFiles(final Stream<FileMetaData> liveFiles,
-      final Stream<Long> pendingOutputs, final long logNumber, final long prevLogNumber,
+  @SuppressWarnings("serial")
+  private static CompletionStage<Void> deleteObsoleteFiles(final VersionSet versions,
+      final Collection<Long> pendingOutputs, final long logNumber, final long prevLogNumber,
       final long manifestNumber, final TableCache tableCache, final Env env,
       final DBHandle dbHandle) {
-    // Make a set of all of the live files
-    final Set<Long> live = Stream.concat(liveFiles.map(FileMetaData::getNumber), pendingOutputs)
-        .collect(Collectors.toSet());
+    /*
+     * deletion filtering is performed in 2 stages:
+     *
+     * (1) filter anything that isn't a table/pending using information we already have (and is more
+     * lenient)
+     *
+     * (2) filter tables based on pending outputs and live versions - the order of collecting these
+     * two sets, along with the owned file listing, is important in the face of concurrent
+     * modification. Pending outputs should be collected before the version files, as entries are
+     * removed from the pending set only once the associated version update is applied. Listing
+     * owned files should be performed before either of these two to compare against the most
+     * up-to-date knowledge of live files (avoiding races between writing files to disk and updating
+     * versions)
+     */
 
+
+    // return true for files that are either tables, temp, or should be deleted
+    // tables and temp are held in pending outputs
     @SuppressWarnings("deprecation")
-    final Predicate<FileInfo> shouldKeep = fileInfo -> {
+    final Predicate<FileInfo> filter1 = fileInfo -> {
       final long number = fileInfo.getFileNumber();
       switch (fileInfo.getFileType()) {
         case LOG:
-          return ((number >= logNumber) || (number == prevLogNumber));
+          return ((number < logNumber) && (number != prevLogNumber));
         case MANIFEST:
-          // Keep my manifest file, and any newer incarnations'
-          // (in case there is a race that allows other
-          // incarnations)
-          return (number >= manifestNumber);
+          return (number < manifestNumber);
         case TABLE:
-          return live.contains(number);
         case TEMP:
-          // Any temp files that are currently being written to must be recorded in
-          // pending_outputs_, which is inserted into "live"
-          return live.contains(number);
+          return true;
         case INFO_LOG:
         case CURRENT:
         case DB_LOCK:
-          return true;
+          return false;
         default:
           throw new IllegalArgumentException("unknown file type:" + fileInfo);
       }
     };
 
     return env.getOwnedFiles(dbHandle).thenCompose(fileIter -> closeAfter(
-        Iterators.toStream(fileIter.filter(shouldKeep.negate()).map(fileInfo -> {
-          if (fileInfo.getFileType() == FileType.TABLE) {
-            tableCache.evict(fileInfo.getFileNumber());
+        fileIter.filter(filter1).reduce(new EnumMap<FileType, LongStream.Builder>(FileType.class) {
+          {
+            // attempt to save space for huge DBs by only storing file number for disk listing
+            put(FileType.LOG, LongStream.builder());
+            put(FileType.MANIFEST, LongStream.builder());
+            put(FileType.TABLE, LongStream.builder());
+            put(FileType.TEMP, LongStream.builder());
           }
-          LOGGER.debug("{} delete type={} #{}", dbHandle, fileInfo.getFileType(),
-              fileInfo.getFileNumber());
-          return deleteIgnoringFileNotFound(env, fileInfo);
-        })), fileIter).thenCompose(CompletableFutures::allOfVoid));
+        }, (typeMap, fileInfo) -> {
+          typeMap.get(fileInfo.getFileType()).add(fileInfo.getFileNumber());
+          return typeMap;
+        }), fileIter)).thenCompose(typeMap -> {
+          final Set<Long> live;
+          {
+            final Set<Long> pending = new HashSet<>(pendingOutputs);
+            live = Sets.union(pending,
+                versions.getLiveFiles().map(FileMetaData::getNumber).collect(Collectors.toSet()));
+          }
+          final LongPredicate filter2 = fileNumber -> !live.contains(fileNumber);
+          final Stream<CompletionStage<Void>> deletions;
+          {
+            final Function<FileType, LongConsumer> debugMsg =
+                type -> number -> LOGGER.debug("{} delete type={} #{}", dbHandle, type, number);
+
+            final Stream<CompletionStage<Void>> tableDeletions = typeMap.get(FileType.TABLE).build()
+                .filter(filter2).peek(debugMsg.apply(FileType.TABLE)).mapToObj(number -> {
+              tableCache.evict(number);
+              return deleteIgnoringFileNotFound(env, FileInfo.table(dbHandle, number));
+            });
+            final Stream<CompletionStage<Void>> tempDeletions = typeMap.get(FileType.TEMP).build()
+                .filter(filter2).peek(debugMsg.apply(FileType.TEMP)).mapToObj(
+                    number -> deleteIgnoringFileNotFound(env, FileInfo.temp(dbHandle, number)));
+            final Stream<CompletionStage<Void>> logDeletions =
+                typeMap.get(FileType.LOG).build().peek(debugMsg.apply(FileType.LOG)).mapToObj(
+                    number -> deleteIgnoringFileNotFound(env, FileInfo.log(dbHandle, number)));
+            final Stream<CompletionStage<Void>> manifestDeletions = typeMap.get(FileType.MANIFEST)
+                .build().peek(debugMsg.apply(FileType.MANIFEST)).mapToObj(
+                    number -> deleteIgnoringFileNotFound(env, FileInfo.manifest(dbHandle, number)));
+            deletions = Stream.concat(tableDeletions,
+                Stream.concat(tempDeletions, Stream.concat(logDeletions, manifestDeletions)));
+          }
+          return CompletableFutures.allOfVoid(deletions);
+        });
   }
 
-  public void checkBackgroundException() {
-    exceptionHandler.checkBackgroundException();
+  public Throwable checkBackgroundException() {
+    return exceptionHandler.checkBackgroundException();
   }
 
   @Override
@@ -404,7 +462,11 @@ public class DbImpl implements DB {
 
   @Override
   public CompletionStage<ByteBuffer> get(final ByteBuffer key, final ReadOptions readOptions) {
-    checkBackgroundException();
+    final Throwable t = checkBackgroundException();
+    if (t != null) {
+      return CompletableFutures.exceptionalFuture(t);
+    }
+
     final DeletionHandle<CompletableFuture<?>> readOperation =
         openOperations.insert(new CompletableFuture<>());
 
@@ -476,7 +538,10 @@ public class DbImpl implements DB {
 
   private CompletionStage<Snapshot> writeInternal(final WriteBatchImpl updates,
       final WriteOptions writeOptions) {
-    checkBackgroundException();
+    final Throwable t = checkBackgroundException();
+    if (t != null) {
+      return CompletableFutures.exceptionalFuture(t);
+    }
 
     if (updates.size() == 0 || updates.getApproximateSize() == 0) {
       return CompletableFuture.completedFuture(writeOptions.snapshot() ? getSnapshot() : null);
@@ -526,7 +591,10 @@ public class DbImpl implements DB {
 
   @Override
   public WriteBatch createWriteBatch() {
-    checkBackgroundException();
+    final Throwable t = checkBackgroundException();
+    if (t != null) {
+      Throwables.propagate(t);
+    }
     return new WriteBatchImpl.WriteBatchMulti();
   }
 
@@ -1102,11 +1170,8 @@ public class DbImpl implements DB {
       backgroundExceptions.add(e);
     }
 
-    public void checkBackgroundException() throws Throwable {
-      final Throwable t = backgroundExceptions.poll();
-      if (t != null) {
-        throw t;
-      }
+    public Throwable checkBackgroundException() {
+      return backgroundExceptions.poll();
     }
   }
 
