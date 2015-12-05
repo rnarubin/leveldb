@@ -55,8 +55,9 @@ public class DeletionQueue<T> implements Iterable<T> {
     return deque.iterator();
   }
 
-  public Object[] toArray() {
-    return deque.toArray();
+  @SuppressWarnings("unchecked")
+  public T[] toArray() {
+    return (T[]) deque.toArray();
   }
 
   public static abstract class DeletionHandle<T> implements AutoCloseable {

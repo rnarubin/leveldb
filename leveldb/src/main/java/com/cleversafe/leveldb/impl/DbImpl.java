@@ -26,6 +26,7 @@ import java.lang.Thread.UncaughtExceptionHandler;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -41,7 +42,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -77,7 +77,6 @@ import com.cleversafe.leveldb.table.Footer;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.TableBuilder;
 import com.cleversafe.leveldb.util.ByteBuffers;
-import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.DeletionQueue;
 import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
@@ -201,7 +200,7 @@ public class DbImpl implements DB {
                 .thenCompose(logWriter -> {
               edit.setLogNumber(logWriter.getFileNumber());
               return versionSet.logAndApply(edit)
-                  .thenCompose(voided -> deleteObsoleteFiles(versionSet.getLiveFiles(), Stream.of(),
+                  .thenCompose(voided -> deleteObsoleteFiles(versionSet, Collections.emptyList(),
                       versionSet.getLogNumber(), versionSet.getPrevLogNumber(),
                       versionSet.getManifestFileNumber(), tableCache, env, dbHandle))
                   .thenApply(voided -> new DbImpl(options, dbHandle, dbLock, versionSet, tableCache,
@@ -283,68 +282,15 @@ public class DbImpl implements DB {
     if (shuttingDown.getAndSet(true)) {
       return CompletableFuture.completedFuture(null);
     }
-    // TODO Auto-generated method stub
-    return null;
-  }
 
-  @Override
-  public void close() {
-    if (shuttingDown.getAndSet(true)) {
-      return;
+    CompletionStage<Void> close =
+        // memTables must be first to close for correctness
+        closeAfter(CompletableFuture.allOf(openOperations.toArray()), memTables);
+    for (final AsynchronousCloseable closeable : Arrays.asList(tableCache, versions, dbLock)) {
+      close = closeAfter(close, closeable);
     }
 
-    backgroundCompaction.clear();
-
-    try {
-      compactionExecutor.shutdown();
-      try {
-        compactionExecutor.awaitTermination(1, TimeUnit.DAYS);
-      } catch (final InterruptedException e) {
-        Thread.currentThread().interrupt();
-      }
-
-      final MemTables tables = memTables;
-      closeMemAndLog(tables.mutable, versions);
-
-      if (tables.immutableExists()) {
-        closeMemAndLog(tables.immutable, versions);
-      }
-
-      Closeables.closeQuietly(versions);
-    } finally {
-      try {
-        Closeables.closeIO(tableCache, dbLock);
-      } catch (final IOException e) {
-        LOGGER.warn("{} error in closing", this, e);
-      }
-    }
-  }
-
-  private void closeMemAndLog(final MemTableAndLog memlog, final VersionSet versions) {
-    memlog.acquireAll();
-    try {
-      try {
-        if (memlog.isUnpersisted()) {
-          final VersionEdit edit = new VersionEdit();
-          writeLevel0Table(memlog.memTable, edit, versions.getCurrent());
-
-          edit.setPreviousLogNumber(0);
-          edit.setLogNumber(memlog.log.getFileNumber());
-          versions.logAndApply(edit);
-        }
-      } finally {
-        Closeables.closeIO(memlog.log, memlog.memTable);
-      }
-      if (memlog.isUnpersisted()) {
-        // delete log as we've already flushed
-        options.env().deleteFile(FileInfo.log(dbHandle, memlog.log.getFileNumber()));
-      }
-    } catch (final IOException e) {
-      LOGGER.error("{} error in closing", this, e);
-    } finally {
-      memlog.releaseAll();
-    }
-
+    return close;
   }
 
   @Override
@@ -503,7 +449,6 @@ public class DbImpl implements DB {
   }
 
   @Override
-  // TODO measure cost of cast instead of wildcard
   public CompletionStage<?> put(final ByteBuffer key, final ByteBuffer value) {
     return put(key, value, DEFAULT_WRITE_OPTIONS);
   }
@@ -554,7 +499,7 @@ public class DbImpl implements DB {
         final long sequenceBegin = versions.getAndAddLastSequence(updates.size()) + 1;
         final CompletionStage<Void> logWrite;
         if (writeOptions.disableLog()) {
-          memlog.markUnpersisted();
+          memlog.requiresFlush = true;
           logWrite = CompletableFuture.completedFuture(null);
         } else {
           logWrite =
@@ -768,23 +713,16 @@ public class DbImpl implements DB {
     final CompletableFuture<Void> flush = new CompletableFuture<>();
     final CompletableFuture<Void> swap = new CompletableFuture<>();
     final DeletionQueue<CompletableFuture<Snapshot>> pendingWriters = new DeletionQueue<>();
+    // TODO check volatile necessity
     volatile boolean requiresFlush = false;
 
     public MemTableAndLog(final MemTable memTable, final LogWriter log) {
       this.memTable = memTable;
       this.log = log;
     }
-
-    public void markUnpersisted() {
-      this.requiresFlush = true;
-    }
-
-    public boolean isUnpersisted() {
-      return this.requiresFlush;
-    }
   }
 
-  private class MemTables {
+  private class MemTables implements AsynchronousCloseable {
     private final DeletionQueue<MemTableAndLog> immutableTables = new DeletionQueue<>();
     private volatile MemTableAndLog mutable;
     private final AtomicInteger pendingCount = new AtomicInteger(0);
@@ -830,8 +768,11 @@ public class DbImpl implements DB {
            * this condition can only be true for one writer. this writer is the one which exceeded
            * the memtable buffer limit first, so here we swap the memtables
            */
-          return swapTables(current)
-              .thenApply(voided -> Maps.immutableEntry(writeOperation, current));
+          return swapTables(current).whenComplete((success, exception) -> {
+            if (exception != null) {
+              writeOperation.close();
+            }
+          }).thenApply(voided -> Maps.immutableEntry(writeOperation, current));
         } else {
           // this write can fit into the memtable
           return CompletableFuture.completedFuture(Maps.immutableEntry(writeOperation, current));
@@ -857,7 +798,7 @@ public class DbImpl implements DB {
           return immutableTables.peekLast().flush.thenComposeAsync(voided -> swapTables(memlog),
               options.env().getExecutor());
         }
-      } while (pendingCount.compareAndSet(count, count + 1));
+      } while (!pendingCount.compareAndSet(count, count + 1));
 
       // we are under limit, safe to start a new table and to insert the immutable
       final CompletionStage<Void> createAndSwap =
@@ -892,7 +833,7 @@ public class DbImpl implements DB {
 
     private CompletionStage<Void> writeLevel0Table(final MemTableAndLog memlog) {
       // TODO check on suspended compaction
-      return CompletableFuture.allOf((CompletableFuture[]) memlog.pendingWriters.toArray())
+      return CompletableFuture.allOf(memlog.pendingWriters.toArray())
           .thenCompose(writersFinished -> {
             // skip empty mem table
             if (memlog.memTable.isEmpty()) {
@@ -903,9 +844,7 @@ public class DbImpl implements DB {
             final long fileNumber = versions.getAndIncrementNextFileNumber();
             pendingOutputs.add(fileNumber);
             return buildTable(memlog.memTable.entryIterable(), fileNumber, internalKeyComparator,
-                dbHandle, options)
-                    .whenComplete((meta, exception) -> pendingOutputs.remove(fileNumber))
-                    .thenCompose(meta -> {
+                dbHandle, options).thenCompose(meta -> {
               final VersionEdit edit = new VersionEdit();
               // Note that if file size is zero, the file has been deleted and
               // should not be added to the manifest.
@@ -920,13 +859,34 @@ public class DbImpl implements DB {
               }
               edit.setPreviousLogNumber(0);
               edit.setLogNumber(memlog.log.getFileNumber()); // Earlier logs no longer needed
-              return versions.logAndApply(edit);
+              return versions.logAndApply(edit)
+                  .whenComplete((voided, exception) -> pendingOutputs.remove(fileNumber));
             }).thenCompose(version -> {
               compactions.maybeScheduleVersionCompaction();
               return deleteIgnoringFileNotFound(options.env(),
                   FileInfo.log(dbHandle, memlog.log.getFileNumber()));
             });
           });
+    }
+
+    @Override
+    public CompletionStage<Void> asyncClose() {
+      assert shuttingDown.get();
+
+      final MemTableAndLog current = mutable;
+      return CompletableFutures.composeUnconditionally(
+          CompletableFuture.allOf(current.pendingWriters.toArray()).thenCompose(voided -> {
+            final MemTableAndLog newest = mutable;
+            // it's possible that one of the pending writers performed a swap, but only one swap
+            // could be performed following the set shutdown flag
+            return newest != current ? CompletableFuture.allOf(newest.pendingWriters.toArray())
+                .thenApply(ignored -> newest) : CompletableFuture.completedFuture(newest);
+          }),
+          optMutable -> CompletableFutures.composeUnconditionally(
+              CompletableFutures
+                  .allOfVoid(Stream.of(immutableTables.toArray()).map(memlog -> memlog.flush)),
+              ignored -> optMutable.filter(memlog -> memlog.requiresFlush)
+                  .map(this::writeLevel0Table).orElse(CompletableFuture.completedFuture(null))));
     }
   }
 
