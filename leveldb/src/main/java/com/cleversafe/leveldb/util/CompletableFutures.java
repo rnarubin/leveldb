@@ -15,7 +15,6 @@
 
 package com.cleversafe.leveldb.util;
 
-import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -28,35 +27,13 @@ import com.cleversafe.leveldb.AsynchronousCloseable;
 public final class CompletableFutures {
   private CompletableFutures() {}
 
-  public static <T, U> CompletionStage<Stream<U>> mapSequential(final Stream<T> stream,
-      final Function<T, CompletionStage<U>> mapper) {
-    final Iterator<T> iter = stream.iterator();
-    if (!iter.hasNext()) {
-      return CompletableFuture.completedFuture(Stream.of());
-    }
-    final Stream.Builder<U> builder = Stream.builder();
-    return unrollImmediate(ignored -> iter.hasNext(),
-        (final T t) -> mapper.apply(t).thenApply(u -> {
-          builder.add(u);
-          return t;
-        }), iter.next()).thenApply(ignored -> builder.build());
-  }
-
   /**
    * used to prevent unbounded stack growth in recursive async calls
    */
-  public static <T> CompletionStage<T> unroll(final Predicate<T> whileCondition,
-      final ExceptionalFunction<T, CompletionStage<T>> f, final CompletionStage<T> seed) {
+  public static <T> CompletionStage<T> unroll(final CompletionStage<T> seed,
+      final Predicate<T> whileCondition, final ExceptionalFunction<T, CompletionStage<T>> f) {
     return compose(seed, new CompletableFuture<>(),
         (t, future) -> unrollStep(future, whileCondition, f, t, null, null));
-  }
-
-
-  public static <T> CompletionStage<T> unrollImmediate(final Predicate<T> whileCondition,
-      final ExceptionalFunction<T, CompletionStage<T>> f, final T seed) {
-    final CompletableFuture<T> future = new CompletableFuture<>();
-    unrollStep(future, whileCondition, f, seed, null, null);
-    return future;
   }
 
   private static <T> void unrollStep(final CompletableFuture<T> future,
@@ -79,6 +56,7 @@ public final class CompletableFutures {
           }
         } catch (final Throwable e) {
           future.completeExceptionally(e);
+          return;
         }
       }
       currentPassBack.isRunning = false;

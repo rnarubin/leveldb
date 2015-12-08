@@ -16,26 +16,22 @@ package com.cleversafe.leveldb.impl;
 
 import java.nio.ByteBuffer;
 
-import com.cleversafe.leveldb.util.ByteBuffers;
-
 public class LookupResult {
   public static LookupResult ok(final LookupKey key, final ByteBuffer value) {
-    return new LookupResult(key, value, false);
+    return new LookupResult(key, value);
   }
 
   public static LookupResult deleted(final LookupKey key) {
-    return new LookupResult(key, ByteBuffers.EMPTY_BUFFER, true);
+    return new LookupResult(key, null);
   }
 
   private final LookupKey key;
   private final ByteBuffer value;
-  private final boolean deleted;
 
-  private LookupResult(final LookupKey key, final ByteBuffer value, final boolean deleted) {
+  private LookupResult(final LookupKey key, final ByteBuffer value) {
     assert key != null;
     this.key = key;
     this.value = value;
-    this.deleted = deleted;
   }
 
   public LookupKey getKey() {
@@ -47,11 +43,11 @@ public class LookupResult {
   }
 
   public boolean isDeleted() {
-    return deleted;
+    return getValue() == null;
   }
 
   @Override
   public String toString() {
-    return "LookupResult [key=" + key + ", value=" + value + ", deleted=" + deleted + "]";
+    return "LookupResult [key=" + key + ", value=" + value + "]";
   }
 }

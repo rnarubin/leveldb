@@ -15,15 +15,19 @@
 package com.cleversafe.leveldb;
 
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
+import com.cleversafe.leveldb.Env.DBHandle;
+import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
+
 public interface DB extends AsynchronousCloseable {
-  CompletionStage<ByteBuffer> get(ByteBuffer key);
+  CompletionStage<Optional<ByteBuffer>> get(ByteBuffer key);
 
-  CompletionStage<ByteBuffer> get(ByteBuffer key, ReadOptions options);
+  CompletionStage<Optional<ByteBuffer>> get(ByteBuffer key, ReadOptions options);
 
-  CompletionStage<DBIterator> iterator(ReadOptions options);
+  CompletionStage<SeekingAsynchronousIterator<ByteBuffer, ByteBuffer>> iterator(
+      ReadOptions options);
 
   CompletionStage<?> put(ByteBuffer key, ByteBuffer value);
 
@@ -94,6 +98,6 @@ public interface DB extends AsynchronousCloseable {
   CompletionStage<Void> compactRange(ByteBuffer begin, ByteBuffer end);
 
   public interface DBFactory {
-    CompletionStage<? extends DB> open(Path path, Options options);
+    CompletionStage<? extends DB> open(DBHandle handle, Options options);
   }
 }

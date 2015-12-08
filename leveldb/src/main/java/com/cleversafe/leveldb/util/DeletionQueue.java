@@ -18,6 +18,7 @@ package com.cleversafe.leveldb.util;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.function.IntFunction;
 
 public class DeletionQueue<T> implements Iterable<T> {
   private final Deque<T> deque = new ConcurrentLinkedDeque<>();
@@ -55,9 +56,8 @@ public class DeletionQueue<T> implements Iterable<T> {
     return deque.iterator();
   }
 
-  @SuppressWarnings("unchecked")
-  public T[] toArray() {
-    return (T[]) deque.toArray();
+  public T[] toArray(final IntFunction<T[]> arrSupplier) {
+    return deque.stream().toArray(arrSupplier);
   }
 
   public static abstract class DeletionHandle<T> implements AutoCloseable {

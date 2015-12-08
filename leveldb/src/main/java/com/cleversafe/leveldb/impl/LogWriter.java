@@ -65,7 +65,7 @@ public final class LogWriter implements AsynchronousCloseable {
     boolean begin = true;
     do {
       int bytesRemainingInBlock = BLOCK_SIZE - blockOffset;
-      assert(bytesRemainingInBlock >= 0);
+      assert (bytesRemainingInBlock >= 0);
 
       // Switch to a new block if necessary
       if (bytesRemainingInBlock < HEADER_SIZE) {

@@ -219,24 +219,24 @@ public abstract class PathEnv implements Env {
     // dbname/MANIFEST-[0-9]+
     // dbname/[0-9]+.(log|sst|dbtmp)
     final String fileName = path.getFileName().toString();
-    if ("CURRENT".equals(fileName)) {
+    if (fileName.endsWith(".ldb") || fileName.endsWith(".sst")) {
+      final long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
+      return FileInfo.table(handle, fileNumber);
+    } else if ("CURRENT".equals(fileName)) {
       return FileInfo.current(handle);
     } else if ("LOCK".equals(fileName)) {
       return FileInfo.lock(handle);
-    } else if ("LOG".equals(fileName) || "LOG.old".equals(fileName)) {
-      return FileInfo.legacyInfoLog(handle);
     } else if (fileName.startsWith("MANIFEST-")) {
       final long fileNumber = Long.parseLong(fileName.substring("MANIFEST-".length()));
       return FileInfo.manifest(handle, fileNumber);
     } else if (fileName.endsWith(".log")) {
       final long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
       return FileInfo.log(handle, fileNumber);
-    } else if (fileName.endsWith(".ldb") || fileName.endsWith(".sst")) {
-      final long fileNumber = Long.parseLong(removeSuffix(fileName, 4));
-      return FileInfo.table(handle, fileNumber);
     } else if (fileName.endsWith(".dbtmp")) {
       final long fileNumber = Long.parseLong(removeSuffix(fileName, 6));
       return FileInfo.temp(handle, fileNumber);
+    } else if ("LOG".equals(fileName) || "LOG.old".equals(fileName)) {
+      return FileInfo.legacyInfoLog(handle);
     }
     throw new IllegalArgumentException("Unknown file type:" + path);
   }

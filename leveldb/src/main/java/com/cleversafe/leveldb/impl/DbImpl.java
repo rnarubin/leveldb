@@ -60,7 +60,6 @@ import org.slf4j.LoggerFactory;
 import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.AsynchronousIterator;
 import com.cleversafe.leveldb.DB;
-import com.cleversafe.leveldb.DBIterator;
 import com.cleversafe.leveldb.Env;
 import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.Env.LockFile;
@@ -81,6 +80,7 @@ import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.DeletionQueue;
 import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
 import com.cleversafe.leveldb.util.Iterators;
+import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
@@ -183,19 +183,16 @@ public class DbImpl implements DB {
                                 && ((fileInfo.getFileNumber() >= minLogNumber)
                                     || (fileInfo.getFileNumber() == previousLogNumber)))),
                 fileIter))
-                .thenCompose(logStream -> CompletableFutures
-                    .mapSequential(
-                        logStream.sorted(Comparator.comparingLong(FileInfo::getFileNumber)),
-                        logFile -> recoverLogFile(logFile, edit, options, dbHandle,
-                            () -> versionSet.getAndIncrementNextFileNumber(),
-                            internalKeyComparator))
-                    .thenAccept(recoveredSequences -> recoveredSequences
-                        .max(Comparator.naturalOrder()).ifPresent(maxSequence -> {
+                .thenCompose(logStream -> Iterators
+                    .async(logStream.sorted(Comparator.comparingLong(FileInfo::getFileNumber)))
+                    .mapCompose(logFile -> recoverLogFile(logFile, edit, options, dbHandle,
+                        () -> versionSet.getAndIncrementNextFileNumber(), internalKeyComparator))
+                    .reduce(Long.MIN_VALUE, Math::max).thenAccept(maxSequence -> {
               final long lastSequence = versionSet.getLastSequence();
               if (lastSequence < maxSequence) {
                 versionSet.getAndAddLastSequence(maxSequence - lastSequence);
               }
-            }))).thenCompose(voided -> Logs.createLogWriter(
+            })).thenCompose(voided -> Logs.createLogWriter(
                 FileInfo.log(dbHandle, versionSet.getAndIncrementNextFileNumber()), env))
                 .thenCompose(logWriter -> {
               edit.setLogNumber(logWriter.getFileNumber());
@@ -220,61 +217,54 @@ public class DbImpl implements DB {
 
     LOGGER.info("{} recovering log #{}", dbHandle, logFile.getFileNumber());
 
-    return LogReader
-        .newLogReader(options.env(), logFile, LogMonitors.loggingMonitor(), true,
-            0)
-        .thenCompose(logReader -> closeAfter(recoverStep(logReader, edit, options, dbHandle, null,
-            0, LogMonitors.loggingMonitor(), internalKeyComparator, fileNumbers), logReader));
-  }
+    // TODO paranoia exception monitor?
+    final LogMonitor logMonitor = LogMonitors.loggingMonitor();
+    return LogReader.newLogReader(options.env(), logFile, logMonitor, true, 0)
+        .thenCompose(logReader -> {
+          class RecoverStruct {
+            MemTable table = null;
+            long maxSequence = Long.MIN_VALUE;
+          }
+          final RecoverStruct struct = new RecoverStruct();
 
-  private static CompletionStage<Long> recoverStep(final LogReader logReader,
-      final VersionEdit edit, final Options options, final DBHandle dbHandle, final MemTable _table,
-      final long maxSequence, final LogMonitor logMonitor,
-      final InternalKeyComparator internalKeyComparator, final LongSupplier fileNumbers) {
-    // TODO safe recursion
-    return CompletableFutures.thenComposeExceptional(logReader.next(), optRecord -> {
-      if (optRecord.isPresent()) {
-        final ByteBuffer record = optRecord.get();
-        if (record.remaining() < 12) {
-          logMonitor.corruption(record.remaining(), "log record too small");
-          return recoverStep(logReader, edit, options, dbHandle, _table, maxSequence, logMonitor,
-              internalKeyComparator, fileNumbers);
-        }
-
-        final long sequenceBegin = record.getLong();
-        final int updateSize = record.getInt();
-
-        // read entries
-        final WriteBatchImpl writeBatch = readWriteBatch(record, updateSize);
-
-        // apply entries to memTable
-        final MemTable table = _table != null ? _table : new MemTable(internalKeyComparator);
-        table.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
-        writeBatch.forEach(new InsertIntoHandler(table, sequenceBegin));
-
-        // update the maxSequence
-        final long largerSequence = Math.max(sequenceBegin + updateSize - 1, maxSequence);
-
-        // flush mem table if necessary
-        if (table.approximateMemoryUsage() > options.writeBufferSize()) {
-          assert !table.isEmpty();
-          return buildTable(table.entryIterable(), fileNumbers.getAsLong(), internalKeyComparator,
-              dbHandle, options).thenCompose(fileMetaData -> {
-            if (fileMetaData.getFileSize() > 0) {
-              edit.addFile(0, fileMetaData);
+          return closeAfter(
+              CompletableFutures.unroll(logReader.next(), Optional::isPresent, optRecord -> {
+            final ByteBuffer record = optRecord.get();
+            if (record.remaining() < 12) {
+              logMonitor.corruption(record.remaining(), "log record too small");
+              return logReader.next();
             }
-            return recoverStep(logReader, edit, options, dbHandle, null, largerSequence, logMonitor,
-                internalKeyComparator, fileNumbers);
-          });
-        } else {
-          return recoverStep(logReader, edit, options, dbHandle, table, largerSequence, logMonitor,
-              internalKeyComparator, fileNumbers);
-        }
+            final long sequenceBegin = record.getLong();
+            final int updateSize = record.getInt();
 
-      } else {
-        return CompletableFuture.completedFuture(maxSequence);
-      }
-    });
+            // read entries
+            final WriteBatchImpl writeBatch = readWriteBatch(record, updateSize);
+
+            // apply entries to memTable
+            if (struct.table == null) {
+              struct.table = new MemTable(internalKeyComparator);
+            }
+            struct.table.getAndAddApproximateMemoryUsage(writeBatch.getApproximateSize());
+            writeBatch.forEach(new InsertIntoHandler(struct.table, sequenceBegin));
+            // update the maxSequence
+            struct.maxSequence = Math.max(sequenceBegin + updateSize - 1, struct.maxSequence);
+
+            // flush mem table if necessary
+            if (struct.table.approximateMemoryUsage() > options.writeBufferSize()) {
+              assert !struct.table.isEmpty();
+              return buildTable(struct.table.entryIterable(), fileNumbers.getAsLong(),
+                  internalKeyComparator, dbHandle, options).thenCompose(fileMetaData -> {
+                if (fileMetaData.getFileSize() > 0) {
+                  edit.addFile(0, fileMetaData);
+                }
+                struct.table = null;
+                return logReader.next();
+              });
+            } else {
+              return logReader.next();
+            }
+          }).thenApply(ignored -> struct.maxSequence), logReader);
+        });
   }
 
   @Override
@@ -285,7 +275,8 @@ public class DbImpl implements DB {
 
     CompletionStage<Void> close =
         // memTables must be first to close for correctness
-        closeAfter(CompletableFuture.allOf(openOperations.toArray()), memTables);
+        closeAfter(CompletableFuture.allOf(openOperations.toArray(CompletableFuture[]::new)),
+            memTables);
     for (final AsynchronousCloseable closeable : Arrays.asList(tableCache, versions, dbLock)) {
       close = closeAfter(close, closeable);
     }
@@ -402,12 +393,13 @@ public class DbImpl implements DB {
   }
 
   @Override
-  public CompletionStage<ByteBuffer> get(final ByteBuffer key) {
+  public CompletionStage<Optional<ByteBuffer>> get(final ByteBuffer key) {
     return get(key, DEFAULT_READ_OPTIONS);
   }
 
   @Override
-  public CompletionStage<ByteBuffer> get(final ByteBuffer key, final ReadOptions readOptions) {
+  public CompletionStage<Optional<ByteBuffer>> get(final ByteBuffer key,
+      final ReadOptions readOptions) {
     final Throwable t = checkBackgroundException();
     if (t != null) {
       return CompletableFutures.exceptionalFuture(t);
@@ -425,7 +417,7 @@ public class DbImpl implements DB {
             });
   }
 
-  private CompletionStage<ByteBuffer> getInternal(final ByteBuffer key,
+  private CompletionStage<Optional<ByteBuffer>> getInternal(final ByteBuffer key,
       final boolean verifyChecksums, final boolean fillCache, final long snapshot) {
     if (shuttingDown.get()) {
       return CompletableFutures.exceptionalFuture(
@@ -436,7 +428,7 @@ public class DbImpl implements DB {
 
     final LookupResult memTableLookup = memTables.get(lookupKey);
     if (memTableLookup != null) {
-      return CompletableFuture.completedFuture(memTableLookup.getValue());
+      return CompletableFuture.completedFuture(Optional.ofNullable(memTableLookup.getValue()));
     }
 
     // Not in memTables; try live files in level order
@@ -444,7 +436,7 @@ public class DbImpl implements DB {
     return versions.get(lookupKey).thenApply(lookupResult -> {
       // possibly necessitated seek threshold compaction
       compactions.maybeScheduleVersionCompaction();
-      return lookupResult.getValue();
+      return lookupResult == null ? Optional.empty() : Optional.ofNullable(lookupResult.getValue());
     });
   }
 
@@ -604,7 +596,8 @@ public class DbImpl implements DB {
   }
 
   @Override
-  public CompletionStage<DBIterator> iterator(final ReadOptions options) {
+  public CompletionStage<SeekingAsynchronousIterator<ByteBuffer, ByteBuffer>> iterator(
+      final ReadOptions options) {
     // TODO Auto-generated method stub
     return null;
   }
@@ -646,7 +639,6 @@ public class DbImpl implements DB {
     final FileInfo fileInfo = FileInfo.table(dbHandle, fileNumber);
     return CompletableFutures
         .composeOnException(env.openSequentialWriteFile(fileInfo).thenCompose(file -> {
-
           final Iterator<Entry<InternalKey, ByteBuffer>> dataIter = data.iterator();
           Preconditions.checkArgument(dataIter.hasNext(), "cannot build from empty table");
           final Entry<InternalKey, ByteBuffer> first = dataIter.next();
@@ -657,10 +649,10 @@ public class DbImpl implements DB {
           return closeAfter(
               // TODO coalesce deletions and writes
               CompletableFutures
-                  .unrollImmediate(
+                  .unroll(builder.add(first),
                       ignored -> dataIter
                           .hasNext(),
-                      builder::add, first)
+                      builder::add)
                   .thenCompose(largestEntry -> builder.finish()
                       .whenComplete((success, exception) -> builder.close())
                       .thenApply(fileSize -> new FileMetaData(fileNumber, fileSize,
@@ -700,7 +692,7 @@ public class DbImpl implements DB {
     return versions.getCurrent().numberOfFilesInLevel(level);
   }
 
-  public long getMaxNextLevelOverlappingBytes() {
+  long getMaxNextLevelOverlappingBytes() {
     return versions.getMaxNextLevelOverlappingBytes();
   }
 
@@ -833,7 +825,7 @@ public class DbImpl implements DB {
 
     private CompletionStage<Void> writeLevel0Table(final MemTableAndLog memlog) {
       // TODO check on suspended compaction
-      return CompletableFuture.allOf(memlog.pendingWriters.toArray())
+      return CompletableFuture.allOf(memlog.pendingWriters.toArray(CompletableFuture[]::new))
           .thenCompose(writersFinished -> {
             // skip empty mem table
             if (memlog.memTable.isEmpty()) {
@@ -874,17 +866,19 @@ public class DbImpl implements DB {
       assert shuttingDown.get();
 
       final MemTableAndLog current = mutable;
-      return CompletableFutures.composeUnconditionally(
-          CompletableFuture.allOf(current.pendingWriters.toArray()).thenCompose(voided -> {
+      return CompletableFutures.composeUnconditionally(CompletableFuture
+          .allOf(current.pendingWriters.toArray(CompletableFuture[]::new)).thenCompose(voided -> {
             final MemTableAndLog newest = mutable;
             // it's possible that one of the pending writers performed a swap, but only one swap
             // could be performed following the set shutdown flag
-            return newest != current ? CompletableFuture.allOf(newest.pendingWriters.toArray())
-                .thenApply(ignored -> newest) : CompletableFuture.completedFuture(newest);
+            return newest != current
+                ? CompletableFuture.allOf(newest.pendingWriters.toArray(CompletableFuture[]::new))
+                    .thenApply(ignored -> newest)
+                : CompletableFuture.completedFuture(newest);
           }),
           optMutable -> CompletableFutures.composeUnconditionally(
-              CompletableFutures
-                  .allOfVoid(Stream.of(immutableTables.toArray()).map(memlog -> memlog.flush)),
+              CompletableFutures.allOfVoid(Stream.of(immutableTables.toArray(MemTableAndLog[]::new))
+                  .map(memlog -> memlog.flush)),
               ignored -> optMutable.filter(memlog -> memlog.requiresFlush)
                   .map(this::writeLevel0Table).orElse(CompletableFuture.completedFuture(null))));
     }
@@ -943,28 +937,27 @@ public class DbImpl implements DB {
     private CompletionStage<Optional<CompactionState>> doCompactionWork(
         final CompactionState compactionState,
         final AsynchronousIterator<Entry<InternalKey, ByteBuffer>> iter) {
-      return CompletableFutures
-          .unroll(state -> state.currentEntry.isPresent() && !shuttingDown.get(), state -> {
-            final Entry<InternalKey, ByteBuffer> entry = state.currentEntry.get();
+      return CompletableFutures.unroll(iter.next().thenApply(optNext -> {
+        compactionState.currentEntry = optNext;
+        return compactionState;
+      }), state -> state.currentEntry.isPresent() && !shuttingDown.get(), state -> {
+        final Entry<InternalKey, ByteBuffer> entry = state.currentEntry.get();
 
-            if (state.compaction.shouldStopBefore(entry.getKey()) && state.builder != null) {
-              return state.finishCompactionOutputFile()
-                  .thenCompose(voided -> addIfNecessary(state, entry));
-            } else {
-              return addIfNecessary(state, entry);
-            }
-          } , iter.next().thenApply(optNext -> {
-            compactionState.currentEntry = optNext;
-            return compactionState;
-          })).thenCompose(state -> {
-            if (shuttingDown.get()) {
-              return CompletableFuture.completedFuture(Optional.empty());
-            } else if (state.builder != null) {
-              return state.finishCompactionOutputFile().thenApply(voided -> Optional.of(state));
-            } else {
-              return CompletableFuture.completedFuture(Optional.of(state));
-            }
-          });
+        if (state.compaction.shouldStopBefore(entry.getKey()) && state.builder != null) {
+          return state.finishCompactionOutputFile()
+              .thenCompose(voided -> addIfNecessary(state, entry));
+        } else {
+          return addIfNecessary(state, entry);
+        }
+      }).thenCompose(state -> {
+        if (shuttingDown.get()) {
+          return CompletableFuture.completedFuture(Optional.empty());
+        } else if (state.builder != null) {
+          return state.finishCompactionOutputFile().thenApply(voided -> Optional.of(state));
+        } else {
+          return CompletableFuture.completedFuture(Optional.of(state));
+        }
+      });
 
       // TODO port CompactionStats code
     }

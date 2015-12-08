@@ -89,8 +89,9 @@ public class CompletableFuturesTest {
   public void testUnroll() throws InterruptedException, ExecutionException, TimeoutException {
     final int expected = 100_000;
 
-    final CompletionStage<Integer> c = CompletableFutures.unrollImmediate(i -> i < expected,
-        i -> CompletableFuture.completedFuture(i + 1), 0);
+    final CompletionStage<Integer> c =
+        CompletableFutures.unroll(CompletableFuture.completedFuture(0), i -> i < expected,
+            i -> CompletableFuture.completedFuture(i + 1));
     final int actual = c.toCompletableFuture().get(5, TimeUnit.SECONDS);
 
     Assert.assertEquals(actual, expected);
