@@ -35,8 +35,8 @@ import com.cleversafe.leveldb.table.TestUtils.EqualableFileMetaData;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.EnvDependentTest;
 import com.cleversafe.leveldb.util.FileEnvTestProvider;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.Iterators;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.collect.Maps;
 
 public abstract class VersionSetTest extends EnvDependentTest {
@@ -195,12 +195,11 @@ public abstract class VersionSetTest extends EnvDependentTest {
     final TableCache delayedTableCache =
         new TableCache(getHandle(), 100, TestUtils.keyComparator, getEnv(), true, null, null) {
           @Override
-          public CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> tableIterator(
-              final FileMetaData file) {
+          public CompletionStage<InternalIterator> tableIterator(final FileMetaData file) {
             if (file.getNumber() == file1.getNumber()) {
               blocker.acquireUninterruptibly();
             }
-            return CompletableFuture.completedFuture(Iterators.emptySeekingAsyncIterator());
+            return CompletableFuture.completedFuture(Iterators.emptyInternal());
           }
         };
     final VersionSet vs =

@@ -17,6 +17,7 @@ package com.cleversafe.leveldb;
 
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -63,11 +64,21 @@ public interface AsynchronousIterator<T> {
   }
 
   /**
+   * @return an iterator consisting of the results of applying the given stage producing function to
+   *         the elements of this iterator.
+   */
+  default <R> AsynchronousIterator<R> mapCompose(
+      final Function<? super T, ? extends CompletionStage<R>> mapper) {
+    return () -> next().thenCompose(optT -> optT.map(t -> mapper.apply(t).thenApply(Optional::of))
+        .orElseGet(() -> CompletableFuture.completedFuture(Optional.empty())));
+  }
+
+  /**
    * @return an iterator consisting of the elements of this iterator that match the given predicate.
    */
   default AsynchronousIterator<T> filter(final Predicate<? super T> predicate) {
-    return () -> CompletableFutures.unroll(optT -> optT.filter(predicate.negate()).isPresent(),
-        ignored -> next(), next());
+    return () -> CompletableFutures.unroll(next(),
+        optT -> optT.filter(predicate.negate()).isPresent(), ignored -> next());
   }
 
   /**
@@ -77,10 +88,11 @@ public interface AsynchronousIterator<T> {
   default <U> CompletionStage<U> reduce(final U seed,
       final BiFunction<U, ? super T, U> accumulator) {
     return CompletableFutures
-        .<Entry<Optional<T>, U>>unroll(pair -> pair.getKey().isPresent(),
+        .<Entry<Optional<T>, U>>unroll(
+            next().thenApply(optNext -> Maps.immutableEntry(optNext, seed)),
+            pair -> pair.getKey().isPresent(),
             pair -> next().thenApply(optNext -> Maps.immutableEntry(optNext,
-                accumulator.apply(pair.getValue(), pair.getKey().get()))),
-        next().thenApply(optNext -> Maps.immutableEntry(optNext, seed)))
+                accumulator.apply(pair.getValue(), pair.getKey().get()))))
         .thenApply(Entry::getValue);
   }
 }

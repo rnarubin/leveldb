@@ -67,13 +67,11 @@ public class MergingIteratorTest {
   }
 
   private void iterTest(final List<List<Entry<InternalKey, ByteBuffer>>> input) {
-    final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter =
-        MergingIterator
-            .newMergingIterator(
-                input.stream()
-                    .map(list -> Iterators
-                        .async(Iterators.reverseSeekingIterator(list, keyComparator)))
-                .collect(Collectors.toList()), keyComparator);
+    final InternalIterator iter =
+        MergingIterator.newMergingIterator(input.stream()
+            .map(list -> Iterators
+                .asyncInternal(Iterators.reverseSeekingIterator(list, keyComparator)))
+        .collect(Collectors.toList()), keyComparator);
     final List<Entry<InternalKey, ByteBuffer>> entries =
         input.stream().reduce(new ArrayList<>(), (x, y) -> {
           x.addAll(y);

@@ -34,8 +34,8 @@ import java.util.stream.Stream;
 
 import com.cleversafe.leveldb.table.Table.TableIterator;
 import com.cleversafe.leveldb.util.CompletableFutures;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.MergingIterator;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.cleversafe.leveldb.util.TwoStageIterator;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -93,7 +93,7 @@ final class Version {
     return internalKeyComparator;
   }
 
-  public static CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> newLevel0Iterator(
+  public static CompletionStage<InternalIterator> newLevel0Iterator(
       final Stream<FileMetaData> files, final TableCache tableCache,
       final Comparator<InternalKey> internalKeyComparator) {
     return CompletableFutures.allOf(files.map(tableCache::tableIterator))
@@ -101,11 +101,10 @@ final class Version {
             .newMergingIterator(tableIters.collect(Collectors.toList()), internalKeyComparator));
   }
 
-  public CompletionStage<Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>>> getIterators() {
-    final CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0 =
+  public CompletionStage<Collection<InternalIterator>> getIterators() {
+    final CompletionStage<InternalIterator> level0 =
         newLevel0Iterator(Arrays.stream(files[0]), tableCache, internalKeyComparator);
-    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> listBuilder =
-        ImmutableList.builder();
+    final ImmutableList.Builder<InternalIterator> listBuilder = ImmutableList.builder();
     for (int i = 1; i < files.length; i++) {
       listBuilder.add(new LevelIterator(tableCache, files[i], internalKeyComparator));
     }

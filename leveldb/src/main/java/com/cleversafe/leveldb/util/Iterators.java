@@ -15,6 +15,7 @@
 
 package com.cleversafe.leveldb.util;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -28,6 +29,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.stream.Stream;
 
 import com.cleversafe.leveldb.AsynchronousIterator;
+import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.ReverseIterator;
 import com.cleversafe.leveldb.impl.ReversePeekingIterator;
 import com.cleversafe.leveldb.impl.ReverseSeekingIterator;
@@ -45,13 +47,46 @@ public final class Iterators {
     return new EmptySeekingAsyncIterator<K, V>();
   }
 
+  public static InternalIterator emptyInternal() {
+    class EmptyInternalIterator extends EmptySeekingAsyncIterator<InternalKey, ByteBuffer>
+        implements InternalIterator {
+      @Override
+      public CompletionStage<Void> asyncClose() {
+        return CompletableFuture.completedFuture(null);
+      }
+    }
+
+    return new EmptyInternalIterator();
+  }
+
   public static <T> AsynchronousIterator<T> async(final Iterator<T> iter) {
     return new AsyncWrappedIterator<>(iter);
+  }
+
+  public static <T> AsynchronousIterator<T> async(final Stream<T> stream) {
+    return async(stream.iterator());
   }
 
   public static <K, V> SeekingAsynchronousIterator<K, V> async(
       final ReverseSeekingIterator<K, V> iter) {
     return new AsyncWrappedSeekingIterator<>(iter);
+  }
+
+  public static InternalIterator asyncInternal(
+      final ReverseSeekingIterator<InternalKey, ByteBuffer> iter) {
+    class WrappedInternalIterator extends AsyncWrappedSeekingIterator<InternalKey, ByteBuffer>
+        implements InternalIterator {
+      public WrappedInternalIterator(final ReverseSeekingIterator<InternalKey, ByteBuffer> iter) {
+        super(iter);
+      }
+
+      @Override
+      public CompletionStage<Void> asyncClose() {
+        return CompletableFuture.completedFuture(null);
+      }
+    }
+
+    return new WrappedInternalIterator(iter);
   }
 
   public static <T> CompletionStage<Stream<T>> toStream(final AsynchronousIterator<T> iter) {
@@ -352,11 +387,6 @@ public final class Iterators {
       iter.seekToEnd();
       return CompletableFuture.completedFuture(null);
     }
-
-    @Override
-    public CompletionStage<Void> asyncClose() {
-      return CompletableFuture.completedFuture(null);
-    }
   }
 
   private static class EmptyAsyncIterator<T> implements AsynchronousIterator<T> {
@@ -390,11 +420,6 @@ public final class Iterators {
 
     @Override
     public CompletionStage<Void> seekToEnd() {
-      return CompletableFuture.completedFuture(null);
-    }
-
-    @Override
-    public CompletionStage<Void> asyncClose() {
       return CompletableFuture.completedFuture(null);
     }
   }

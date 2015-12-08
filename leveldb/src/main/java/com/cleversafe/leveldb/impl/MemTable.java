@@ -29,8 +29,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.Iterators.Direction;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 
 public class MemTable {
   private final NavigableMap<InternalKey, ByteBuffer> table;
@@ -86,11 +86,11 @@ public class MemTable {
     return table.entrySet();
   }
 
-  public SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator() {
+  public InternalIterator iterator() {
     return new MemTableIterator();
   }
 
-  class MemTableIterator implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
+  class MemTableIterator implements InternalIterator {
     private Iterator<Entry<InternalKey, ByteBuffer>> iter;
     private InternalKey lastKey;
     private Direction direction;

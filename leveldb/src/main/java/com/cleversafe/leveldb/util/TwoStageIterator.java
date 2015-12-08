@@ -27,8 +27,8 @@ import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.impl.ReverseSeekingIterator;
 import com.cleversafe.leveldb.util.Iterators.Direction;
 
-public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<InternalKey, V>, DataT extends SeekingAsynchronousIterator<InternalKey, ByteBuffer>, V>
-    implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
+public abstract class TwoStageIterator<IndexT extends ReverseSeekingIterator<InternalKey, V>, DataT extends InternalIterator, V>
+    implements InternalIterator {
   private final IndexT index;
   private DataT current;
   private Direction currentOrigin;

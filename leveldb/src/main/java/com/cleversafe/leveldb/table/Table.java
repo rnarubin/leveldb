@@ -32,8 +32,8 @@ import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.util.ByteBufferCrc32C;
 import com.cleversafe.leveldb.util.ByteBuffers;
 import com.cleversafe.leveldb.util.CompletableFutures;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.Iterators;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.cleversafe.leveldb.util.Snappy;
 import com.cleversafe.leveldb.util.TwoStageIterator;
 import com.google.common.base.Preconditions;
@@ -226,8 +226,8 @@ public final class Table {
         + verifyChecksums + "]";
   }
 
-  public static class TableIterator extends
-      TwoStageIterator<BlockIterator<InternalKey>, SeekingAsynchronousIterator<InternalKey, ByteBuffer>, ByteBuffer> {
+  public static class TableIterator
+      extends TwoStageIterator<BlockIterator<InternalKey>, InternalIterator, ByteBuffer> {
     private final Table table;
 
     public TableIterator(final Table table, final BlockIterator<InternalKey> indexIterator) {
@@ -236,9 +236,9 @@ public final class Table {
     }
 
     @Override
-    protected CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> getData(
-        final ByteBuffer blockHandle) {
-      return table.openBlock(blockHandle).thenApply(block -> Iterators.async(block.iterator()));
+    protected CompletionStage<InternalIterator> getData(final ByteBuffer blockHandle) {
+      return table.openBlock(blockHandle)
+          .thenApply(block -> Iterators.asyncInternal(block.iterator()));
     }
 
     @Override

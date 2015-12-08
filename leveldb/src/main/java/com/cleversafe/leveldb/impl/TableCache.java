@@ -15,7 +15,6 @@
 package com.cleversafe.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
-import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
@@ -28,7 +27,7 @@ import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.Table.TableIterator;
 import com.cleversafe.leveldb.util.CompletableFutures;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
@@ -78,8 +77,7 @@ public class TableCache implements AsynchronousCloseable {
         });
   }
 
-  public CompletionStage<? extends SeekingAsynchronousIterator<InternalKey, ByteBuffer>> tableIterator(
-      final FileMetaData file) {
+  public CompletionStage<? extends InternalIterator> tableIterator(final FileMetaData file) {
     return tableIterator(file.getNumber());
   }
 

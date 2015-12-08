@@ -47,9 +47,9 @@ import com.cleversafe.leveldb.FileInfo;
 import com.cleversafe.leveldb.util.Closeables;
 import com.cleversafe.leveldb.util.CompletableFutures;
 import com.cleversafe.leveldb.util.GrowingBuffer;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.MemoryManagers;
 import com.cleversafe.leveldb.util.MergingIterator;
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableList;
@@ -547,14 +547,12 @@ public class VersionSet implements AsynchronousCloseable {
     return Maps.immutableEntry(smallest, largest);
   }
 
-  public CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> makeInputIterator(
-      final Compaction c) {
+  public CompletionStage<InternalIterator> makeInputIterator(final Compaction c) {
     // Level-0 files have to be merged together. For other levels,
     // we will make a concatenating iterator per level.
     // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-    CompletionStage<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> level0Iter = null;
-    final ImmutableList.Builder<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> list =
-        ImmutableList.builder();
+    CompletionStage<InternalIterator> level0Iter = null;
+    final ImmutableList.Builder<InternalIterator> list = ImmutableList.builder();
     for (int which = 0; which < 2; which++) {
       final List<FileMetaData> input = c.input(which);
       if (!input.isEmpty()) {

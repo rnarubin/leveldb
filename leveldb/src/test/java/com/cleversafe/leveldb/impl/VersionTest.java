@@ -31,14 +31,6 @@ import java.util.stream.Stream;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import com.cleversafe.leveldb.impl.FileMetaData;
-import com.cleversafe.leveldb.impl.InternalKey;
-import com.cleversafe.leveldb.impl.LookupKey;
-import com.cleversafe.leveldb.impl.LookupResult;
-import com.cleversafe.leveldb.impl.TableCache;
-import com.cleversafe.leveldb.impl.TransientInternalKey;
-import com.cleversafe.leveldb.impl.ValueType;
-import com.cleversafe.leveldb.impl.Version;
 import com.cleversafe.leveldb.table.TestUtils;
 import com.cleversafe.leveldb.util.ByteBuffers;
 import com.cleversafe.leveldb.util.CompletableFutures;
@@ -248,10 +240,14 @@ public abstract class VersionTest extends EnvDependentTest {
     if (actual == null || expected == null) {
       Assert.assertTrue(actual == expected);
     } else {
-      Assert.assertEquals(actual.isDeleted(), expected.isDeleted());
       TestUtils.assertByteBufferEquals(actual.getKey().getUserKey(),
           expected.getKey().getUserKey());
-      TestUtils.assertByteBufferEquals(actual.getValue(), expected.getValue());
+      if (expected.isDeleted()) {
+        Assert.assertTrue(actual.isDeleted());
+        Assert.assertEquals(actual.getValue(), expected.getValue());
+      } else {
+        TestUtils.assertByteBufferEquals(actual.getValue(), expected.getValue());
+      }
     }
   }
 

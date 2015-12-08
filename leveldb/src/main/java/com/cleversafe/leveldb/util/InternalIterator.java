@@ -12,12 +12,14 @@
  * or implied. See the License for the specific language governing permissions and limitations under
  * the License.
  */
-package com.cleversafe.leveldb;
+
+package com.cleversafe.leveldb.util;
 
 import java.nio.ByteBuffer;
 
-import com.cleversafe.leveldb.util.SeekingAsynchronousIterator;
+import com.cleversafe.leveldb.AsynchronousCloseable;
+import com.cleversafe.leveldb.impl.InternalKey;
 
-public interface DBIterator
-    extends SeekingAsynchronousIterator<ByteBuffer, ByteBuffer>, AsynchronousCloseable {
+public interface InternalIterator
+    extends SeekingAsynchronousIterator<InternalKey, ByteBuffer>, AsynchronousCloseable {
 }

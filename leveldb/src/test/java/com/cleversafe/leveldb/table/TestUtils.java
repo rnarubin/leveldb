@@ -52,6 +52,7 @@ import org.testng.Assert;
 import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.Compression;
 import com.cleversafe.leveldb.DBComparator;
+import com.cleversafe.leveldb.DBIterator;
 import com.cleversafe.leveldb.Env;
 import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.Env.DelegateEnv;
@@ -68,6 +69,7 @@ import com.cleversafe.leveldb.impl.TableCache;
 import com.cleversafe.leveldb.impl.TransientInternalKey;
 import com.cleversafe.leveldb.impl.ValueType;
 import com.cleversafe.leveldb.util.ByteBuffers;
+import com.cleversafe.leveldb.util.InternalIterator;
 import com.cleversafe.leveldb.util.Iterators;
 import com.cleversafe.leveldb.util.Iterators.Direction;
 import com.cleversafe.leveldb.util.MemoryManagers;
@@ -286,8 +288,7 @@ public final class TestUtils {
   }
 
 
-  public static void testBufferIterator(
-      final SeekingAsynchronousIterator<ByteBuffer, ByteBuffer> iter,
+  public static void testDBIterator(final DBIterator iter,
       final List<Entry<ByteBuffer, ByteBuffer>> entries) {
     testIterator(iter, entries, ByteBuffer.wrap(new byte[] {0}),
         ByteBuffer.wrap(new byte[] {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}),
@@ -295,8 +296,7 @@ public final class TestUtils {
   }
 
 
-  public static void testInternalKeyIterator(
-      final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter,
+  public static void testInternalKeyIterator(final InternalIterator iter,
       final List<Entry<InternalKey, ByteBuffer>> entries) {
     testIterator(iter, entries,
         new TransientInternalKey(ByteBuffer.wrap(new byte[] {0}), Long.MAX_VALUE, ValueType.VALUE),
@@ -306,9 +306,9 @@ public final class TestUtils {
         TestUtils::before, TestUtils::after);
   }
 
-  private static <K, V> void testIterator(final SeekingAsynchronousIterator<K, V> iter,
-      final List<Entry<K, V>> entries, final K first, final K end, final UnaryOperator<K> before,
-      final UnaryOperator<K> after) {
+  private static <K, V, I extends SeekingAsynchronousIterator<K, V> & AsynchronousCloseable> void testIterator(
+      final I iter, final List<Entry<K, V>> entries, final K first, final K end,
+      final UnaryOperator<K> before, final UnaryOperator<K> after) {
     final List<Entry<K, V>> reverseEntries = new ArrayList<>(entries);
     Collections.reverse(reverseEntries);
 

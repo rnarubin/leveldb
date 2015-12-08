@@ -32,7 +32,7 @@ import java.util.stream.Stream;
 import com.cleversafe.leveldb.impl.InternalKey;
 import com.cleversafe.leveldb.util.Iterators.Direction;
 
-public final class MergingIterator implements SeekingAsynchronousIterator<InternalKey, ByteBuffer> {
+public final class MergingIterator implements InternalIterator {
   /*
    * favors forward iteration by pre-loading next() after seek(key)
    */
@@ -42,13 +42,12 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   private boolean uncleanReverse;
   private boolean sought = false;
 
-  private MergingIterator(
-      final Collection<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
+  private MergingIterator(final Collection<InternalIterator> iterators,
       final Comparator<InternalKey> internalKeyComparator) {
     assert iterators.size() > 1;
     int ordinal = 0;
     this.iters = new OrdinalIterator[iterators.size()];
-    for (final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iter : iterators) {
+    for (final InternalIterator iter : iterators) {
       iters[ordinal] = new OrdinalIterator(ordinal, iter);
       ordinal++;
     }
@@ -57,12 +56,11 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
     this.largerPrev = OrdinalIterator.largerPrev(internalKeyComparator);
   }
 
-  public static SeekingAsynchronousIterator<InternalKey, ByteBuffer> newMergingIterator(
-      final List<SeekingAsynchronousIterator<InternalKey, ByteBuffer>> iterators,
+  public static InternalIterator newMergingIterator(final List<InternalIterator> iterators,
       final Comparator<InternalKey> internalKeyComparator) {
     switch (iterators.size()) {
       case 0:
-        return Iterators.emptySeekingAsyncIterator();
+        return Iterators.emptyInternal();
       case 1:
         return iterators.get(0);
       default:
@@ -120,14 +118,13 @@ public final class MergingIterator implements SeekingAsynchronousIterator<Intern
   }
 
   private static final class OrdinalIterator {
-    private final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator;
+    private final InternalIterator iterator;
     private final int ordinal;
     private Optional<Entry<InternalKey, ByteBuffer>> cachedNext;
     Optional<Entry<InternalKey, ByteBuffer>> cachedPrev;
     private Direction lastAdvance;
 
-    public OrdinalIterator(final int ordinal,
-        final SeekingAsynchronousIterator<InternalKey, ByteBuffer> iterator) {
+    public OrdinalIterator(final int ordinal, final InternalIterator iterator) {
       this.ordinal = ordinal;
       this.iterator = iterator;
     }
