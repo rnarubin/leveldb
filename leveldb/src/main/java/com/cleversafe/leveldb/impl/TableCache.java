@@ -16,9 +16,7 @@ package com.cleversafe.leveldb.impl;
 
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.Comparator;
-import java.util.Set;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentSkipListSet;
 
 import com.cleversafe.leveldb.AsynchronousCloseable;
 import com.cleversafe.leveldb.Compression;
@@ -27,6 +25,8 @@ import com.cleversafe.leveldb.Env.DBHandle;
 import com.cleversafe.leveldb.table.Table;
 import com.cleversafe.leveldb.table.Table.TableIterator;
 import com.cleversafe.leveldb.util.CompletableFutures;
+import com.cleversafe.leveldb.util.DeletionQueue;
+import com.cleversafe.leveldb.util.DeletionQueue.DeletionHandle;
 import com.cleversafe.leveldb.util.InternalIterator;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -39,8 +39,7 @@ public class TableCache implements AsynchronousCloseable {
    * release (i.e. IOException on dispose) they remain in the set to throw an exception on the
    * TableCache's close
    */
-  // TODO deletion quueue
-  private final Set<CompletionStage<Void>> pendingRemovals = new ConcurrentSkipListSet<>();
+  private final DeletionQueue<CompletionStage<Void>> pendingRemovals = new DeletionQueue<>();
   // TODO look into ben-manes/caffeine
   private final LoadingCache<Long, CompletionStage<Table>> cache;
 
@@ -54,17 +53,25 @@ public class TableCache implements AsynchronousCloseable {
           notification.getValue().whenComplete((table, openException) -> {
             if (openException == null) {
               // table was originally opened successfully
-              final CompletionStage<Void> release = table.releaseNullable();
-              if (release != null) {
-                pendingRemovals.add(release);
-                release.whenComplete((voided, closeException) -> {
-                  if (closeException != null) {
-                    backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
-                        closeException);
-                  } else {
-                    pendingRemovals.remove(release);
-                  }
-                });
+              try {
+                final CompletionStage<Void> release = table.releaseNullable();
+                if (release != null) {
+                  final DeletionHandle<?> deletion = pendingRemovals.insert(release);
+                  release.whenComplete((voided, closeException) -> {
+                    if (closeException != null) {
+                      backgroundExceptionHandler.uncaughtException(Thread.currentThread(),
+                          closeException);
+                    } else {
+                      try {
+                        deletion.close();
+                      } catch (final Throwable t) {
+                        backgroundExceptionHandler.uncaughtException(Thread.currentThread(), t);
+                      }
+                    }
+                  });
+                }
+              } catch (final Throwable t) {
+                backgroundExceptionHandler.uncaughtException(Thread.currentThread(), t);
               }
             }
           });

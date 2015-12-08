@@ -14,10 +14,9 @@
  */
 package com.cleversafe.leveldb;
 
-import java.io.Closeable;
 import java.nio.ByteBuffer;
 
-public interface WriteBatch extends Closeable {
+public interface WriteBatch {
   WriteBatch put(ByteBuffer key, ByteBuffer value);
 
   WriteBatch delete(ByteBuffer key);

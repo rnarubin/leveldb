@@ -263,8 +263,44 @@ public class DbImpl implements DB {
             } else {
               return logReader.next();
             }
-          }).thenApply(ignored -> struct.maxSequence), logReader);
+          }), logReader).thenCompose(ignored -> struct.table.isEmpty()
+              ? CompletableFuture.completedFuture(struct.maxSequence)
+              : buildTable(struct.table.entryIterable(), fileNumbers.getAsLong(),
+                  internalKeyComparator, dbHandle, options).thenApply(fileMetaData -> {
+            if (fileMetaData.getFileSize() > 0) {
+              edit.addFile(0, fileMetaData);
+            }
+            return struct.maxSequence;
+          }));
         });
+  }
+
+  private static WriteBatchImpl readWriteBatch(final ByteBuffer record, final int updateSize)
+      throws IOException {
+    @SuppressWarnings("resource")
+    final WriteBatchImpl writeBatch = new WriteBatchImpl.WriteBatchMulti();
+    int entries = 0;
+    while (record.hasRemaining()) {
+      entries++;
+      final ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
+      if (valueType == VALUE) {
+        final ByteBuffer key = ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(record));
+        final ByteBuffer value = ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(record));
+        writeBatch.put(key, value);
+      } else if (valueType == DELETION) {
+        final ByteBuffer key = ByteBuffers.heapCopy(ByteBuffers.readLengthPrefixedBytes(record));
+        writeBatch.delete(key);
+      } else {
+        throw new IllegalStateException("Unexpected value type " + valueType);
+      }
+    }
+
+    if (entries != updateSize) {
+      throw new IOException(String.format("Expected %d entries in log record but found %s entries",
+          updateSize, entries));
+    }
+
+    return writeBatch;
   }
 
   @Override
@@ -281,15 +317,12 @@ public class DbImpl implements DB {
       close = closeAfter(close, closeable);
     }
 
-    return close;
+    return close.whenComplete((success, exception) -> checkAndThrowBackgroundException());
   }
 
   @Override
   public String getProperty(final String name) {
-    final Throwable t = checkBackgroundException();
-    if (t != null) {
-      Throwables.propagate(t);
-    }
+    checkAndThrowBackgroundException();
     return null;
   }
 
@@ -390,6 +423,13 @@ public class DbImpl implements DB {
 
   public Throwable checkBackgroundException() {
     return exceptionHandler.checkBackgroundException();
+  }
+
+  public void checkAndThrowBackgroundException() {
+    final Throwable t = exceptionHandler.checkBackgroundException();
+    if (t != null) {
+      Throwables.propagate(t);
+    }
   }
 
   @Override
@@ -528,44 +568,13 @@ public class DbImpl implements DB {
 
   @Override
   public WriteBatch createWriteBatch() {
-    final Throwable t = checkBackgroundException();
-    if (t != null) {
-      Throwables.propagate(t);
-    }
+    checkAndThrowBackgroundException();
     return new WriteBatchImpl.WriteBatchMulti();
   }
 
   @Override
   public SnapshotImpl getSnapshot() {
     return snapshots.newSnapshot(versions.getLastSequence());
-  }
-
-  private static WriteBatchImpl readWriteBatch(final ByteBuffer record, final int updateSize)
-      throws IOException {
-    @SuppressWarnings("resource")
-    final WriteBatchImpl writeBatch = new WriteBatchImpl.WriteBatchMulti();
-    int entries = 0;
-    while (record.hasRemaining()) {
-      entries++;
-      final ValueType valueType = ValueType.getValueTypeByPersistentId(record.get());
-      if (valueType == VALUE) {
-        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
-        final ByteBuffer value = ByteBuffers.readLengthPrefixedBytes(record);
-        writeBatch.put(key, value);
-      } else if (valueType == DELETION) {
-        final ByteBuffer key = ByteBuffers.readLengthPrefixedBytes(record);
-        writeBatch.delete(key);
-      } else {
-        throw new IllegalStateException("Unexpected value type " + valueType);
-      }
-    }
-
-    if (entries != updateSize) {
-      throw new IOException(String.format("Expected %d entries in log record but found %s entries",
-          updateSize, entries));
-    }
-
-    return writeBatch;
   }
 
   private ByteBuffer writeWriteBatch(final WriteBatchImpl updates, final long sequenceBegin) {
@@ -649,10 +658,9 @@ public class DbImpl implements DB {
           return closeAfter(
               // TODO coalesce deletions and writes
               CompletableFutures
-                  .unroll(builder.add(first),
-                      ignored -> dataIter
-                          .hasNext(),
-                      builder::add)
+                  .unroll(builder.add(first), ignored -> dataIter.hasNext(),
+                      ignored -> builder
+                          .add(dataIter.next()))
                   .thenCompose(largestEntry -> builder.finish()
                       .whenComplete((success, exception) -> builder.close())
                       .thenApply(fileSize -> new FileMetaData(fileNumber, fileSize,

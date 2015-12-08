@@ -39,9 +39,6 @@ abstract class WriteBatchImpl implements WriteBatch {
   }
 
   @Override
-  public void close() {}
-
-  @Override
   public final WriteBatchImpl put(final ByteBuffer key, final ByteBuffer value) {
     Preconditions.checkNotNull(key, "key is null");
     Preconditions.checkNotNull(value, "value is null");

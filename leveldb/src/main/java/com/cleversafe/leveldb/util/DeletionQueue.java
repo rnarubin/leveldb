@@ -19,6 +19,7 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.IntFunction;
+import java.util.stream.Stream;
 
 public class DeletionQueue<T> implements Iterable<T> {
   private final Deque<T> deque = new ConcurrentLinkedDeque<>();
@@ -58,6 +59,10 @@ public class DeletionQueue<T> implements Iterable<T> {
 
   public T[] toArray(final IntFunction<T[]> arrSupplier) {
     return deque.stream().toArray(arrSupplier);
+  }
+
+  public Stream<T> stream() {
+    return deque.stream();
   }
 
   public static abstract class DeletionHandle<T> implements AutoCloseable {
