@@ -330,10 +330,12 @@ public class DbImpl
             }
 
             MemTables tables = memTables;
-            closeMemAndLog(tables.mutable, versions);
+            if(tables != null){
+                closeMemAndLog(tables.mutable, versions);
 
-            if (tables.immutableExists()) {
-                closeMemAndLog(tables.immutable, versions);
+                if (tables.immutableExists()) {
+                    closeMemAndLog(tables.immutable, versions);
+                }
             }
 
             Closeables.closeQuietly(versions);
