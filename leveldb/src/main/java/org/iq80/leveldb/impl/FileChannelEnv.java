@@ -236,7 +236,7 @@ public class FileChannelEnv
                 throws IOException
         {
             super(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND,
-                            StandardOpenOption.CREATE));
+                    StandardOpenOption.CREATE_NEW));
         }
 
         @Override
@@ -266,6 +266,7 @@ public class FileChannelEnv
             implements TemporaryWriteFile
     {
         private final Path temp, target;
+        private boolean saved = false;
 
         public FileChannelTemporaryWriteFile(Path temp, Path target)
                 throws IOException
@@ -276,11 +277,21 @@ public class FileChannelEnv
         }
 
         @Override
-        public void close()
+        public void save()
                 throws IOException
         {
             super.close();
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            saved = true;
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            if (!saved) {
+                super.close();
+            }
         }
     }
 
@@ -292,7 +303,7 @@ public class FileChannelEnv
         public FileChannelConcurrentWriteFile(Path path)
                 throws IOException
         {
-            super(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE));
+            super(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW));
             this.filePosition = new AtomicLong(0);
         }
 

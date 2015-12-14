@@ -18,17 +18,19 @@
 
 package org.iq80.leveldb.util;
 
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
+
 import java.util.Arrays;
 
 import org.iq80.leveldb.impl.ReverseIterators;
 import org.iq80.leveldb.impl.ReversePeekingIterator;
-
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertEquals;
+import org.testng.annotations.Test;
 
 public class ReversePeekingIteratorTest
 {
+    @Test
     public void testNextPrevPeekPeekPrev()
     {
         Integer a = 0, b = 1, c = 2, d = 3;

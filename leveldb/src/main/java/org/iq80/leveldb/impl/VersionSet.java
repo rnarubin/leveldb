@@ -17,26 +17,10 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ComparisonChain;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSortedSet;
-import com.google.common.collect.MapMaker;
-import com.google.common.collect.Maps;
-
-import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.Env;
-import org.iq80.leveldb.Env.DBHandle;
-import org.iq80.leveldb.Env.TemporaryWriteFile;
-import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Env.SequentialReadFile;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.util.GrowingBuffer;
-import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.MergingIterator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static com.google.common.collect.Lists.newArrayList;
+import static com.google.common.collect.Lists.newArrayListWithCapacity;
+import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
+import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -55,10 +39,26 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static com.google.common.collect.Lists.newArrayList;
-import static com.google.common.collect.Lists.newArrayListWithCapacity;
-import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
-import static org.iq80.leveldb.impl.LogMonitors.throwExceptionMonitor;
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.Env.SequentialReadFile;
+import org.iq80.leveldb.Env.TemporaryWriteFile;
+import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.util.GrowingBuffer;
+import org.iq80.leveldb.util.InternalIterator;
+import org.iq80.leveldb.util.MergingIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ComparisonChain;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.MapMaker;
+import com.google.common.collect.Maps;
 
 public class VersionSet
         implements Closeable
@@ -709,6 +709,7 @@ public class VersionSet
         try (TemporaryWriteFile file = env.openTemporaryWriteFile(temp, FileInfo.current(dbHandle))) {
             file.write(ByteBuffer.wrap((descriptorStringName(descriptorNumber) + "\n").getBytes(StandardCharsets.UTF_8)));
             file.sync();
+            file.save();
         }
         catch (IOException e) {
             env.deleteFile(temp);

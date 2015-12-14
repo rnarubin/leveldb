@@ -75,8 +75,8 @@ import org.iq80.leveldb.impl.FileSystemEnv.DBPath;
 import org.iq80.leveldb.util.ByteBuffers;
 import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
-import org.iq80.leveldb.util.MergingIterator;
 import org.iq80.leveldb.util.FileUtils;
+import org.iq80.leveldb.util.MergingIterator;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -475,6 +475,55 @@ public class DbImplTest
         assertEquals(db.get("bar"), "v2");
         assertEquals(db.get("big1"), longString(10000000, 'x'));
         assertEquals(db.get("big2"), longString(1000, 'y'));
+    }
+
+    @Test
+    public void testCrashDuringTempSync()
+            throws IOException
+    {
+        DbStringWrapper db = new DbStringWrapper(Options.make(), databaseDir);
+        db.put("foo", "bar");
+
+        @SuppressWarnings("serial")
+        class InjectedException
+                extends RuntimeException
+        {
+        }
+
+        Env crashOnTempSync = new DelegateEnv(getEnv())
+        {
+            @Override
+            public TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
+                    throws IOException
+            {
+                return new DelegateTemporaryWriteFile(delegate.openTemporaryWriteFile(temp, target))
+                {
+                    @Override
+                    public void sync()
+                    {
+                        throw new InjectedException();
+                    }
+                };
+            }
+        };
+
+        try{
+            // force error
+            db.reopen(Options.make().env(crashOnTempSync));
+            Assert.fail("did not throw expected exception");
+        }
+        catch (InjectedException expected) {
+        }
+
+        // corrupt CURRENT
+        db.reopen(Options.make());
+
+        Assert.assertEquals(db.get("foo"), "bar");
+
+        // read corrupted CURRENT
+        db.reopen();
+
+        Assert.assertEquals(db.get("foo"), "bar");
     }
 
     @Test
@@ -1518,7 +1567,7 @@ public class DbImplTest
         private final Options options;
         private final File databaseDir;
         private DbImpl db;
-        private final StrictEnv env;
+        private StrictEnv env;
 
         private DbStringWrapper(Options options, File databaseDir)
                 throws IOException
@@ -1639,7 +1688,15 @@ public class DbImplTest
                 throws IOException
         {
             db.close();
-            db = new DbImpl(options.verifyChecksums(true).createIfMissing(false).errorIfExists(false), databaseDir);
+            if (options != this.options) {
+                env.close();
+                env = new StrictEnv(options.env() == null ? getEnv() : options.env());
+            }
+            db = new DbImpl(options.verifyChecksums(true)
+                    .createIfMissing(false)
+                    .errorIfExists(false)
+                    .env(env)
+                    .memoryManager(env.strictMemory), databaseDir);
         }
 
         private List<String> allEntriesFor(String userKey)

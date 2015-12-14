@@ -54,8 +54,10 @@ public interface Env
 
     /**
      * Creates and opens a new {@link TemporaryWriteFile} with the given temp
-     * file info. Upon closing, the data in the temp file should be atomically
-     * saved to the target file info, replacing the target file if it exists
+     * file info. If a file already exists with the temp info, the existing file
+     * is first deleted. Upon closing, the data in the temp file should be
+     * atomically saved to the target file info, replacing the target file if it
+     * exists
      */
     TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
             throws IOException;
@@ -278,12 +280,11 @@ public interface Env
             extends SequentialWriteFile
     {
         /**
-         * Save the data written to the temporary file to the given target file
-         * name (in addition to releasing associated resources as required by
-         * {@link Closeable#close() close})
+         * Atomically save the data written to the temporary file to the given
+         * target file name. The temporary file will no longer be written to,
+         * and may be closed as necessary
          */
-        @Override
-        public void close()
+        public void save()
                 throws IOException;
     }
 
@@ -663,6 +664,12 @@ public interface Env
                 throws IOException
         {
             return delegate.size();
+        }
+
+        public void save()
+                throws IOException
+        {
+            delegate.save();
         }
 
         public void close()

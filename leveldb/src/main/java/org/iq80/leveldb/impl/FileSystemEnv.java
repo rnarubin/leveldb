@@ -86,21 +86,34 @@ public abstract class FileSystemEnv
     public ConcurrentWriteFile openMultiWriteFile(FileInfo fileInfo)
             throws IOException
     {
-        return openMultiWriteFile(getPath(fileInfo));
+        Path path = getPath(fileInfo);
+        if (Files.exists(path)) {
+            Files.delete(path);
+        }
+        return openMultiWriteFile(path);
     }
 
     @Override
     public SequentialWriteFile openSequentialWriteFile(FileInfo fileInfo)
             throws IOException
     {
-        return openSequentialWriteFile(getPath(fileInfo));
+        Path path = getPath(fileInfo);
+        if (Files.exists(path)) {
+            Files.delete(path);
+        }
+        return openSequentialWriteFile(path);
     }
 
     @Override
     public TemporaryWriteFile openTemporaryWriteFile(FileInfo temp, FileInfo target)
             throws IOException
     {
-        return openTemporaryWriteFile(getPath(temp), getPath(target));
+        Path targetPath = getPath(target);
+        Path tempPath = getPath(temp);
+        if (Files.exists(tempPath)) {
+            Files.delete(tempPath);
+        }
+        return openTemporaryWriteFile(tempPath, targetPath);
     }
 
     @Override
