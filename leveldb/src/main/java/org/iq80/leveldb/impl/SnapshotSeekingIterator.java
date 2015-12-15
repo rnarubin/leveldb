@@ -18,10 +18,8 @@
 
 package org.iq80.leveldb.impl;
 
-import com.google.common.collect.Maps;
-
-import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
-import org.iq80.leveldb.util.MergingIterator;
+import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.FORWARD;
+import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.REVERSE;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -29,15 +27,22 @@ import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
-import static org.iq80.leveldb.impl.SnapshotSeekingIterator.Direction.*;
+import org.iq80.leveldb.util.AbstractReverseSeekingIterator;
+import org.iq80.leveldb.util.MergingIterator;
+
+import com.google.common.collect.Maps;
 
 public final class SnapshotSeekingIterator
         extends AbstractReverseSeekingIterator<ByteBuffer, ByteBuffer>
         implements Closeable
 {
     private final MergingIterator iterator;
-    private final SnapshotImpl snapshot;
+    private final long lastSequence;
     private final Comparator<ByteBuffer> userComparator;
+
+    @SuppressWarnings("unused") // retain for weak key map
+    private final Version version;
+
     // indicates the direction in which the iterator was last advanced
     private Direction direction;
     private Entry<InternalKey, ByteBuffer> savedEntry;
@@ -47,12 +52,15 @@ public final class SnapshotSeekingIterator
         FORWARD, REVERSE
     }
 
-    public SnapshotSeekingIterator(MergingIterator iterator, SnapshotImpl snapshot, Comparator<ByteBuffer> userComparator)
+    public SnapshotSeekingIterator(MergingIterator iterator,
+            Version version,
+            long lastSequence,
+            Comparator<ByteBuffer> userComparator)
     {
         this.iterator = iterator;
-        this.snapshot = snapshot;
+        this.lastSequence = lastSequence;
         this.userComparator = userComparator;
-        this.snapshot.getVersion().retain();
+        this.version = version;
         this.savedEntry = null;
     }
 
@@ -60,7 +68,6 @@ public final class SnapshotSeekingIterator
     public void close()
             throws IOException
     {
-        this.snapshot.getVersion().release();
         this.iterator.close();
     }
 
@@ -82,7 +89,7 @@ public final class SnapshotSeekingIterator
     @Override
     protected void seekInternal(ByteBuffer targetKey)
     {
-        iterator.seek(new TransientInternalKey(targetKey, snapshot.getLastSequence(), ValueType.VALUE));
+        iterator.seek(new TransientInternalKey(targetKey, lastSequence, ValueType.VALUE));
         findNextUserEntry(false, null);
         direction = REVERSE; // the next user entry has been found, but not yet advanced
     }
@@ -176,7 +183,7 @@ public final class SnapshotSeekingIterator
 
         while (iterator.hasNext()) {
             InternalKey internalKey = iterator.peek().getKey();
-            if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
+            if (internalKey.getSequenceNumber() <= lastSequence) {
                 switch (internalKey.getValueType()) {
                     case DELETION:
                         skipKey = internalKey.getUserKey();
@@ -201,7 +208,7 @@ public final class SnapshotSeekingIterator
         while (iterator.hasPrev()) {
             Entry<InternalKey, ByteBuffer> peekPrev = iterator.peekPrev();
             InternalKey internalKey = peekPrev.getKey();
-            if (internalKey.getSequenceNumber() <= snapshot.getLastSequence()) {
+            if (internalKey.getSequenceNumber() <= lastSequence) {
                 if (valueType != ValueType.DELETION
                         && (savedEntry == null || userComparator.compare(internalKey.getUserKey(),
                         savedEntry.getKey().getUserKey()) < 0)) {
@@ -234,7 +241,7 @@ public final class SnapshotSeekingIterator
     {
         final StringBuilder sb = new StringBuilder();
         sb.append("SnapshotSeekingIterator");
-        sb.append("{snapshot=").append(snapshot);
+        sb.append("{lastSequence=").append(lastSequence);
         sb.append(", iterator=").append(iterator);
         sb.append('}');
         return sb.toString();

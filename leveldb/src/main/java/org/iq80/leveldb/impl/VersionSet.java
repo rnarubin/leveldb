@@ -80,7 +80,8 @@ public class VersionSet
     private long logNumber;
     private long prevLogNumber;
 
-    private final Map<Version, Object> activeVersions = new MapMaker().weakKeys().makeMap();
+    private final Set<Version> activeVersions = Collections
+            .newSetFromMap(new MapMaker().weakKeys().<Version, Boolean> makeMap());
     private final DBHandle dbHandle;
     private final TableCache tableCache;
     private final InternalKeyComparator internalKeyComparator;
@@ -135,39 +136,14 @@ public class VersionSet
             descriptorLog.close();
             descriptorLog = null;
         }
-
-        Version t = current;
-        if (t != null) {
-            current = null;
-            t.release();
-        }
-
-        Set<Version> versions = activeVersions.keySet();
-        if (versions.size() > 0) {
-            // TODO fix snapshots/versions
-            LOGGER.trace("DB closed with " + versions.size()
-                    + " open versions. This could mean your application has a resource leak.");
-        }
     }
 
     private void appendVersion(Version version)
     {
         Preconditions.checkNotNull(version, "version is null");
         Preconditions.checkArgument(version != current, "version is the current version");
-        Version previous = current;
         current = version;
-        activeVersions.put(version, new Object());
-        if (previous != null) {
-            previous.release();
-        }
-    }
-
-    public void removeVersion(Version version)
-    {
-        Preconditions.checkNotNull(version, "version is null");
-        Preconditions.checkArgument(version != current, "version is the current version");
-        boolean removed = activeVersions.remove(version) != null;
-        assert removed : "Expected the version to still be in the active set";
+        activeVersions.add(version);
     }
 
     public InternalKeyComparator getInternalKeyComparator()
@@ -482,7 +458,7 @@ public class VersionSet
     public List<FileMetaData> getLiveFiles()
     {
         ImmutableList.Builder<FileMetaData> builder = ImmutableList.builder();
-        for (Version activeVersion : activeVersions.keySet()) {
+        for (Version activeVersion : activeVersions) {
             builder.addAll(activeVersion.getFiles().values());
         }
         return builder.build();

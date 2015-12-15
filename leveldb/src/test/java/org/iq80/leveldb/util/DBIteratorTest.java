@@ -18,12 +18,11 @@
 
 package org.iq80.leveldb.util;
 
-import org.iq80.leveldb.DB;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.ReadOptions;
-import org.iq80.leveldb.Snapshot;
-import org.iq80.leveldb.WriteBatch;
-import org.iq80.leveldb.WriteOptions;
+import static com.google.common.base.Charsets.UTF_8;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.fail;
 
 import java.io.Closeable;
 import java.io.File;
@@ -48,7 +47,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBIterator;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.ReadOptions;
+import org.iq80.leveldb.Snapshot;
+import org.iq80.leveldb.WriteBatch;
+import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.impl.DbImplTest.StrictEnv;
 import org.iq80.leveldb.impl.Iq80DBFactory;
 import org.iq80.leveldb.impl.ReverseIterator;
@@ -65,12 +70,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-
-import static com.google.common.base.Charsets.UTF_8;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
 
 public class DBIteratorTest
 {
@@ -397,26 +396,24 @@ public class DBIteratorTest
 
     @Test
     public void testIterationSnapshotWithSeeks()
-            throws IOException
+            throws IOException, ExecutionException, InterruptedException
     {
         List<List<Entry<String, String>>> splitList = Lists.partition(entries, entries.size() / 2);
         List<Entry<String, String>> firstHalf = splitList.get(0), secondHalf = splitList.get(1);
         putAll(db, firstHalf);
-        // TODO: use actual snapshots once snapshot preservation through compaction is supported
-        //Snapshot snapshot = db.getSnapshot();
-        try (StringDbIterator actual = new StringDbIterator(db.iterator())) {
+        Snapshot snapshot = db.getSnapshot();
 
-            // delete one-third of the entries in the db
-            deletePortion(db, firstHalf, 1.0 / 3.0);
+        // delete one-third of the entries in the db
+        deletePortion(db, firstHalf, 1.0 / 3.0);
 
-            // put in another set of data
-            putAll(db, secondHalf);
+        // put in another set of data
+        putAll(db, secondHalf);
 
-            List<Entry<String, String>> forward = ordered(firstHalf), backward = reverseOrdered(firstHalf);
+        List<Entry<String, String>> forward = ordered(firstHalf), backward = reverseOrdered(firstHalf);
 
-            // ReadOptions snapshotRead = ReadOptions.make().snapshot(snapshot);
+        ReadOptions snapshotRead = ReadOptions.make().snapshot(snapshot);
             // snapshot should retain the entries of the first insertion batch
-            // StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead));
+        try (StringDbIterator actual = new StringDbIterator(db.iterator(snapshotRead))) {
 
             actual.seekToFirst();
             assertForwardSame(actual, forward);
@@ -426,9 +423,8 @@ public class DBIteratorTest
             assertBackwardSame(actual, backward);
             assertForwardSame(actual, forward);
 
-            // TODO seeks after deletes require snapshots
-            // System.out.println("Testing snapshot seeks (this may take a while)");
-            // doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead);
+            System.out.println("Testing snapshot seeks (this may take a while)");
+            doSeeks(db, forward, backward, 0.01, 0.001, snapshotRead, null);
         }
     }
 

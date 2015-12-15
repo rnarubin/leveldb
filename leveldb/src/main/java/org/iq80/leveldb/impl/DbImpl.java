@@ -17,37 +17,15 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-
-import org.iq80.leveldb.DB;
-import org.iq80.leveldb.DBBufferComparator;
-import org.iq80.leveldb.DBException;
-import org.iq80.leveldb.Env;
-import org.iq80.leveldb.Env.DBHandle;
-import org.iq80.leveldb.Env.LockFile;
-import org.iq80.leveldb.Env.SequentialReadFile;
-import org.iq80.leveldb.Env.SequentialWriteFile;
-import org.iq80.leveldb.FileInfo;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.Range;
-import org.iq80.leveldb.ReadOptions;
-import org.iq80.leveldb.Snapshot;
-import org.iq80.leveldb.WriteBatch;
-import org.iq80.leveldb.WriteOptions;
-import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
-import org.iq80.leveldb.table.BytewiseComparator;
-import org.iq80.leveldb.table.TableBuilder;
-import org.iq80.leveldb.util.ByteBuffers;
-import org.iq80.leveldb.util.Closeables;
-import org.iq80.leveldb.util.InternalIterator;
-import org.iq80.leveldb.util.MergingIterator;
-import org.iq80.leveldb.util.MemoryManagers;
-import org.iq80.leveldb.util.Snappy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static com.google.common.collect.Lists.newArrayList;
+import static org.iq80.leveldb.impl.DbConstants.L0_SLOWDOWN_WRITES_TRIGGER;
+import static org.iq80.leveldb.impl.DbConstants.L0_STOP_WRITES_TRIGGER;
+import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
+import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
+import static org.iq80.leveldb.impl.ValueType.DELETION;
+import static org.iq80.leveldb.impl.ValueType.VALUE;
+import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
+import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
 
 import java.io.File;
 import java.io.IOException;
@@ -70,15 +48,38 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static com.google.common.collect.Lists.newArrayList;
-import static org.iq80.leveldb.impl.DbConstants.L0_SLOWDOWN_WRITES_TRIGGER;
-import static org.iq80.leveldb.impl.DbConstants.L0_STOP_WRITES_TRIGGER;
-import static org.iq80.leveldb.impl.DbConstants.NUM_LEVELS;
-import static org.iq80.leveldb.impl.SequenceNumber.MAX_SEQUENCE_NUMBER;
-import static org.iq80.leveldb.impl.ValueType.DELETION;
-import static org.iq80.leveldb.impl.ValueType.VALUE;
-import static org.iq80.leveldb.util.SizeOf.SIZE_OF_INT;
-import static org.iq80.leveldb.util.SizeOf.SIZE_OF_LONG;
+import org.iq80.leveldb.DB;
+import org.iq80.leveldb.DBBufferComparator;
+import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.Env;
+import org.iq80.leveldb.Env.DBHandle;
+import org.iq80.leveldb.Env.LockFile;
+import org.iq80.leveldb.Env.SequentialReadFile;
+import org.iq80.leveldb.Env.SequentialWriteFile;
+import org.iq80.leveldb.FileInfo;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.Range;
+import org.iq80.leveldb.ReadOptions;
+import org.iq80.leveldb.Snapshot;
+import org.iq80.leveldb.WriteBatch;
+import org.iq80.leveldb.WriteOptions;
+import org.iq80.leveldb.impl.Snapshots.SnapshotImpl;
+import org.iq80.leveldb.impl.WriteBatchImpl.Handler;
+import org.iq80.leveldb.table.BytewiseComparator;
+import org.iq80.leveldb.table.TableBuilder;
+import org.iq80.leveldb.util.ByteBuffers;
+import org.iq80.leveldb.util.Closeables;
+import org.iq80.leveldb.util.InternalIterator;
+import org.iq80.leveldb.util.MemoryManagers;
+import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.Snappy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 @SuppressWarnings("AccessingNonPublicFieldOfAnotherObject")
 public class DbImpl
@@ -102,7 +103,7 @@ public class DbImpl
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
     private final ReentrantLock mutex = new ReentrantLock();
     private final Condition backgroundCondition = mutex.newCondition();
-
+    private final Snapshots snapshots = new Snapshots();
     private final List<Long> pendingOutputs = new Vector<>();//todo
 
     private volatile MemTables memTables;
@@ -704,10 +705,10 @@ public class DbImpl
             throws DBException
     {
         checkBackgroundException();
+        final long lastSequence = readOptions.snapshot() != null
+                ? ((SnapshotImpl) readOptions.snapshot()).getLastSequence() : versions.getLastSequence();
+        final LookupKey lookupKey = new LookupKey(key, lastSequence);
         LookupResult lookupResult;
-        LookupKey lookupKey;
-        SnapshotImpl snapshot = getSnapshot(readOptions);
-        lookupKey = new LookupKey(key, snapshot.getLastSequence());
         do {
             MemTables tables = memTables;
 
@@ -898,7 +899,7 @@ public class DbImpl
         }
 
         if (writeOptions.snapshot()) {
-            return new SnapshotImpl(versions.getCurrent(), sequenceEnd);
+            return snapshots.getSnapshot(sequenceEnd);
         }
         else {
             return null;
@@ -928,8 +929,10 @@ public class DbImpl
             MergingIterator rawIterator = internalIterator();
 
             // filter any entries not visible in our snapshot
-            SnapshotImpl snapshot = getSnapshot(readOptions);
-            SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator, snapshot,
+            final long lastSequence = readOptions.snapshot() != null
+                    ? ((SnapshotImpl) readOptions.snapshot()).getLastSequence() : versions.getLastSequence();
+            SnapshotSeekingIterator snapshotIterator = new SnapshotSeekingIterator(rawIterator, versions.getCurrent(),
+                    lastSequence,
                     internalKeyComparator.getUserComparator());
             return new SeekingIteratorAdapter(snapshotIterator);
         }
@@ -983,30 +986,16 @@ public class DbImpl
         }
     }
 
-    public Snapshot getSnapshot()
+    public SnapshotImpl getSnapshot()
     {
         checkBackgroundException();
         mutex.lock();
         try {
-            return new SnapshotImpl(versions.getCurrent(), versions.getLastSequence());
+            return snapshots.getSnapshot(versions.getLastSequence());
         }
         finally {
             mutex.unlock();
         }
-    }
-
-    private SnapshotImpl getSnapshot(ReadOptions options)
-    {
-        SnapshotImpl snapshot;
-        if (options.snapshot() != null) {
-            snapshot = (SnapshotImpl) options.snapshot();
-        }
-        else {
-            //FIXME we do have to retain, wrap this in a conditional closeable maybe?
-            snapshot = new SnapshotImpl(versions.getCurrent(), versions.getLastSequence());
-            snapshot.close(); // To avoid holding the snapshot active..
-        }
-        return snapshot;
     }
 
     private void throttleWritesIfNecessary()
@@ -1261,8 +1250,8 @@ public class DbImpl
         Preconditions.checkArgument(compactionState.builder == null);
         Preconditions.checkArgument(compactionState.outfile == null);
 
-        // todo track snapshots
-        compactionState.smallestSnapshot = versions.getLastSequence();
+        final long sequence = snapshots.getOldestSequence();
+        compactionState.smallestSnapshot = sequence == -1 ? versions.getLastSequence() : sequence;
 
         // Release mutex while we're actually doing the compaction work
         mutex.unlock();
