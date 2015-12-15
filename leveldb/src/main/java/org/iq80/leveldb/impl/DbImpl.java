@@ -330,13 +330,19 @@ public class DbImpl
                 Thread.currentThread().interrupt();
             }
 
-            MemTables tables = memTables;
-            if(tables != null){
-                closeMemAndLog(tables.mutable, versions);
+            mutex.lock();
+            try {
+                MemTables tables = memTables;
+                if (tables != null) {
+                    closeMemAndLog(tables.mutable, versions);
 
-                if (tables.immutableExists()) {
-                    closeMemAndLog(tables.immutable, versions);
+                    if (tables.immutableExists()) {
+                        closeMemAndLog(tables.immutable, versions);
+                    }
                 }
+            }
+            finally {
+                mutex.unlock();
             }
 
             Closeables.closeQuietly(versions);
@@ -360,8 +366,6 @@ public class DbImpl
                     VersionEdit edit = new VersionEdit();
                     writeLevel0Table(memlog.memTable, edit, versions.getCurrent());
 
-                    edit.setPreviousLogNumber(0);
-                    edit.setLogNumber(memlog.log.getFileNumber());
                     versions.logAndApply(edit);
                 }
             }

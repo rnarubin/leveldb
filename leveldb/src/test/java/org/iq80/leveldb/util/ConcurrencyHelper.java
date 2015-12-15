@@ -34,7 +34,6 @@ public class ConcurrencyHelper<T>
         implements AutoCloseable
 {
     ExecutorService threadPool;
-    List<Future<T>> pendingWork;
 
     public ConcurrencyHelper(int threadCount)
     {
@@ -43,9 +42,18 @@ public class ConcurrencyHelper<T>
 
     public ConcurrencyHelper(int threads, String threadPrefix)
     {
-        threadPool = Executors.newFixedThreadPool(threads,
+        threadPool = Executors.newFixedThreadPool(Math.max(1, threads),
                 new ThreadFactoryBuilder().setNameFormat(threadPrefix + "-%d").build());
-        pendingWork = new ArrayList<>();
+    }
+
+    public List<Future<T>> submitAll(Collection<Callable<T>> callables)
+    {
+        List<Future<T>> pendingWork = new ArrayList<>(callables.size());
+        for (Callable<T> work : callables) {
+            pendingWork.add(threadPool.submit(work));
+        }
+
+        return pendingWork;
     }
 
     public List<T> submitAllAndWait(Collection<Callable<T>> callables, long timeOut, TimeUnit timeUnit)

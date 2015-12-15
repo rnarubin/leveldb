@@ -17,14 +17,18 @@
  */
 package org.iq80.leveldb.table;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Comparator;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.iq80.leveldb.Compression;
 import org.iq80.leveldb.DBException;
+import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.MemoryManager;
 import org.iq80.leveldb.Options;
-import org.iq80.leveldb.Env.RandomReadFile;
 import org.iq80.leveldb.impl.EncodedInternalKey;
 import org.iq80.leveldb.impl.InternalKey;
 import org.iq80.leveldb.impl.SeekingIterable;
@@ -36,12 +40,8 @@ import org.iq80.leveldb.util.Snappy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Comparator;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicInteger;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 
 public final class Table
         extends ReferenceCounted<Table>
@@ -132,7 +132,7 @@ public final class Table
         ByteBuffer readBuffer = file.read(blockHandle.getOffset(), blockHandle.getDataSize()
                 + BlockTrailer.ENCODED_LENGTH);
 
-        Preconditions.checkState(readBuffer != null, "block handle offset greater than file size (%s, %d)",
+        assert readBuffer != null : String.format("block handle offset greater than file size (%s, %d)",
                 blockHandle.toString(), file.size());
         Preconditions.checkState(readBuffer.remaining() == blockHandle.getDataSize() + BlockTrailer.ENCODED_LENGTH,
                 "read buffer incorrect size (%d, %d)", readBuffer.remaining(), blockHandle.getDataSize()

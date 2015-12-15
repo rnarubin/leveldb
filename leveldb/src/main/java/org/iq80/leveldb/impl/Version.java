@@ -47,7 +47,7 @@ public class Version
     private final Level0 level0;
     private final List<Level> levels;
 
-    // move these mutable fields somewhere else
+    // these fields can be made immutable by reworking version builder
     private int compactionLevel;
     private double compactionScore;
     private FileMetaData fileToCompact;
@@ -107,7 +107,7 @@ public class Version
         return versionSet.getInternalKeyComparator();
     }
 
-    public synchronized int getCompactionLevel()
+    public int getCompactionLevel()
     {
         return compactionLevel;
     }
@@ -117,7 +117,7 @@ public class Version
         this.compactionLevel = compactionLevel;
     }
 
-    public synchronized double getCompactionScore()
+    public double getCompactionScore()
     {
         return compactionScore;
     }

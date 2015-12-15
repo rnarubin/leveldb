@@ -41,6 +41,7 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -54,6 +55,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.iq80.leveldb.DB;
@@ -77,6 +80,7 @@ import org.iq80.leveldb.util.Closeables;
 import org.iq80.leveldb.util.ConcurrencyHelper;
 import org.iq80.leveldb.util.FileUtils;
 import org.iq80.leveldb.util.MergingIterator;
+import org.iq80.leveldb.util.ReferenceCounted;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -1013,6 +1017,147 @@ public class DbImplTest
             }
 
             assertFalse(seekingIterator.hasNext());
+        }
+    }
+
+    @Test
+    public void testConcurrentGets()
+            throws IOException, InterruptedException, ExecutionException
+    {
+        final int concurrency = Math.max(3, Runtime.getRuntime().availableProcessors());
+        final int putterCount = concurrency / 3;
+        final int getterCount = concurrency - putterCount;
+        final int keyCount = 1_000;
+        final int iterations = 30_000;
+
+        final ArrayList<ByteBuffer> keys = new ArrayList<>();
+        final Random rand = new Random(7);
+        for (int i = 0; i < keyCount; i++) {
+            byte[] arr = randomString(rand, rand.nextInt(50) + 5).getBytes(UTF_8);
+            keys.add(ByteBuffer.wrap(arr).asReadOnlyBuffer());
+        }
+
+        final WriteOptions writeOptions = WriteOptions.make().disableLog(true).snapshot(true);
+
+        try (StrictEnv env = new StrictEnv(getEnv())) {
+            Options options = Options.make()
+                    .verifyChecksums(true)
+                    .createIfMissing(true)
+                    .errorIfExists(true)
+                    .env(env)
+                    .memoryManager(env.strictMemory)
+                    .writeBufferSize(512)
+                    .throttleLevel0(false);
+            try (DbImpl db = new DbImpl(options, databaseDir)) {
+
+                class ValueId
+                        extends ReferenceCounted<ValueId>
+                {
+                    final Snapshot snapshot;
+                    final ByteBuffer value;
+
+                    public ValueId(Snapshot snapshot, ByteBuffer value)
+                    {
+                        this.snapshot = snapshot;
+                        this.value = value;
+                    }
+
+                    @Override
+                    protected ValueId getThis()
+                    {
+                        return this;
+                    }
+
+                    @Override
+                    protected void dispose()
+                    {
+                        try {
+                            snapshot.close();
+                        }
+                        catch (IOException e) {
+                            throw new AssertionError(e);
+                        }
+                    }
+                }
+                final Map<ByteBuffer, ValueId> lookupMap = new ConcurrentHashMap<>(keys.size());
+                for (ByteBuffer key : keys) {
+                    ByteBuffer value = keys.get(rand.nextInt(keys.size()));
+                    Snapshot snapshot = db.put(key, value, writeOptions);
+                    lookupMap.put(key, new ValueId(snapshot, value));
+                }
+
+                final AtomicBoolean gettersDone = new AtomicBoolean(false);
+                Collection<Callable<Void>> putWork = new ArrayList<>();
+                for (int i = 0; i < putterCount; i++) {
+                    putWork.add(new Callable<Void>()
+                    {
+                        @Override
+                        public Void call()
+                                throws Exception
+                        {
+                            while (!gettersDone.get()) {
+                                ByteBuffer key = keys.get(ThreadLocalRandom.current().nextInt(keys.size()));
+                                ByteBuffer value = keys.get(ThreadLocalRandom.current().nextInt(keys.size()));
+                                Snapshot snapshot = db.put(key, value, writeOptions);
+                                ValueId last = lookupMap.put(key, new ValueId(snapshot, value));
+                                last.release();
+                            }
+                            return null;
+                        }
+                    });
+                }
+
+                Collection<Callable<Void>> getWork = new ArrayList<>();
+                for (int i = 0; i < getterCount; i++) {
+                    getWork.add(new Callable<Void>()
+                    {
+                        @Override
+                        public Void call()
+                                throws Exception
+                        {
+                            for (int i = 0; i < iterations; i++) {
+                                ByteBuffer key;
+                                ValueId val = null;
+                                try {
+                                    while ((val = lookupMap
+                                            .get(key = keys.get(ThreadLocalRandom.current().nextInt(keys.size())))
+                                            .retain()) == null)
+                                        ;
+                                    ByteBuffer value = db.get(key, ReadOptions.make().snapshot(val.snapshot));
+                                    if (!val.value.equals(value)) {
+                                        throw new AssertionError(String.format(
+                                                "get mismatch on key '%s', found '%s' expected '%s'; used %s relative to %s",
+                                                ByteBuffers.toString(key), ByteBuffers.toString(value),
+                                                ByteBuffers.toString(val.value), val.snapshot, db.getSnapshot()));
+                                    }
+                                }
+                                finally {
+                                    val.release();
+                                }
+                            }
+                            return null;
+                        }
+                    });
+                }
+
+                try (ConcurrencyHelper<Void> putters = new ConcurrencyHelper<>(putterCount, testName);
+                        ConcurrencyHelper<Void> getters = new ConcurrencyHelper<>(getterCount, testName)) {
+                    List<Future<Void>> gets = getters.submitAll(getWork);
+                    List<Future<Void>> puts = putters.submitAll(putWork);
+
+                    try {
+                        for (Future<?> f : gets) {
+                            f.get();
+                        }
+                    }
+                    finally {
+                        gettersDone.set(true);
+                        for (Future<?> f : puts) {
+                            f.get();
+                        }
+                    }
+                }
+            }
         }
     }
 
