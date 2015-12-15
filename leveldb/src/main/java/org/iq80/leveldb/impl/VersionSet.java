@@ -75,7 +75,7 @@ public class VersionSet
 
     private final AtomicLong nextFileNumber = new AtomicLong(2);
     private long manifestFileNumber = 1;
-    private Version current;
+    private volatile Version current;
     private AtomicLong lastSequence = new AtomicLong(0);
     private long logNumber;
     private long prevLogNumber;
@@ -120,7 +120,7 @@ public class VersionSet
                     manifestFileNumber,
                     options); GrowingBuffer record = edit.encode(options.memoryManager())) {
                 fileNum = log.getFileNumber();
-                writeSnapshot(log);
+                writeSnapshot(current, log);
                 log.addRecord(record.get(), true);
             }
 
@@ -140,8 +140,9 @@ public class VersionSet
 
     private void appendVersion(Version version)
     {
-        Preconditions.checkNotNull(version, "version is null");
-        Preconditions.checkArgument(version != current, "version is the current version");
+        assert version != null;
+        assert version != current;
+
         current = version;
         activeVersions.add(version);
     }
@@ -258,8 +259,9 @@ public class VersionSet
         edit.setNextFileNumber(nextFileNumber.get());
         edit.setLastSequenceNumber(lastSequence.get());
 
+        Version c = current;
         Version version = new Version(this);
-        Builder builder = new Builder(this, current);
+        Builder builder = new Builder(this, c);
         builder.apply(edit);
         builder.saveTo(version);
 
@@ -273,7 +275,7 @@ public class VersionSet
             if (descriptorLog == null) {
                 edit.setNextFileNumber(nextFileNumber.get());
                 descriptorLog = Logs.createLogWriter(manifestFile, manifestFileNumber, options);
-                writeSnapshot(descriptorLog);
+                writeSnapshot(c, descriptorLog);
                 createdNewManifest = true;
             }
 
@@ -304,7 +306,7 @@ public class VersionSet
         prevLogNumber = edit.getPreviousLogNumber();
     }
 
-    private void writeSnapshot(LogWriter log)
+    private void writeSnapshot(Version c, LogWriter log)
             throws IOException
     {
         // Save metadata
@@ -315,7 +317,7 @@ public class VersionSet
         edit.setCompactPointers(compactPointers);
 
         // Save files
-        edit.addFiles(current.getFiles());
+        edit.addFiles(c.getFiles());
 
         try (GrowingBuffer record = edit.encode(options.memoryManager())) {
             log.addRecord(record.get(), true);
@@ -483,36 +485,39 @@ public class VersionSet
 
     public boolean needsCompaction()
     {
-        return current.getCompactionScore() >= 1 || current.getFileToCompact() != null;
+        Version c = current;
+        return c.getCompactionScore() >= 1 || c.getFileToCompact() != null;
     }
 
     public Compaction compactRange(int level, InternalKey begin, InternalKey end)
     {
-        List<FileMetaData> levelInputs = getOverlappingInputs(level, begin, end);
+        Version c = current;
+        List<FileMetaData> levelInputs = getOverlappingInputs(c, level, begin, end);
         if (levelInputs.isEmpty()) {
             return null;
         }
 
-        return setupOtherInputs(level, levelInputs);
+        return setupOtherInputs(c, level, levelInputs);
     }
 
     public Compaction pickCompaction()
     {
+        Version c = current;
         // We prefer compactions triggered by too much data in a level over
         // the compactions triggered by seeks.
-        boolean sizeCompaction = (current.getCompactionScore() >= 1);
-        boolean seekCompaction = (current.getFileToCompact() != null);
+        boolean sizeCompaction = (c.getCompactionScore() >= 1);
+        boolean seekCompaction = (c.getFileToCompact() != null);
 
         int level;
         List<FileMetaData> levelInputs;
         if (sizeCompaction) {
-            level = current.getCompactionLevel();
+            level = c.getCompactionLevel();
             Preconditions.checkState(level >= 0);
             Preconditions.checkState(level + 1 < NUM_LEVELS);
 
             // Pick the first file that comes after compact_pointer_[level]
             levelInputs = newArrayList();
-            for (FileMetaData fileMetaData : current.getFiles(level)) {
+            for (FileMetaData fileMetaData : c.getFiles(level)) {
                 if (!compactPointers.containsKey(level) ||
                         internalKeyComparator.compare(fileMetaData.getLargest(), compactPointers.get(level)) > 0) {
                     levelInputs.add(fileMetaData);
@@ -521,12 +526,12 @@ public class VersionSet
             }
             if (levelInputs.isEmpty()) {
                 // Wrap-around to the beginning of the key space
-                levelInputs.add(current.getFiles(level).get(0));
+                levelInputs.add(c.getFiles(level).get(0));
             }
         }
         else if (seekCompaction) {
-            level = current.getFileToCompactLevel();
-            levelInputs = ImmutableList.of(current.getFileToCompact());
+            level = c.getFileToCompactLevel();
+            levelInputs = ImmutableList.of(c.getFileToCompact());
         }
         else {
             return null;
@@ -538,22 +543,22 @@ public class VersionSet
             // Note that the next call will discard the file we placed in
             // c->inputs_[0] earlier and replace it with an overlapping set
             // which will include the picked file.
-            levelInputs = getOverlappingInputs(0, range.getKey(), range.getValue());
+            levelInputs = getOverlappingInputs(c, 0, range.getKey(), range.getValue());
 
             Preconditions.checkState(!levelInputs.isEmpty());
         }
 
-        Compaction compaction = setupOtherInputs(level, levelInputs);
+        Compaction compaction = setupOtherInputs(c, level, levelInputs);
         return compaction;
     }
 
-    private Compaction setupOtherInputs(int level, List<FileMetaData> levelInputs)
+    private Compaction setupOtherInputs(Version c, int level, List<FileMetaData> levelInputs)
     {
         Entry<InternalKey, InternalKey> range = getRange(levelInputs);
         InternalKey smallest = range.getKey();
         InternalKey largest = range.getValue();
 
-        List<FileMetaData> levelUpInputs = getOverlappingInputs(level + 1, smallest, largest);
+        List<FileMetaData> levelUpInputs = getOverlappingInputs(c, level + 1, smallest, largest);
 
         // Get entire range covered by compaction
         range = getRange(levelInputs, levelUpInputs);
@@ -564,14 +569,14 @@ public class VersionSet
         // changing the number of "level+1" files we pick up.
         if (!levelUpInputs.isEmpty()) {
 
-            List<FileMetaData> expanded0 = getOverlappingInputs(level, allStart, allLimit);
+            List<FileMetaData> expanded0 = getOverlappingInputs(c, level, allStart, allLimit);
 
             if (expanded0.size() > levelInputs.size()) {
                 range = getRange(expanded0);
                 InternalKey newStart = range.getKey();
                 InternalKey newLimit = range.getValue();
 
-                List<FileMetaData> expanded1 = getOverlappingInputs(level + 1, newStart, newLimit);
+                List<FileMetaData> expanded1 = getOverlappingInputs(c, level + 1, newStart, newLimit);
                 if (expanded1.size() == levelUpInputs.size()) {
                     LOGGER.debug("Expanding@{} {}+{} to {}+{}", level, levelInputs.size(), levelUpInputs.size(),
                             expanded0.size(), expanded1.size());
@@ -591,7 +596,7 @@ public class VersionSet
         // (parent == level+1; grandparent == level+2)
         List<FileMetaData> grandparents = null;
         if (level + 2 < NUM_LEVELS) {
-            grandparents = getOverlappingInputs(level + 2, allStart, allLimit);
+            grandparents = getOverlappingInputs(c, level + 2, allStart, allLimit);
         }
 
 //        if (false) {
@@ -601,7 +606,7 @@ public class VersionSet
 //                    EscapeString(largest.Encode()).c_str());
 //        }
 
-        Compaction compaction = new Compaction(current, level, levelInputs, levelUpInputs, grandparents);
+        Compaction compaction = new Compaction(c, level, levelInputs, levelUpInputs, grandparents);
 
         // Update the place where we will do the next compaction for this level.
         // We update this immediately instead of waiting for the VersionEdit
@@ -613,13 +618,13 @@ public class VersionSet
         return compaction;
     }
 
-    List<FileMetaData> getOverlappingInputs(int level, InternalKey begin, InternalKey end)
+    List<FileMetaData> getOverlappingInputs(Version c, int level, InternalKey begin, InternalKey end)
     {
         ImmutableList.Builder<FileMetaData> files = ImmutableList.builder();
         ByteBuffer userBegin = begin.getUserKey();
         ByteBuffer userEnd = end.getUserKey();
         DBBufferComparator userComparator = internalKeyComparator.getUserComparator();
-        for (FileMetaData fileMetaData : current.getFiles(level)) {
+        for (FileMetaData fileMetaData : c.getFiles(level)) {
             if (userComparator.compare(fileMetaData.getLargest().getUserKey(), userBegin) < 0 ||
                     userComparator.compare(fileMetaData.getSmallest().getUserKey(), userEnd) > 0) {
                 // Either completely before or after range; skip it
@@ -657,10 +662,12 @@ public class VersionSet
 
     public long getMaxNextLevelOverlappingBytes()
     {
+        Version c = current;
         long result = 0;
         for (int level = 1; level < NUM_LEVELS; level++) {
-            for (FileMetaData fileMetaData : current.getFiles(level)) {
-                List<FileMetaData> overlaps = getOverlappingInputs(level + 1, fileMetaData.getSmallest(), fileMetaData.getLargest());
+            for (FileMetaData fileMetaData : c.getFiles(level)) {
+                List<FileMetaData> overlaps = getOverlappingInputs(c, level + 1, fileMetaData.getSmallest(),
+                        fileMetaData.getLargest());
                 long totalSize = 0;
                 for (FileMetaData overlap : overlaps) {
                     totalSize += overlap.getFileSize();

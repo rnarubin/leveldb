@@ -30,7 +30,7 @@ import java.util.Collection;
 import java.util.List;
 
 import org.iq80.leveldb.MemoryManager;
-import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.util.InternalIterator;
 import org.iq80.leveldb.util.LevelIterator;
 
 import com.google.common.base.Preconditions;
@@ -127,9 +127,9 @@ public class Version
         this.compactionScore = compactionScore;
     }
 
-    List<TableIterator> getLevel0Files()
+    List<InternalIterator> getLevel0Files()
     {
-        Builder<TableIterator> builder = ImmutableList.builder();
+        Builder<InternalIterator> builder = ImmutableList.builder();
         for (FileMetaData file : level0.getFiles()) {
             builder.add(getTableCache().newIterator(file));
         }
@@ -179,7 +179,8 @@ public class Version
                 if (overlapInLevel(level + 1, smallestUserKey, largestUserKey)) {
                     break;
                 }
-                long sum = Compaction.totalFileSize(versionSet.getOverlappingInputs(level + 2, start, limit));
+                long sum = Compaction.totalFileSize(
+                        versionSet.getOverlappingInputs(versionSet.getCurrent(), level + 2, start, limit));
                 if (sum > MAX_GRAND_PARENT_OVERLAP_BYTES) {
                     break;
                 }

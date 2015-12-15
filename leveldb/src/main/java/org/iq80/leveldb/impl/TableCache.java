@@ -17,23 +17,24 @@
  */
 package org.iq80.leveldb.impl;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
-import com.google.common.cache.RemovalListener;
-import com.google.common.cache.RemovalNotification;
+import java.io.IOException;
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.concurrent.ExecutionException;
 
 import org.iq80.leveldb.Env.DBHandle;
 import org.iq80.leveldb.FileInfo;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.table.Table;
 import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.util.InternalIterator;
 
-import java.io.IOException;
-import java.lang.Thread.UncaughtExceptionHandler;
-import java.util.concurrent.ExecutionException;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
 
-public final class TableCache
+public class TableCache
         implements AutoCloseable
 {
     private final LoadingCache<Long, Table> cache;
@@ -71,7 +72,7 @@ public final class TableCache
                 });
     }
 
-    public TableIterator newIterator(FileMetaData file)
+    public InternalIterator newIterator(FileMetaData file)
     {
         return newIterator(file.getNumber());
     }

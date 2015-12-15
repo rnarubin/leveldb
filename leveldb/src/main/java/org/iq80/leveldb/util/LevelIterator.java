@@ -17,19 +17,18 @@
  */
 package org.iq80.leveldb.util;
 
-import org.iq80.leveldb.impl.FileMetaData;
-import org.iq80.leveldb.impl.InternalKey;
-import org.iq80.leveldb.impl.InternalKeyComparator;
-import org.iq80.leveldb.impl.ReverseSeekingIterator;
-import org.iq80.leveldb.impl.TableCache;
-import org.iq80.leveldb.util.LevelIterator.FileIterator;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map.Entry;
 
+import org.iq80.leveldb.impl.FileMetaData;
+import org.iq80.leveldb.impl.InternalKey;
+import org.iq80.leveldb.impl.InternalKeyComparator;
+import org.iq80.leveldb.impl.ReverseSeekingIterator;
+import org.iq80.leveldb.impl.TableCache;
 import org.iq80.leveldb.table.TableIterator;
+import org.iq80.leveldb.util.LevelIterator.FileIterator;
 
 import com.google.common.collect.Maps;
 
@@ -49,7 +48,7 @@ public final class LevelIterator
 
     protected TableIterator getData(FileMetaData file)
     {
-        return tableCache.newIterator(file);
+        return tableCache.newIterator(file.getNumber());
     }
 
     static final class FileIterator
